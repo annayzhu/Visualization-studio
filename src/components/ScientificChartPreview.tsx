@@ -18,6 +18,7 @@ import {
   numericExtent,
   parseNumericValue,
   parseRatioValue,
+  resolveAxisDomain,
   scaleLinear,
   type JournalThemeId,
   type ParsedDataset,
@@ -231,7 +232,10 @@ function renderBar(
   }));
   const groups = [...new Set(rows.map((row) => row.group))];
   const colorMap = paletteForGroups(groups, colors);
-  const domain = numericExtent(rows.flatMap((row) => [row.value - row.error, row.value + row.error]), true);
+  const automaticDomain = numericExtent(rows.flatMap((row) => [row.value - row.error, row.value + row.error]), true);
+  const domain = settings.swapAxes
+    ? resolveAxisDomain(automaticDomain, settings.xMin, settings.xMax)
+    : resolveAxisDomain(automaticDomain, settings.yMin, settings.yMax);
   const band = (settings.swapAxes ? frame.plotHeight : frame.plotWidth) / Math.max(1, rows.length);
   const categoryPositions = rows.map((_, index) => settings.swapAxes
     ? frame.top + band * (index + 0.5)
@@ -261,7 +265,7 @@ function renderBar(
           const errorCenter = y + band * 0.34;
           const capHalf = Math.min(settings.errorBarCapSize / 2, band * 0.3);
           return (
-            <g key={`${row.category}-${index}`}>
+            <g key={`${row.category}-${index}`} data-plot-data>
               {interval ? <rect data-plot-element="bar" x={interval.start} y={y} width={interval.length} height={band * 0.68} rx={2} fill={color} fillOpacity={settings.opacity} stroke={settings.barBorderWidth > 0 ? settings.barBorderColor : "none"} strokeWidth={settings.barBorderWidth} /> : null}
               {settings.barErrorType !== "none" ? <g data-plot-element="error-bar" stroke={ink} strokeWidth={settings.errorBarLineWidth} strokeLinecap="round"><line x1={errorStart} x2={errorEnd} y1={errorCenter} y2={errorCenter} /><line x1={errorStart} x2={errorStart} y1={errorCenter - capHalf} y2={errorCenter + capHalf} /><line x1={errorEnd} x2={errorEnd} y1={errorCenter - capHalf} y2={errorCenter + capHalf} /></g> : null}
               <text x={frame.left - 9} y={y + band * 0.43} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{truncate(row.category, 18)}</text>
@@ -276,7 +280,7 @@ function renderBar(
         const errorCenter = x + band * 0.34;
         const capHalf = Math.min(settings.errorBarCapSize / 2, band * 0.3);
         return (
-          <g key={`${row.category}-${index}`}>
+          <g key={`${row.category}-${index}`} data-plot-data>
             {interval ? <rect data-plot-element="bar" x={x} y={interval.start} width={band * 0.68} height={interval.length} rx={2} fill={color} fillOpacity={settings.opacity} stroke={settings.barBorderWidth > 0 ? settings.barBorderColor : "none"} strokeWidth={settings.barBorderWidth} /> : null}
             {settings.barErrorType !== "none" ? <g data-plot-element="error-bar" stroke={ink} strokeWidth={settings.errorBarLineWidth} strokeLinecap="round"><line x1={errorCenter} x2={errorCenter} y1={errorStart} y2={errorEnd} /><line x1={errorCenter - capHalf} x2={errorCenter + capHalf} y1={errorStart} y2={errorStart} /><line x1={errorCenter - capHalf} x2={errorCenter + capHalf} y1={errorEnd} y2={errorEnd} /></g> : null}
             <text transform={`translate(${x + band * 0.34} ${frame.top + frame.plotHeight + 10}) rotate(-30)`} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{truncate(row.category, 16)}</text>
@@ -313,12 +317,12 @@ function renderLineOrScatter(
       order: rawX,
     };
   });
-  const xDomain = numericExtent(lineErrorsEnabled && settings.swapAxes
+  const xDomain = resolveAxisDomain(numericExtent(lineErrorsEnabled && settings.swapAxes
     ? points.flatMap((point) => [point.x - point.error, point.x + point.error])
-    : points.map((point) => point.x));
-  const yDomain = numericExtent(lineErrorsEnabled && !settings.swapAxes
+    : points.map((point) => point.x)), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent(lineErrorsEnabled && !settings.swapAxes
     ? points.flatMap((point) => [point.y - point.error, point.y + point.error])
-    : points.map((point) => point.y));
+    : points.map((point) => point.y)), settings.yMin, settings.yMax);
   const groups = [...new Set(points.map((point) => point.group))];
   const colorMap = paletteForGroups(groups, colors);
   const xLabel = settings.swapAxes
@@ -336,6 +340,7 @@ function renderLineOrScatter(
   return (
     <>
       <NumericAxes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={xLabel} yLabel={yLabel} ink={ink} muted={muted} gridColor={gridColor} />
+      <g data-plot-data>
       {lineErrorsEnabled
         ? scaled.map((point) => {
             const capHalf = settings.errorBarCapSize / 2;
@@ -391,9 +396,10 @@ function renderLineOrScatter(
       {scaled.map((point) => (
         <g key={`point-${point.index}`}>
           <circle cx={point.sx} cy={point.sy} r={settings.pointSize} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.8} />
-          {settings.showLabels && point.label ? <text x={point.sx + settings.pointSize + 2} y={point.sy - 3} fill={ink} fontSize={settings.tickSize}>{truncate(point.label, 12)}</text> : null}
+          {settings.showLabels && point.label ? <text data-plot-label x={point.x > (xDomain[0] + xDomain[1]) / 2 ? point.sx - settings.pointSize - 2 : point.sx + settings.pointSize + 2} y={point.y > (yDomain[0] + yDomain[1]) / 2 ? point.sy + settings.tickSize + 2 + (point.index % 2) * 3 : point.sy - 3 - (point.index % 2) * 3} textAnchor={point.x > (xDomain[0] + xDomain[1]) / 2 ? "end" : "start"} fill={ink} fontSize={settings.tickSize}>{truncate(point.label, 12)}</text> : null}
         </g>
       ))}
+      </g>
       <Legend frame={frame} settings={settings} ink={ink} items={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0], shape: type === "line" ? "line" : "circle" }))} />
     </>
   );
@@ -426,9 +432,10 @@ function renderDistribution(
   const densityBoundaryDomain: [number, number] = [rawYDomain[0] - rawSpan, rawYDomain[1] + rawSpan];
   const densityCurves = new Map(entries.map(([group, values]) => [group, kernelDensityEstimate(values, densityBoundaryDomain, settings.violinBandwidth).points]));
   const densitySupport = [...densityCurves.values()].flatMap((curve) => curve.map((point) => point.position));
-  const yDomain = type === "violin" && densitySupport.length > 0
+  const automaticYDomain = type === "violin" && densitySupport.length > 0
     ? numericExtent(densitySupport)
     : numericExtent([...entries.flatMap(([, values]) => values), ...boxSummaryExtent]);
+  const yDomain = resolveAxisDomain(automaticYDomain, settings.yMin, settings.yMax);
   const band = frame.plotWidth / Math.max(1, entries.length);
   const groupNames = entries.map(([group]) => group);
   const colorMap = paletteForGroups(groupNames, colors);
@@ -453,7 +460,7 @@ function renderDistribution(
           violin = <polygon data-plot-element="violin" points={[...right, ...left].join(" ")} fill={color} fillOpacity={0.3} stroke={color} strokeWidth={settings.dataLineWidth} strokeLinejoin="round" />;
         }
         return (
-          <g key={group}>
+          <g key={group} data-plot-data>
             {violin}
             {type === "box" && settings.showBox ? (
               <g data-plot-element="box-layer">
@@ -503,8 +510,8 @@ function renderVolcano(
         : "Not significant";
     return { index, label: row[mapping.label], effect, pValue, significance, state };
   });
-  const xDomain = numericExtent(points.map((point) => point.effect));
-  const yDomain = numericExtent(points.map((point) => point.significance), true);
+  const xDomain = resolveAxisDomain(numericExtent([...points.map((point) => point.effect), -settings.foldChangeThreshold, settings.foldChangeThreshold]), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent([...points.map((point) => point.significance), -Math.log10(settings.pValueThreshold)], true), settings.yMin, settings.yMax);
   const stateColors = new Map<string, string>([["Down", colors[0]], ["Up", colors[1] ?? colors[0]], ["Not significant", colors[2] ?? "#B8B8BC"]]);
   const labels = points
     .filter((point) => point.state !== "Not significant")
@@ -515,18 +522,20 @@ function renderVolcano(
   return (
     <>
       <NumericAxes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "log₂ fold change"} yLabel={settings.yLabel || "−log₁₀ adjusted P"} ink={ink} muted={muted} gridColor={gridColor} />
-      {[-settings.foldChangeThreshold, settings.foldChangeThreshold].map((value) => <line key={value} x1={scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth])} x2={scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth])} y1={frame.top} y2={frame.top + frame.plotHeight} stroke={muted} strokeWidth={1} strokeDasharray="5 4" />)}
-      <line x1={frame.left} x2={frame.left + frame.plotWidth} y1={scaleLinear(-Math.log10(settings.pValueThreshold), yDomain, [frame.top + frame.plotHeight, frame.top])} y2={scaleLinear(-Math.log10(settings.pValueThreshold), yDomain, [frame.top + frame.plotHeight, frame.top])} stroke={muted} strokeWidth={1} strokeDasharray="5 4" />
+      <g data-plot-data>
+      {[-settings.foldChangeThreshold, settings.foldChangeThreshold].map((value) => <line key={value} data-plot-element="fold-change-threshold" x1={scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth])} x2={scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth])} y1={frame.top} y2={frame.top + frame.plotHeight} stroke={muted} strokeWidth={1} strokeDasharray="5 4" />)}
+      <line data-plot-element="p-value-threshold" x1={frame.left} x2={frame.left + frame.plotWidth} y1={scaleLinear(-Math.log10(settings.pValueThreshold), yDomain, [frame.top + frame.plotHeight, frame.top])} y2={scaleLinear(-Math.log10(settings.pValueThreshold), yDomain, [frame.top + frame.plotHeight, frame.top])} stroke={muted} strokeWidth={1} strokeDasharray="5 4" />
       {points.map((point) => {
         const x = scaleLinear(point.effect, xDomain, [frame.left, frame.left + frame.plotWidth]);
         const y = scaleLinear(point.significance, yDomain, [frame.top + frame.plotHeight, frame.top]);
         return (
           <g key={point.index}>
             <circle cx={x} cy={y} r={settings.pointSize} fill={stateColors.get(point.state)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.6} />
-            {labelSet.has(point.index) ? <text x={x + settings.pointSize + 2} y={y - 3} fill={ink} fontSize={settings.tickSize} fontWeight={600}>{truncate(point.label, 13)}</text> : null}
+            {labelSet.has(point.index) ? <text data-plot-label x={point.effect > (xDomain[0] + xDomain[1]) / 2 ? x - settings.pointSize - 2 : x + settings.pointSize + 2} y={point.significance > (yDomain[0] + yDomain[1]) / 2 ? y + settings.tickSize + 2 + (point.index % 2) * 3 : y - 3 - (point.index % 2) * 3} textAnchor={point.effect > (xDomain[0] + xDomain[1]) / 2 ? "end" : "start"} fill={ink} fontSize={settings.tickSize} fontWeight={600}>{truncate(point.label, 13)}</text> : null}
           </g>
         );
       })}
+      </g>
       <Legend frame={frame} settings={settings} ink={ink} items={["Up", "Down", "Not significant"].map((state) => ({ label: state, color: stateColors.get(state) ?? colors[0] }))} />
     </>
   );
@@ -607,7 +616,7 @@ function renderEnrichment(
     pValue: parseNumericValue(row[mapping.pValue]) ?? 1,
     group: mapping.group ? row[mapping.group] || "All" : "All",
   })).sort((a, b) => a.ratio - b.ratio);
-  const ratioDomain = numericExtent(rows.map((row) => row.ratio), true);
+  const ratioDomain = resolveAxisDomain(numericExtent(rows.map((row) => row.ratio), true), settings.xMin, settings.xMax);
   const countExtent = numericExtent(rows.map((row) => row.count), true);
   const significance = rows.map((row) => -Math.log10(row.pValue));
   const significanceExtent = numericExtent(significance, true);
@@ -624,7 +633,7 @@ function renderEnrichment(
         const radius = scaleLinear(row.count, countExtent, [3.5, 10.5]);
         const color = interpolateColor(sequential[0], sequential[1], scaleLinear(-Math.log10(row.pValue), significanceExtent, [0, 1]));
         return (
-          <g key={`${row.term}-${index}`}>
+          <g key={`${row.term}-${index}`} data-plot-data>
             <circle cx={x} cy={y} r={radius} fill={color} fillOpacity={settings.opacity} stroke={ink} strokeWidth={0.45} />
             <text x={frame.left - 9} y={y + settings.tickSize * 0.34} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{truncate(row.term, 24)}</text>
           </g>
@@ -681,6 +690,8 @@ export function ScientificChartPreview({ svgRef, type, dataset, mapping, setting
       <title>{settings.title || `${definition.name} figure`}</title>
       <desc>{definition.summary} Generated in LabNest Visualization Studio.</desc>
       <rect width={frame.width} height={frame.height} fill="#FFFFFF" />
+      <defs><clipPath id={`plot-area-${type}`}><rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} /></clipPath></defs>
+      <style>{`[data-plot-data] path,[data-plot-data] circle,[data-plot-data] rect,[data-plot-data] line,[data-plot-data] polyline,[data-plot-data] polygon,[data-plot-data] text[data-plot-label]{clip-path:url(#plot-area-${type})}`}</style>
       <ChartTitle frame={frame} settings={settings} color={CHART_TEXT_COLOR} />
       {content}
     </svg>

@@ -77,7 +77,7 @@ describe("plot-module registry interface", () => {
   });
 
   it("adapts all existing plots to the shared module contract", () => {
-    expect(plotModuleRegistry.list()).toHaveLength(43);
+    expect(plotModuleRegistry.list()).toHaveLength(45);
     plotModuleRegistry.list().forEach((plotModule) => {
       expect(plotModule.definition.id).toBeTruthy();
       expect(plotModule.examples.length).toBeGreaterThan(0);
@@ -95,6 +95,10 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("scatter").capabilities.settingKeys).toEqual(expect.arrayContaining(["associationVariant", "associationFit", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode"]));
     expect(getPlotModule("correlation").capabilities.settingKeys).toEqual(expect.arrayContaining(["correlationMethod", "associationVariant", "associationFit"]));
     expect(getPlotModule("pca").capabilities.settingKeys).toContain("swapAxes");
+    expect(getPlotModule("pca").renderer).toBe("advanced");
+    expect(getPlotModule("pca").capabilities.settingKeys).toEqual(expect.arrayContaining(["ordinationView", "ordinationShowLoadings", "ordinationPermanovaR2"]));
+    expect(getPlotModule("tsne").capabilities.dataShape).toBe("coordinates");
+    expect(getPlotModule("nmds").capabilities.settingKeys).toContain("ordinationStress");
     expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");
     expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("xLabel");

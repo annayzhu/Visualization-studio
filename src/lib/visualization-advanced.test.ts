@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSetMemberships,
   correlation,
+  correlationPValue,
   correlationMatrix,
   hierarchicalClusterOrder,
   kaplanMeier,
@@ -20,6 +21,16 @@ describe("advanced visualization statistics", () => {
     expect(correlation([1, 2, 3], [2, 4, 6], "pearson")).toBeCloseTo(1);
     expect(correlation([1, 2, 3], [9, 4, 1], "spearman")).toBeCloseTo(-1);
     expect(correlationMatrix([[1, 5], [2, 4], [3, 3]], "pearson")[0][1]).toBeCloseTo(-1);
+    expect(Number.isNaN(correlation([1, 1, 1], [2, 3, 4], "pearson"))).toBe(true);
+    expect(Number.isNaN(correlation([1, 1, 1], [2, 3, 4], "spearman"))).toBe(true);
+  });
+
+  it("calculates two-sided correlation P values from the t distribution", () => {
+    expect(correlationPValue(0, 10)).toBeCloseTo(1, 12);
+    expect(correlationPValue(0.5, 10)).toBeCloseTo(0.141113, 5);
+    expect(correlationPValue(-0.5, 10)).toBeCloseTo(0.141113, 5);
+    expect(correlationPValue(1, 10)).toBe(0);
+    expect(Number.isNaN(correlationPValue(0.5, 2))).toBe(true);
   });
 
   it("returns every vector exactly once in deterministic clustering order", () => {

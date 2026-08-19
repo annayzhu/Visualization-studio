@@ -138,8 +138,76 @@ test.describe("Visualization Studio browser acceptance", () => {
     await paletteToggle.click();
     await expect(paletteToggle).toHaveAttribute("aria-expanded", "true");
 
-    const previewCard = page.getByRole("heading", { name: "Correlation heatmap preview" }).locator("xpath=ancestor::section");
-    await expectStablePreviewScreenshot(page, previewCard, "correlation-heatmap-mobile.png");
+    const heatmapSvg = page.locator("svg[aria-label='Correlation heatmap scientific figure preview']");
+    await expect(heatmapSvg).toHaveAttribute("data-plot-renderer", "advanced");
+    const escapedLabels = await heatmapSvg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("text")].flatMap((label) => {
+        const box = label.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : [];
+      });
+    });
+    expect(escapedLabels).toEqual([]);
+  });
+
+  test("configures reproducible heatmap structure without clipping the compact export", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop heatmap controls");
+    await page.goto("/");
+    await page.getByRole("button", { name: /^Clustered heatmap/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const svg = page.locator("svg[aria-label='Clustered heatmap scientific figure preview']");
+    await expect(svg).toHaveAttribute("data-plot-renderer", "advanced");
+    await expect(svg.locator("[data-plot-element='dendrogram']")).not.toHaveCount(0);
+    await expect(svg.locator("[data-cluster-cut='row']")).not.toHaveCount(0);
+
+    await page.getByRole("textbox", { name: "Column annotations (TSV)" }).fill("id\tgroup\nControl_1\tControl\nTreatment_1\tTreatment\nExtra\tUnknown");
+    await expect(page.getByText(/column IDs are missing from the annotation table/)).toBeVisible();
+    await expect(page.getByText(/annotation ID does not match the matrix/)).toBeVisible();
+    await expect(svg.locator("[data-annotation-target='column']")).toHaveCount(12);
+
+    await page.getByRole("textbox", { name: "Width value", exact: true }).fill("520");
+    await page.getByRole("textbox", { name: "Height value", exact: true }).fill("420");
+    await page.getByRole("combobox", { name: "Layout" }).selectOption("circular");
+    await expect(svg.locator("[data-plot-family='circular-heatmap']")).toBeVisible();
+    const escapedCircularText = await svg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-family='circular-heatmap'] text")].flatMap((label) => {
+        const box = label.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : [];
+      });
+    });
+    expect(escapedCircularText).toEqual([]);
+
+    const manyRows = ["gene\tA\tB\tC", ...Array.from({ length: 20 }, (_, index) => `G${index}\t${index + 1}\t${index + 2}\t${index + 3}`)].join("\n");
+    await page.getByRole("textbox", { name: "Column annotations (TSV)" }).fill("");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(manyRows);
+    await page.getByRole("textbox", { name: "Width value", exact: true }).fill("340");
+    await page.getByRole("textbox", { name: "Height value", exact: true }).fill("340");
+    await page.getByRole("textbox", { name: "Legend size value", exact: true }).fill("16");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const escapedLargeLegendText = await svg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-family='circular-heatmap'] text")].flatMap((label) => {
+        const box = label.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : [];
+      });
+    });
+    expect(escapedLargeLegendText).toEqual([]);
+
+    await page.getByRole("textbox", { name: "Width value", exact: true }).fill("520");
+    await page.getByRole("textbox", { name: "Height value", exact: true }).fill("420");
+    await page.getByRole("combobox", { name: "Layout" }).selectOption("rectangular");
+    await page.getByText("Coordinated raw-value row summary", { exact: true }).click();
+    await expect(svg.locator("[data-plot-element='heatmap-side-plot']")).toBeVisible();
+
+    const escapedGeometry = await svg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='heatmap-cell'], [data-plot-element='dendrogram'], [data-annotation-target]")].flatMap((mark) => {
+        const box = mark.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [mark.getAttribute("data-plot-element") ?? mark.getAttribute("data-annotation-target")] : [];
+      });
+    });
+    expect(escapedGeometry).toEqual([]);
   });
 
   test("switches categorical variants and computes long-form uncertainty", async ({ page }, testInfo) => {

@@ -4,7 +4,9 @@ import {
   correlation,
   correlationPValue,
   correlationMatrix,
+  cutHierarchicalCluster,
   hierarchicalClusterOrder,
+  hierarchicalClusterTree,
   kaplanMeier,
   rankValues,
   rocCurve,
@@ -38,6 +40,27 @@ describe("advanced visualization statistics", () => {
     expect([...order].sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
     expect(Math.abs(order.indexOf(0) - order.indexOf(1))).toBe(1);
     expect(Math.abs(order.indexOf(2) - order.indexOf(3))).toBe(1);
+  });
+
+  it("supports explicit distance/linkage choices and reproducible cluster cuts", () => {
+    const vectors = [[0, 0, 0], [0.1, 0.1, 0.1], [8, 8, 8], [8.2, 8.1, 8.3]];
+    for (const linkage of ["average", "complete", "single"] as const) {
+      const tree = hierarchicalClusterTree(vectors, "euclidean", linkage);
+      expect(tree?.order).toEqual(hierarchicalClusterOrder(vectors, "euclidean", linkage));
+      const cuts = cutHierarchicalCluster(tree, 2);
+      expect(cuts[0]).toBe(cuts[1]);
+      expect(cuts[2]).toBe(cuts[3]);
+      expect(cuts[0]).not.toBe(cuts[2]);
+    }
+    expect(() => hierarchicalClusterTree(vectors, "correlation", "average")).toThrow(/zero-variance/);
+  });
+
+  it("clusters the maximum supported 250 × 100 matrix without repeated vector-distance expansion", () => {
+    const vectors = Array.from({ length: 250 }, (_, row) => Array.from({ length: 100 }, (_, column) => Math.sin(row * 0.17 + column * 0.11) + row * 0.002));
+    const started = performance.now();
+    const tree = hierarchicalClusterTree(vectors, "euclidean", "average");
+    expect(tree?.order).toHaveLength(250);
+    expect(performance.now() - started).toBeLessThan(3_000);
   });
 
   it("computes Kaplan-Meier survival after tied events and censoring", () => {

@@ -422,7 +422,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "chord") content = <ChordPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "circos") content = <CircosPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
-  return <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${frame.width} ${frame.height}`} width={frame.width} height={frame.height} role="img" data-chart-text-color={TEXT} aria-label={`${definition.name} scientific figure preview`} style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}>
+  return <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${frame.width} ${frame.height}`} width={frame.width} height={frame.height} role="img" data-plot-renderer="advanced" data-chart-text-color={TEXT} aria-label={`${definition.name} scientific figure preview`} style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}>
     <title>{settings.title || `${definition.name} figure`}</title><desc>{definition.summary} Generated in LabNest Visualization Studio.</desc><rect width={frame.width} height={frame.height} fill="#FFFFFF" />
     {settings.title ? <text x={frame.left} y={24} fill={TEXT} fontSize={settings.titleSize} fontWeight={700}>{settings.title}</text> : null}
     {content}

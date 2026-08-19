@@ -8,6 +8,7 @@ import {
   formatTick,
   figureFontPresets,
   getPlotDefinition,
+  getPlotModule,
   groupNumericValues,
   interpolateColor,
   journalThemes,
@@ -646,11 +647,7 @@ function renderEnrichment(
 }
 
 export function ScientificChartPreview({ svgRef, type, dataset, mapping, settings, themeId }: ChartProps) {
-  if ([
-    "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
-    "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
-    "upset", "sankey", "chord", "circos",
-  ].includes(type)) {
+  if (getPlotModule(type).renderer === "advanced") {
     return <ScientificAdvancedChartPreview svgRef={svgRef} type={type} dataset={dataset} mapping={mapping} settings={settings} themeId={themeId} />;
   }
   const theme = journalThemes[themeId];

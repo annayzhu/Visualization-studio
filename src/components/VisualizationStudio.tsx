@@ -285,6 +285,23 @@ function TextControl({ label, value, onChange, placeholder }: { label: string; v
   );
 }
 
+function TextareaControl({ label, value, onChange, placeholder, hint }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; hint?: string }) {
+  return (
+    <label className="grid gap-1 text-xs text-graphite">
+      <span>{label}</span>
+      <textarea
+        aria-label={label}
+        value={value}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={(event) => onChange(event.target.value)}
+        className="focus-ring min-h-20 resize-y rounded-[7px] border border-hairline bg-[#FBFBF9] px-2.5 py-2 font-mono text-[10px] leading-4 text-ink placeholder:text-muted"
+      />
+      {hint ? <span className="text-[10px] leading-4 text-muted">{hint}</span> : null}
+    </label>
+  );
+}
+
 function SelectControl({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
   return (
     <label className="grid gap-1 text-xs text-graphite">
@@ -419,6 +436,7 @@ export function VisualizationStudio() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const previewCardRef = useRef<HTMLDivElement | null>(null);
+  const parameterScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -557,10 +575,13 @@ export function VisualizationStudio() {
       xLabel: "",
       yLabel: "",
       swapAxes: false,
+      clusterColumns: nextType === "correlation-heatmap" ? current.clusterRows : current.clusterColumns,
+      heatmapColumnClusters: nextType === "correlation-heatmap" ? current.heatmapRowClusters : current.heatmapColumnClusters,
       compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
       legendPosition: (["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment", "enrichment-bar", "venn", "upset", "sankey", "chord", "circos"] as PlotType[]).includes(nextType) && current.legendPosition === "bottom" ? "right" : current.legendPosition,
     }, nextType));
     window.requestAnimationFrame(() => {
+      if (parameterScrollRef.current) parameterScrollRef.current.scrollTop = 0;
       previewCardRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
     });
   };
@@ -939,7 +960,7 @@ export function VisualizationStudio() {
               const plotResetSettings = plotType === "rose" ? { ...resetSettings, compositionLabelMode: "value" as const } : resetSettings;
               setSettings(settingsForDistributionPreset(plotResetSettings, plotType));
             }}><RotateCcw className="h-3.5 w-3.5" aria-hidden />Reset</Button>} />
-            <CardBody className="space-y-4 p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
+            <CardBody ref={parameterScrollRef} className="space-y-4 p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
               <ControlGroup title="Labels">
                 <TextControl label="Title" value={settings.title} onChange={(value) => updateSetting("title", value)} placeholder={`${definition.name} title`} />
               {hasSetting("xLabel") ? <TextControl label="X-axis label" value={settings.xLabel} onChange={(value) => updateSetting("xLabel", value)} /> : null}
@@ -1031,7 +1052,32 @@ export function VisualizationStudio() {
             {plotType === "correlation-heatmap" ? <ControlGroup title="Correlation"><SelectControl label="Method" value={settings.correlationMethod} onChange={(value) => updateSetting("correlationMethod", value as VisualizationSettings["correlationMethod"])}><option value="pearson">Pearson</option><option value="spearman">Spearman</option></SelectControl><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Each matrix cell is calculated from paired complete observations. This view reports coefficients, not inferential P values.</p></ControlGroup> : null}
             {plotType === "quadrant" ? <ControlGroup title="Quadrant thresholds"><RangeControl label="X threshold" value={settings.xThreshold} minimum={-10} maximum={10} step={0.1} onChange={(value) => updateSetting("xThreshold", value)} /><RangeControl label="Y threshold" value={settings.yThreshold} minimum={-10} maximum={10} step={0.1} onChange={(value) => updateSetting("yThreshold", value)} /></ControlGroup> : null}
             {plotType === "errorbar" ? <ControlGroup title="Error bars"><RangeControl label="Error line" value={settings.errorBarLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("errorBarLineWidth", value)} /><RangeControl label="Cap width" value={settings.errorBarCapSize} minimum={4} maximum={30} step={1} unit=" px" onChange={(value) => updateSetting("errorBarCapSize", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The mapped error column must already contain SD or SEM. Record which statistic you used in the title, axis, caption, or exported config.</p></ControlGroup> : null}
-            {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) ? <ControlGroup title="Heatmap">{plotType !== "correlation-heatmap" ? <SelectControl label="Scaling" value={settings.heatmapScale} onChange={(value) => updateSetting("heatmapScale", value as VisualizationSettings["heatmapScale"])}><option value="row">Row z-score</option><option value="none">Raw values</option></SelectControl> : null}{plotType !== "heatmap" ? <><ToggleControl label="Cluster rows" checked={settings.clusterRows} onChange={(value) => updateSetting("clusterRows", value)} /><ToggleControl label="Cluster columns" checked={settings.clusterColumns} onChange={(value) => updateSetting("clusterColumns", value)} /><p className="text-[11px] leading-4 text-muted">Deterministic Euclidean average-linkage ordering is used for the preview.</p></> : null}</ControlGroup> : null}
+            {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) ? <>
+              <ControlGroup title="Heatmap view">
+                <SelectControl label="Layout" value={settings.heatmapDisplay} onChange={(value) => updateSetting("heatmapDisplay", value as VisualizationSettings["heatmapDisplay"])}><option value="rectangular">Rectangular matrix</option><option value="circular">Circular heatmap</option></SelectControl>
+                {plotType === "correlation-heatmap" && settings.heatmapDisplay === "rectangular" ? <SelectControl label="Correlation cells" value={settings.heatmapTriangle} onChange={(value) => updateSetting("heatmapTriangle", value as VisualizationSettings["heatmapTriangle"])}><option value="lower">Lower triangle</option><option value="upper">Upper triangle</option><option value="full">Full matrix</option></SelectControl> : null}
+                {plotType !== "correlation-heatmap" ? <SelectControl label="Scaling" value={settings.heatmapScale} onChange={(value) => updateSetting("heatmapScale", value as VisualizationSettings["heatmapScale"])}><option value="row">Row z-score</option><option value="column">Column z-score</option><option value="none">Raw values</option></SelectControl> : null}
+                {plotType !== "correlation-heatmap" && settings.heatmapScale === "none" ? <SelectControl label="Color scale" value={settings.heatmapColorMode} onChange={(value) => updateSetting("heatmapColorMode", value as VisualizationSettings["heatmapColorMode"])}><option value="sequential">Sequential low → high</option><option value="diverging">Diverging around zero</option></SelectControl> : null}
+                <SelectControl label="Label density" value={settings.heatmapLabelDensity} onChange={(value) => updateSetting("heatmapLabelDensity", value as VisualizationSettings["heatmapLabelDensity"])}><option value="auto">Auto (legible)</option><option value="all">All labels</option><option value="none">Hidden</option></SelectControl>
+                {settings.heatmapDisplay === "rectangular" ? <ToggleControl label="Cell values when legible" checked={settings.heatmapShowValues} onChange={(value) => updateSetting("heatmapShowValues", value)} /> : null}
+                {settings.heatmapDisplay === "rectangular" ? <><ToggleControl label="Coordinated raw-value row summary" checked={settings.heatmapShowSidePlot} onChange={(value) => updateSetting("heatmapShowSidePlot", value)} />
+                {settings.heatmapShowSidePlot ? <><SelectControl label="Raw row summary" value={settings.heatmapSidePlotStatistic} onChange={(value) => updateSetting("heatmapSidePlotStatistic", value as VisualizationSettings["heatmapSidePlotStatistic"])}><option value="mean">Mean</option><option value="sd">SD</option><option value="range">Range</option></SelectControl><p className="text-[11px] leading-4 text-muted">The side plot summarizes uploaded values before heatmap scaling; correlation heatmaps summarize displayed coefficients.</p></> : null}</> : <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Circular view keeps cluster ordering, cut tracks, and annotations. Cell text, dendrogram geometry, and the coordinated side plot are available in rectangular view.</p>}
+              </ControlGroup>
+              {plotType !== "heatmap" ? <ControlGroup title="Clustering">
+                {plotType === "correlation-heatmap" ? <ToggleControl label="Cluster variables (linked rows + columns)" checked={settings.clusterRows && settings.clusterColumns} onChange={(value) => setSettings((current) => ({ ...current, clusterRows: value, clusterColumns: value }))} /> : <><ToggleControl label="Cluster rows" checked={settings.clusterRows} onChange={(value) => updateSetting("clusterRows", value)} /><ToggleControl label="Cluster columns" checked={settings.clusterColumns} onChange={(value) => updateSetting("clusterColumns", value)} /></>}
+                {(settings.clusterRows || settings.clusterColumns) ? <>
+                  <SelectControl label="Distance" value={settings.heatmapDistance} onChange={(value) => updateSetting("heatmapDistance", value as VisualizationSettings["heatmapDistance"])}><option value="euclidean">Euclidean</option><option value="correlation">1 − Pearson correlation</option></SelectControl>
+                  <SelectControl label="Linkage" value={settings.heatmapLinkage} onChange={(value) => updateSetting("heatmapLinkage", value as VisualizationSettings["heatmapLinkage"])}><option value="average">Average</option><option value="complete">Complete</option><option value="single">Single</option></SelectControl>
+                  {settings.heatmapDisplay === "rectangular" ? <ToggleControl label="Dendrograms" checked={settings.heatmapShowDendrograms} onChange={(value) => updateSetting("heatmapShowDendrograms", value)} /> : null}
+                  {plotType === "correlation-heatmap" ? <RangeControl label="Variable cluster cut" value={settings.heatmapRowClusters} minimum={1} maximum={8} step={1} onChange={(value) => setSettings((current) => ({ ...current, heatmapRowClusters: value, heatmapColumnClusters: value }))} /> : <>{settings.clusterRows ? <RangeControl label="Row cluster cut" value={settings.heatmapRowClusters} minimum={1} maximum={8} step={1} onChange={(value) => updateSetting("heatmapRowClusters", value)} /> : null}{settings.clusterColumns ? <RangeControl label="Column cluster cut" value={settings.heatmapColumnClusters} minimum={1} maximum={8} step={1} onChange={(value) => updateSetting("heatmapColumnClusters", value)} /> : null}</>}
+                  <p className="text-[11px] leading-4 text-muted">Ordering, distance, linkage, and cut count are deterministic and included in the exported configuration.{plotType === "correlation-heatmap" ? " Symmetric rows and columns always share one variable order." : ""}</p>
+                </> : null}
+              </ControlGroup> : null}
+              <ControlGroup title="Annotation tracks">
+                <TextareaControl label="Row annotations (TSV)" value={settings.heatmapRowAnnotationData} onChange={(value) => updateSetting("heatmapRowAnnotationData", value)} placeholder={"id\tpathway[categorical]\nTP53\tp53 response\nEGFR\tRTK"} hint="First column is a stable row ID; append [categorical] or [continuous] to declare each track." />
+                <TextareaControl label="Column annotations (TSV)" value={settings.heatmapColumnAnnotationData} onChange={(value) => updateSetting("heatmapColumnAnnotationData", value)} placeholder={"id\tgroup[categorical]\tbatch[categorical]\nControl_1\tControl\t1\nTreatment_1\tTreatment\t2"} hint="IDs are matched by name, never by row position. Undeclared numeric tracks trigger a warning instead of silently assuming coded categories." />
+              </ControlGroup>
+            </> : null}
             {plotType === "km" ? <ControlGroup title="Survival"><ToggleControl label="Show numbers at risk" checked={settings.showRiskTable} onChange={(value) => updateSetting("showRiskTable", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Kaplan–Meier estimates and censor marks are calculated from individual records. A log-rank P value is intentionally omitted until a tested inferential module is added.</p></ControlGroup> : null}
             {plotType === "survival-forest" ? <ControlGroup title="Forest reference"><RangeControl label="Null reference" value={settings.forestReferenceValue} minimum={0} maximum={5} step={0.1} onChange={(value) => updateSetting("forestReferenceValue", value)} /><p className="text-[11px] leading-4 text-muted">Use 1 for ratios such as HR/OR and 0 for additive coefficients.</p></ControlGroup> : null}
 
@@ -1061,8 +1107,8 @@ export function VisualizationStudio() {
 
               <ControlGroup title="Editable colors">
                 {categoryLabels.map((label, index) => <ColorControl key={`${label}-${index}`} label={`${index + 1} · ${label}`} value={settings.categoricalColors[index] ?? journalThemes[themeId].categorical[index % journalThemes[themeId].categorical.length]} onChange={(value) => updateCategoryColor(index, value)} />)}
-                {plotType === "enrichment" || plotType === "enrichment-bar" ? <><ColorControl label="Sequential low" value={settings.continuousLow} onChange={(value) => updateSetting("continuousLow", value)} /><ColorControl label="Sequential high" value={settings.continuousHigh} onChange={(value) => updateSetting("continuousHigh", value)} /></> : null}
-                {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) ? <><ColorControl label="Diverging low" value={settings.divergingLow} onChange={(value) => updateSetting("divergingLow", value)} /><ColorControl label="Midpoint" value={settings.divergingMid} onChange={(value) => updateSetting("divergingMid", value)} /><ColorControl label="Diverging high" value={settings.divergingHigh} onChange={(value) => updateSetting("divergingHigh", value)} /></> : null}
+                {plotType === "enrichment" || plotType === "enrichment-bar" || ((plotType === "heatmap" || plotType === "clustered-heatmap") && settings.heatmapScale === "none" && settings.heatmapColorMode === "sequential") ? <><ColorControl label="Sequential low" value={settings.continuousLow} onChange={(value) => updateSetting("continuousLow", value)} /><ColorControl label="Sequential high" value={settings.continuousHigh} onChange={(value) => updateSetting("continuousHigh", value)} /></> : null}
+                {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) && (plotType === "correlation-heatmap" || settings.heatmapScale !== "none" || settings.heatmapColorMode === "diverging") ? <><ColorControl label="Diverging low" value={settings.divergingLow} onChange={(value) => updateSetting("divergingLow", value)} /><ColorControl label="Midpoint" value={settings.divergingMid} onChange={(value) => updateSetting("divergingMid", value)} /><ColorControl label="Diverging high" value={settings.divergingHigh} onChange={(value) => updateSetting("divergingHigh", value)} /></> : null}
               </ControlGroup>
             </CardBody>
           </Card>

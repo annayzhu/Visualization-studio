@@ -106,23 +106,48 @@ function euclidean(left: number[], right: number[]) {
   return Math.sqrt(left.reduce((sum, value, index) => sum + (value - right[index]) ** 2, 0));
 }
 
-export function hierarchicalClusterOrder(vectors: number[][]) {
-  if (vectors.length <= 1) return vectors.map((_, index) => index);
-  type Cluster = { members: number[]; order: number[] };
-  const clusters: Cluster[] = vectors.map((_, index) => ({ members: [index], order: [index] }));
-  const averageDistance = (left: Cluster, right: Cluster) => {
-    const distances = left.members.flatMap((a) => right.members.map((b) => euclidean(vectors[a], vectors[b])));
-    return mean(distances);
-  };
+export type ClusterDistance = "euclidean" | "correlation";
+export type ClusterLinkage = "average" | "complete" | "single";
+export type HierarchicalClusterNode = {
+  id: string;
+  members: number[];
+  order: number[];
+  height: number;
+  left?: HierarchicalClusterNode;
+  right?: HierarchicalClusterNode;
+};
+
+function vectorDistance(left: number[], right: number[], distance: ClusterDistance) {
+  if (distance === "correlation") {
+    const coefficient = pearsonCorrelation(left, right);
+    if (!Number.isFinite(coefficient)) throw new Error("Correlation distance is undefined for a zero-variance vector.");
+    return Math.max(0, 1 - coefficient);
+  }
+  return euclidean(left, right);
+}
+
+export function hierarchicalClusterTree(
+  vectors: number[][],
+  distance: ClusterDistance = "euclidean",
+  linkage: ClusterLinkage = "average",
+): HierarchicalClusterNode | null {
+  if (vectors.length === 0) return null;
+  const clusters: HierarchicalClusterNode[] = vectors.map((_, index) => ({ id: `leaf-${index}`, members: [index], order: [index], height: 0 }));
+  const distances = new Map<string, number>();
+  const distanceKey = (left: HierarchicalClusterNode, right: HierarchicalClusterNode) => left.id < right.id ? `${left.id}\u0000${right.id}` : `${right.id}\u0000${left.id}`;
+  const getDistance = (left: HierarchicalClusterNode, right: HierarchicalClusterNode) => distances.get(distanceKey(left, right)) ?? Number.POSITIVE_INFINITY;
+  for (let left = 0; left < clusters.length; left += 1) {
+    for (let right = left + 1; right < clusters.length; right += 1) distances.set(distanceKey(clusters[left], clusters[right]), vectorDistance(vectors[left], vectors[right], distance));
+  }
   while (clusters.length > 1) {
     let bestI = 0;
     let bestJ = 1;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (let i = 0; i < clusters.length; i += 1) {
       for (let j = i + 1; j < clusters.length; j += 1) {
-        const distance = averageDistance(clusters[i], clusters[j]);
-        if (distance < bestDistance - 1e-12) {
-          bestDistance = distance;
+        const candidateDistance = getDistance(clusters[i], clusters[j]);
+        if (candidateDistance < bestDistance - 1e-12) {
+          bestDistance = candidateDistance;
           bestI = i;
           bestJ = j;
         }
@@ -130,11 +155,60 @@ export function hierarchicalClusterOrder(vectors: number[][]) {
     }
     const left = clusters[bestI];
     const right = clusters[bestJ];
-    const merged: Cluster = { members: [...left.members, ...right.members], order: [...left.order, ...right.order] };
+    const merged: HierarchicalClusterNode = {
+      id: `node-${left.id}-${right.id}`,
+      members: [...left.members, ...right.members],
+      order: [...left.order, ...right.order],
+      height: bestDistance,
+      left,
+      right,
+    };
+    const updatedDistances = clusters.flatMap((other) => {
+      if (other === left || other === right) return;
+      const leftDistance = getDistance(left, other);
+      const rightDistance = getDistance(right, other);
+      const mergedDistance = linkage === "single"
+        ? Math.min(leftDistance, rightDistance)
+        : linkage === "complete"
+          ? Math.max(leftDistance, rightDistance)
+          : (left.members.length * leftDistance + right.members.length * rightDistance) / (left.members.length + right.members.length);
+      return [{ other, mergedDistance }];
+    }).filter((entry): entry is { other: HierarchicalClusterNode; mergedDistance: number } => Boolean(entry));
+    [...distances.keys()].forEach((key) => {
+      const [firstId, secondId] = key.split("\u0000");
+      if (firstId === left.id || secondId === left.id || firstId === right.id || secondId === right.id) distances.delete(key);
+    });
+    updatedDistances.forEach(({ other, mergedDistance }) => distances.set(distanceKey(merged, other), mergedDistance));
     clusters.splice(bestJ, 1);
     clusters.splice(bestI, 1, merged);
   }
-  return clusters[0].order;
+  return clusters[0];
+}
+
+export function hierarchicalClusterOrder(
+  vectors: number[][],
+  distance: ClusterDistance = "euclidean",
+  linkage: ClusterLinkage = "average",
+) {
+  return hierarchicalClusterTree(vectors, distance, linkage)?.order ?? [];
+}
+
+export function cutHierarchicalCluster(tree: HierarchicalClusterNode | null, clusterCount: number) {
+  if (!tree) return [];
+  const requested = Math.max(1, Math.min(Math.floor(clusterCount), tree.members.length));
+  const clusters = [tree];
+  while (clusters.length < requested) {
+    const splittable = clusters
+      .map((node, index) => ({ node, index }))
+      .filter(({ node }) => node.left && node.right)
+      .sort((a, b) => b.node.height - a.node.height || Math.min(...a.node.members) - Math.min(...b.node.members))[0];
+    if (!splittable?.node.left || !splittable.node.right) break;
+    clusters.splice(splittable.index, 1, splittable.node.left, splittable.node.right);
+  }
+  clusters.sort((left, right) => Math.min(...left.members) - Math.min(...right.members));
+  const labels = Array(tree.members.length).fill(0) as number[];
+  clusters.forEach((node, clusterIndex) => node.members.forEach((member) => { labels[member] = clusterIndex; }));
+  return labels;
 }
 
 export type KaplanMeierPoint = { time: number; survival: number; atRisk: number; events: number; censored: number };

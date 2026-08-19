@@ -1389,7 +1389,11 @@ export const plotGuidance: Record<PlotType, PlotGuidance> = {
   },
 };
 
-export const plotModuleRegistry = createLegacyPlotModuleRegistry<PlotType, keyof VisualizationSettings>(plotDefinitions, plotGuidance);
+export const plotModuleRegistry = createLegacyPlotModuleRegistry<PlotType, keyof VisualizationSettings>(
+  plotDefinitions,
+  plotGuidance,
+  Object.keys(defaultVisualizationSettings) as Array<keyof VisualizationSettings>,
+);
 
 export function getPlotModule(type: PlotType) {
   return plotModuleRegistry.get(type);

@@ -16,6 +16,7 @@ const expectedAdvancedRenderers = new Set([
   "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
   "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
+  "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
 
 describe("registered plot-module examples", () => {
@@ -113,5 +114,33 @@ describe("registered plot-module examples", () => {
     expect(foldCoordinates.every((coordinate) => coordinate >= 60 && coordinate <= 218)).toBe(true);
     expect(pCoordinate).toBeGreaterThanOrEqual(20);
     expect(pCoordinate).toBeLessThanOrEqual(292);
+  });
+
+  it("keeps deep sunburst rings valid at the maximum hierarchy gap", () => {
+    const rows = ["node\tparent\tvalue", "Root\t\t0"];
+    for (let depth = 1; depth <= 12; depth += 1) rows.push(`Level ${depth}\t${depth === 1 ? "Root" : `Level ${depth - 1}`}\t${depth === 12 ? 5 : 0}`);
+    const dataset = parseDelimitedData(rows.join("\n"));
+    const mapping = { node: "node", parent: "parent", value: "value" };
+    const settings = { ...defaultVisualizationSettings, hierarchyGap: 8 };
+    expect(validatePlotDataset(plotModuleRegistry.get("sunburst").definition, dataset, mapping, settings).errors).toEqual([]);
+    const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="sunburst" dataset={dataset} mapping={mapping} settings={settings} themeId={defaultVisualizationThemeId} />);
+    const arcRadii = [...markup.matchAll(/A ([\d.]+) ([\d.]+)/g)].flatMap((match) => [Number(match[1]), Number(match[2])]);
+    expect(arcRadii.length).toBeGreaterThan(0);
+    expect(arcRadii.every((radius) => Number.isFinite(radius) && radius > 0)).toBe(true);
+    expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
+
+  it("uses the compact treemap canvas and renders population percentages", () => {
+    const treemapModule = plotModuleRegistry.get("treemap");
+    const treemapExample = treemapModule.examples[0];
+    const treemapMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="treemap" dataset={parseDelimitedData(treemapExample.data)} mapping={treemapExample.mapping ?? treemapModule.definition.defaultMapping} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+    const rootWidth = Number(treemapMarkup.match(/data-plot-element="treemap-node"[^>]* width="([\d.]+)"/)?.[1]);
+    expect(rootWidth).toBeGreaterThan(200);
+
+    const pyramidModule = plotModuleRegistry.get("population-pyramid");
+    const pyramidExample = pyramidModule.examples[0];
+    const pyramidMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="population-pyramid" dataset={parseDelimitedData(pyramidExample.data)} mapping={pyramidExample.mapping ?? pyramidModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, pyramidDisplayMode: "percent" }} themeId={defaultVisualizationThemeId} />);
+    expect(pyramidMarkup).toContain("%");
+    expect(pyramidMarkup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
   });
 });

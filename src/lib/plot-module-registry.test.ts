@@ -77,7 +77,7 @@ describe("plot-module registry interface", () => {
   });
 
   it("adapts all existing plots to the shared module contract", () => {
-    expect(plotModuleRegistry.list()).toHaveLength(31);
+    expect(plotModuleRegistry.list()).toHaveLength(40);
     plotModuleRegistry.list().forEach((plotModule) => {
       expect(plotModule.definition.id).toBeTruthy();
       expect(plotModule.examples.length).toBeGreaterThan(0);
@@ -93,6 +93,11 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("pca").capabilities.settingKeys).toContain("swapAxes");
     expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");
+    expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("xLabel");
+    expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("grid");
+    expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("pointSize");
+    expect(getPlotModule("radar").capabilities.settingKeys).toEqual(expect.arrayContaining(["gridLineWidth", "dataLineWidth", "pointSize"]));
+    expect(getPlotModule("population-pyramid").capabilities.settingKeys).toContain("pyramidDisplayMode");
   });
 
   it("infers exact and normalized aliases deterministically", () => {
@@ -109,5 +114,11 @@ describe("plot-module registry interface", () => {
 
     const scatter = getPlotModule("scatter").definition;
     expect(inferPlotMapping(scatter, ["group"])).toMatchObject({ x: "", y: "", group: "group", label: "" });
+  });
+
+  it("keeps the Rose example aligned with its ungrouped data contract", () => {
+    const rose = getPlotModule("rose");
+    const [header = ""] = rose.examples[0].data.trim().split(/\r?\n/);
+    expect(header.split("\t")).toEqual(rose.definition.roles.map((role) => role.key));
   });
 });

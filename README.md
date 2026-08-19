@@ -5,7 +5,8 @@ A browser-local scientific visualization workspace for creating compact, publica
 ## Highlights
 
 - Publication-oriented defaults with Arial typography and compact figure dimensions
-- A categorical Bar family with grouped, stacked, 100% stacked, horizontal, bidirectional, faceted, polar, bullet, pyramid, axis-break, dual-axis, and overlay variants, plus line, scatter, PCA, box, violin, volcano, heatmap, enrichment, survival, ROC, Venn, UpSet, Sankey, chord, Circos, and additional scientific plot types
+- Forty registry-owned modules, including categorical comparison, distribution, dimension reduction, enrichment, survival, set, network, genomic, composition, hierarchy, cyclic profile, and paired-distribution families
+- Distinct pie, donut, rose, waffle, treemap, sunburst, radar, polar-profile, and population-pyramid contracts with scientific suitability guidance and references
 - Adjustable labels, dimensions, line weights, marks, grids, legends, uncertainty bars, palettes, and plot-specific parameters
 - Built-in journal-inspired and traditional Chinese color palettes
 - SVG, 600 dpi PNG, and reproducible JSON configuration export
@@ -27,6 +28,7 @@ Open [http://localhost:3000](http://localhost:3000).
 ```bash
 npm run typecheck
 npm test
+npm run test:e2e
 npm run build
 ```
 

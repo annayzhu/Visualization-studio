@@ -35,7 +35,16 @@ export type PlotType =
   | "upset"
   | "sankey"
   | "chord"
-  | "circos";
+  | "circos"
+  | "pie"
+  | "donut"
+  | "rose"
+  | "waffle"
+  | "treemap"
+  | "sunburst"
+  | "radar"
+  | "polar-profile"
+  | "population-pyramid";
 
 export type JournalThemeId =
   | "nature"
@@ -219,6 +228,13 @@ export type VisualizationSettings = {
   clusterColumns: boolean;
   showRiskTable: boolean;
   forestReferenceValue: number;
+  compositionLabelMode: "percent" | "value" | "both" | "none";
+  donutHole: number;
+  waffleCells: number;
+  hierarchyGap: number;
+  radarFillOpacity: number;
+  radialMaximum: number | null;
+  pyramidDisplayMode: "value" | "percent";
   categoricalColors: string[];
   continuousLow: string;
   continuousHigh: string;
@@ -284,6 +300,13 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   clusterColumns: true,
   showRiskTable: true,
   forestReferenceValue: 1,
+  compositionLabelMode: "percent",
+  donutHole: 0.54,
+  waffleCells: 100,
+  hierarchyGap: 2,
+  radarFillOpacity: 0.16,
+  radialMaximum: null,
+  pyramidDisplayMode: "value",
   categoricalColors: ["#957454", "#1D4C50", "#D4A278", "#3F605B"],
   continuousLow: "#D4A278",
   continuousHigh: "#1D4C50",
@@ -792,6 +815,68 @@ Tumor\tMacrophage\t12\tImmune
 Fibroblast\tTumor\t10\tStroma
 Macrophage\tT cell\t7\tImmune
 Endothelial\tTumor\t6\tStroma`,
+  composition: `category\tvalue
+Immune\t34
+Stromal\t27
+Epithelial\t21
+Endothelial\t11
+Other\t7`,
+  rose: `category\tvalue
+Baseline\t42
+Week 2\t58
+Week 4\t76
+Week 6\t64
+Week 8\t51
+Week 10\t37`,
+  hierarchy: `node\tparent\tvalue
+All samples\t\t0
+Immune\tAll samples\t0
+Lymphoid\tImmune\t0
+Myeloid\tImmune\t0
+T cells\tLymphoid\t32
+B cells\tLymphoid\t18
+Macrophages\tMyeloid\t24
+Dendritic cells\tMyeloid\t10
+Stromal\tAll samples\t0
+Fibroblasts\tStromal\t12
+Endothelial\tStromal\t4`,
+  radar: `feature\tvalue\tseries
+Sensitivity\t0.88\tModel A
+Specificity\t0.81\tModel A
+Precision\t0.77\tModel A
+Recall\t0.88\tModel A
+Calibration\t0.72\tModel A
+Robustness\t0.79\tModel A
+Sensitivity\t0.79\tModel B
+Specificity\t0.90\tModel B
+Precision\t0.83\tModel B
+Recall\t0.79\tModel B
+Calibration\t0.84\tModel B
+Robustness\t0.74\tModel B`,
+  polarProfile: `angle\tvalue\tseries
+ZT0\t1.2\tControl
+ZT4\t1.8\tControl
+ZT8\t3.1\tControl
+ZT12\t4.0\tControl
+ZT16\t2.7\tControl
+ZT20\t1.5\tControl
+ZT0\t1.1\tTreatment
+ZT4\t2.4\tTreatment
+ZT8\t4.2\tTreatment
+ZT12\t3.3\tTreatment
+ZT16\t2.0\tTreatment
+ZT20\t1.2\tTreatment`,
+  populationPyramid: `category\tvalue\tgroup
+0-19\t18\tFemale
+20-39\t31\tFemale
+40-59\t27\tFemale
+60-79\t17\tFemale
+80+\t7\tFemale
+0-19\t20\tMale
+20-39\t33\tMale
+40-59\t25\tMale
+60-79\t15\tMale
+80+\t5\tMale`,
   circos: `sourceChr\tsourceStart\tsourceEnd\ttargetChr\ttargetStart\ttargetEnd\tvalue
 chr1\t12000000\t18000000\tchr5\t42000000\t47000000\t8
 chr2\t35000000\t39000000\tchr8\t76000000\t80000000\t5
@@ -1197,6 +1282,92 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     defaultMapping: { sourceChr: "sourceChr", sourceStart: "sourceStart", sourceEnd: "sourceEnd", targetChr: "targetChr", targetStart: "targetStart", targetEnd: "targetEnd", value: "value" },
     sampleData: samples.circos,
   },
+  ...(["pie", "donut", "waffle"] as const).map((id) => ({
+    id,
+    name: id === "pie" ? "Pie" : id === "donut" ? "Donut" : "Waffle",
+    family: "Composition",
+    summary: id === "pie"
+      ? "Part-to-whole composition encoded by sector angle and area."
+      : id === "donut"
+        ? "Part-to-whole composition with a central total and compact ring geometry."
+        : "Approximate part-to-whole composition on a discrete unit grid.",
+    inputHint: "One row per mutually exclusive category with a non-negative value. Values are normalized to the displayed total.",
+    roles: [
+      { key: "category", label: "Category", kind: "category" as const, required: true },
+      { key: "value", label: "Value", kind: "number" as const, required: true },
+    ],
+    defaultMapping: { category: "category", value: "value" },
+    sampleData: samples.composition,
+  })),
+  {
+    id: "rose",
+    name: "Rose",
+    family: "Cyclic comparison",
+    summary: "Equal-angle sectors whose areas encode magnitude rather than part-to-whole share.",
+    inputHint: "One row per ordered category with a non-negative magnitude. Rows are not normalized to a compositional total.",
+    roles: [
+      { key: "category", label: "Ordered category", kind: "category", required: true },
+      { key: "value", label: "Magnitude", kind: "number", required: true },
+    ],
+    defaultMapping: { category: "category", value: "value" },
+    sampleData: samples.rose,
+  },
+  ...(["treemap", "sunburst"] as const).map((id) => ({
+    id,
+    name: id === "treemap" ? "Treemap" : "Sunburst",
+    family: "Hierarchical composition",
+    summary: id === "treemap" ? "Nested rectangles encode hierarchical part-to-whole area." : "Concentric rings encode parent-child hierarchy and descendant share.",
+    inputHint: "One row per unique node. Parent is blank only for the single root. Leaf values must be non-negative; internal totals are calculated from descendants.",
+    roles: [
+      { key: "node", label: "Node", kind: "label" as const, required: true },
+      { key: "parent", label: "Parent", kind: "label" as const, required: false },
+      { key: "value", label: "Leaf value", kind: "number" as const, required: true },
+    ],
+    defaultMapping: { node: "node", parent: "parent", value: "value" },
+    sampleData: samples.hierarchy,
+  })),
+  {
+    id: "radar",
+    name: "Radar",
+    family: "Multivariate profile",
+    summary: "Comparable multivariate profiles arranged on shared radial axes.",
+    inputHint: "Long format with at least three features per series. Every series must contain the same features on a common, interpretable scale.",
+    roles: [
+      { key: "feature", label: "Feature", kind: "category", required: true },
+      { key: "value", label: "Value", kind: "number", required: true },
+      { key: "series", label: "Series", kind: "category", required: false },
+    ],
+    defaultMapping: { feature: "feature", value: "value", series: "series" },
+    sampleData: samples.radar,
+  },
+  {
+    id: "polar-profile",
+    name: "Polar profile",
+    family: "Cyclic profile",
+    summary: "Ordered or cyclic measurements connected around a shared radial scale.",
+    inputHint: "Rows follow the angular order. Each series must contain the same ordered categories and non-negative values.",
+    roles: [
+      { key: "angle", label: "Ordered angle category", kind: "category", required: true },
+      { key: "value", label: "Value", kind: "number", required: true },
+      { key: "series", label: "Series", kind: "category", required: false },
+    ],
+    defaultMapping: { angle: "angle", value: "value", series: "series" },
+    sampleData: samples.polarProfile,
+  },
+  {
+    id: "population-pyramid",
+    name: "Population pyramid",
+    family: "Paired distribution",
+    summary: "Two non-negative distributions mirrored across a common ordered-category baseline.",
+    inputHint: "Long format with exactly two groups and one non-negative value per ordered category/group pair.",
+    roles: [
+      { key: "category", label: "Ordered category", kind: "category", required: true },
+      { key: "value", label: "Value", kind: "number", required: true },
+      { key: "group", label: "Group", kind: "category", required: true },
+    ],
+    defaultMapping: { category: "category", value: "value", group: "group" },
+    sampleData: samples.populationPyramid,
+  },
 ];
 
 export const plotReferences = {
@@ -1228,6 +1399,12 @@ export const plotReferences = {
   sankey: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00015.x" },
   chord: { citation: "Gu et al., 2014. circlize Implements and Enhances Circular Visualization in R. Bioinformatics.", href: "https://doi.org/10.1093/bioinformatics/btu393" },
   circos: { citation: "Krzywinski et al., 2009. Circos: An information aesthetic for comparative genomics. Genome Res.", href: "https://doi.org/10.1101/gr.092759.109" },
+  pie: { citation: "Spence, 2005. No Humble Pie: The Origins and Usage of a Statistical Chart. Journal of Educational and Behavioral Statistics.", href: "https://doi.org/10.3102/10769986030004353" },
+  nightingale: { citation: "Magnello, 2012. Victorian statistical graphics and the iconography of Florence Nightingale's polar area graph. BSHM Bulletin.", href: "https://doi.org/10.1080/17498430.2012.618102" },
+  treemap: { citation: "Shneiderman, 1992. Tree visualization with tree-maps: 2-d space-filling approach. ACM Transactions on Graphics.", href: "https://doi.org/10.1145/102377.115768" },
+  sunburst: { citation: "Stasko & Zhang, 2000. Focus+context display and navigation techniques for enhancing radial, space-filling hierarchy visualizations. IEEE InfoVis.", href: "https://doi.org/10.1109/INFVIS.2000.885107" },
+  radar: { citation: "Kolence & Kiviat, 1973. Software Unit Profiles & Kiviat Figures. ACM SIGMETRICS Performance Evaluation Review.", href: "https://doi.org/10.1145/1041613.1041614" },
+  populationPyramid: { citation: "Wilson, 2016. Visualising the demographic factors which shape population age structure. Demographic Research.", href: "https://doi.org/10.4054/DemRes.2016.35.29" },
 } satisfies Record<string, PlotReference>;
 
 const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
@@ -1442,19 +1619,80 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     origin: "Krzywinski 等人在 2009 年创建 Circos 来展示比较基因组和结构变异；圆内连带只是它众多轨道中的一种。",
     references: [plotReferences.circos],
   },
+  pie: {
+    definition: "把互斥类别占总量的比例映射为圆形扇区的角度与面积。所有扇区共同构成一个整体。",
+    suitableData: "单一总体中的非负计数、构成比或资源份额，类别应互斥且数量较少。",
+    answers: "每个类别占总量多少，以及少数主要部分如何构成整体。精确比较多个相近比例时应优先使用柱状图。",
+    origin: "William Playfair 在 1801 年出版的统计图集中使用圆形分区图。现代饼图由此发展，但面积和角度的比较精度低于共同基线上的长度。",
+    references: [plotReferences.pie, plotReferences.graphicalPerception],
+  },
+  donut: {
+    definition: "在饼图中心留出空白的环形组成图。扇区仍编码整体中的份额，中心用于显示总量而不是第二个变量。",
+    suitableData: "与饼图相同的互斥非负组成数据，适合需要在中心明确显示总量的紧凑版式。",
+    answers: "整体由哪些部分构成以及总量是多少。中心孔不会提高相近比例的比较精度。",
+    references: [plotReferences.pie, plotReferences.graphicalPerception],
+  },
+  rose: {
+    definition: "把类别分成等角扇区，以扇区面积编码每一项的数值，因此半径按数值平方根缩放。它比较周期或类别强度，不要求各项相加为整体。",
+    suitableData: "按时间、方向或阶段排列的非负数值，尤其适合周期模式和同权类别的强度比较。",
+    answers: "哪些方向或周期阶段更高，整体轮廓是否呈现集中、偏向或季节性。不要把扇区解释为构成比例。",
+    origin: "Florence Nightingale 在 1858 年用极坐标面积图呈现不同死因随月份的变化，使这种图形常被称为 Nightingale rose。",
+    references: [plotReferences.nightingale, plotReferences.graphicalPerception],
+  },
+  waffle: {
+    definition: "把总量离散成固定数量的小格，再按比例分配给各类别，是对组成比例的近似计数式表达。",
+    suitableData: "互斥非负组成数据，适合面向非技术受众展示直观百分比。",
+    answers: "每 100 个单位中大约有多少属于各类别。小份额会受到网格取整影响，精确值应结合标签。",
+    references: [plotReferences.graphicalPerception, plotReferences.pie],
+  },
+  treemap: {
+    definition: "用嵌套矩形表示树状层级，叶节点面积编码数值，父节点面积由后代汇总。",
+    suitableData: "具有单一根节点、明确父子关系和非负叶节点数值的层级组成数据。",
+    answers: "总量在多个层级如何分配，哪些分支和叶节点占据主要份额。细长矩形不适合精确比较。",
+    origin: "Ben Shneiderman 在 1990 年代初提出 tree-map，用二维空间填充方式浏览大型层级文件结构。",
+    references: [plotReferences.treemap, plotReferences.graphicalPerception],
+  },
+  sunburst: {
+    definition: "以同心环表示树的深度，父节点扇区沿径向向外展开为子节点，角度编码后代份额。",
+    suitableData: "具有单一根节点、明确父子关系和非负叶节点数值的层级组成数据。",
+    answers: "层级路径如何从根部向外展开，各分支在不同深度的相对份额是多少。层级过深时标签会变得拥挤。",
+    origin: "Sunburst 属于径向空间填充层级图。Stasko 与 Zhang 在 2000 年系统研究了这类图的聚焦与导航方法。",
+    references: [plotReferences.sunburst, plotReferences.graphicalPerception],
+  },
+  radar: {
+    definition: "把多个可比较指标放在从同一中心放射的轴上，并连接同一对象的数值形成多边形轮廓。",
+    suitableData: "至少三个方向一致、量纲可比或已标准化的指标。每个系列必须包含相同指标集合。",
+    answers: "对象的多维特征轮廓是否均衡，优势和短板集中在哪些指标。多边形面积不应被当作统计量。",
+    origin: "Kiviat figure 在 1970 年代的软件性能分析中用于同时观察多个指标，后来发展为常见的雷达图。",
+    references: [plotReferences.radar, plotReferences.graphicalPerception],
+  },
+  "polar-profile": {
+    definition: "把有自然循环顺序的测量放在角度轴上，以半径编码数值并连接为闭合曲线。它强调周期轨迹，不是组成图。",
+    suitableData: "昼夜、季节、方向、细胞周期阶段等循环顺序数据，各系列应具有相同的角度类别。",
+    answers: "峰值出现在周期的哪个位置，不同系列的相位、振幅和轮廓是否不同。",
+    references: [plotReferences.radar, plotReferences.graphicalPerception],
+  },
+  "population-pyramid": {
+    definition: "把两个群体在同一组有序区间上的非负分布分别镜像到中心线两侧，以共同尺度比较形状。",
+    suitableData: "恰好两个群体在年龄、分期、剂量区间或其他有序类别中的计数或比例。",
+    answers: "两个群体的分布形状、峰值区间和结构差异在哪里。镜像方向是布局，不代表数值为负。",
+    origin: "人口学长期使用按年龄和性别镜像排列的条形分布来读取人口结构，后来扩展到其他两组有序分布比较。",
+    references: [plotReferences.populationPyramid, plotReferences.graphicalPerception],
+  },
 };
 
 const advancedRendererIds = new Set<PlotType>([
   "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
   "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
+  "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
 const commonSettingKeys: Array<keyof VisualizationSettings> = [
   "title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize",
   "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ];
-const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"]);
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
@@ -1471,6 +1709,22 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   "correlation-heatmap": ["correlationMethod", "clusterRows", "clusterColumns", "divergingLow", "divergingMid", "divergingHigh"],
   enrichment: ["continuousLow", "continuousHigh"], "enrichment-bar": ["continuousLow", "continuousHigh"],
   km: ["showRiskTable"], "survival-forest": ["forestReferenceValue"],
+  pie: ["compositionLabelMode"], donut: ["compositionLabelMode", "donutHole"], waffle: ["compositionLabelMode", "waffleCells"],
+  rose: ["compositionLabelMode", "radialMaximum"], treemap: ["compositionLabelMode", "hierarchyGap"], sunburst: ["compositionLabelMode", "hierarchyGap"],
+  radar: ["radarFillOpacity", "radialMaximum"], "polar-profile": ["radarFillOpacity", "radialMaximum"],
+  "population-pyramid": ["pyramidDisplayMode"],
+};
+
+const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof VisualizationSettings>>> = {
+  pie: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode"]),
+  donut: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "donutHole"]),
+  waffle: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "waffleCells"]),
+  rose: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "gridLineWidth", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "radialMaximum"]),
+  treemap: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "compositionLabelMode", "hierarchyGap"]),
+  sunburst: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "hierarchyGap"]),
+  radar: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "radarFillOpacity", "radialMaximum"]),
+  "polar-profile": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "radarFillOpacity", "radialMaximum"]),
+  "population-pyramid": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "axisLineWidth", "opacity", "legendPosition", "categoricalColors", "pyramidDisplayMode"]),
 };
 
 function dataShapeFor(type: PlotType): PlotDataShape {
@@ -1478,12 +1732,13 @@ function dataShapeFor(type: PlotType): PlotDataShape {
   if (["pcoa", "umap"].includes(type)) return "coordinates";
   if (["venn", "upset"].includes(type)) return "sets";
   if (["sankey", "chord"].includes(type)) return "network";
+  if (["treemap", "sunburst"].includes(type)) return "hierarchy";
   if (type === "circos") return "genomic-links";
   return "long";
 }
 
 function numericAxesFor(type: PlotType): Array<"x" | "y"> {
-  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"].includes(type)) return [];
+  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
   if (["enrichment", "enrichment-bar", "survival-forest"].includes(type)) return ["x"];
   if (["box", "violin", "beeswarm", "raincloud", "errorbar", "lollipop"].includes(type)) return ["y"];
   if (type === "bar") return ["x", "y"];
@@ -1515,7 +1770,7 @@ const plotModuleSeeds: Array<PlotModuleSeed<PlotType, keyof VisualizationSetting
   capabilities: {
     dataShape: dataShapeFor(definition.id),
     numericAxes: numericAxesFor(definition.id),
-    settingKeys: [
+    settingKeys: newAxislessSettingKeys[definition.id] ? [...newAxislessSettingKeys[definition.id]!] : [
       ...commonSettingKeys,
       ...(numericAxesFor(definition.id).includes("x") ? ["xMin" as const, "xMax" as const] : []),
       ...(numericAxesFor(definition.id).includes("y") ? ["yMin" as const, "yMax" as const] : []),
@@ -1671,6 +1926,10 @@ const mappingAliases: Record<string, string[]> = {
   targetChr: ["targetchr", "chr2", "chromosome2"],
   targetStart: ["targetstart", "start2"],
   targetEnd: ["targetend", "end2"],
+  node: ["node", "name", "label", "id"],
+  parent: ["parent", "parentnode", "parentid"],
+  feature: ["feature", "metric", "dimension", "axis"],
+  angle: ["angle", "phase", "time", "direction", "category"],
 };
 
 function normalizeMappingName(value: string) {
@@ -1734,6 +1993,10 @@ export function validatePlotDataset(
       }).length;
       if (invalidCount > 0) errors.push(`${role.label} contains ${invalidCount} non-numeric or blank value${invalidCount === 1 ? "" : "s"}.`);
     }
+    if (column && role.required && role.kind !== "number") {
+      const blankCount = dataset.rows.filter((row) => !row[column]?.trim()).length;
+      if (blankCount > 0) errors.push(`${role.label} contains ${blankCount} blank value${blankCount === 1 ? "" : "s"}.`);
+    }
   });
 
   if (["volcano", "ma", "enrichment", "enrichment-bar"].includes(definition.id) && mapping.pValue) {
@@ -1745,6 +2008,123 @@ export function validatePlotDataset(
         }).length
       : 0;
     if (invalidP > 0) errors.push(`Adjusted P value contains ${invalidP} value${invalidP === 1 ? "" : "s"} outside (0, 1].`);
+  }
+
+  if (["pie", "donut", "waffle", "rose"].includes(definition.id) && mapping.value) {
+    const values = dataset.rows.map((row) => parseNumericValue(row[mapping.value]) ?? 0);
+    const negative = values.filter((value) => value < 0).length;
+    if (negative > 0) errors.push(`${definition.name} requires non-negative values; detected ${negative} negative value${negative === 1 ? "" : "s"}.`);
+    if (values.reduce((sum, value) => sum + value, 0) <= 0) errors.push(`${definition.name} requires a positive displayed total.`);
+    const categoryCount = mapping.category ? new Set(dataset.rows.map((row) => row[mapping.category]).filter(Boolean)).size : 0;
+    if (mapping.category && categoryCount !== dataset.rows.length) errors.push(`${definition.name} requires one row per unique category.`);
+    if (categoryCount > 12) errors.push(`${definition.name} is limited to 12 categories so every exported category remains identifiable; aggregate small parts or use a sorted bar chart.`);
+    if (definition.id === "rose" && settings?.radialMaximum !== null && settings?.radialMaximum !== undefined) {
+      if (settings.radialMaximum <= 0) errors.push("Radial maximum must be positive or left on Auto.");
+      else if (values.some((value) => value > settings.radialMaximum!)) warnings.push("The manual radial maximum clips one or more rose sectors.");
+    }
+  }
+
+  if (["treemap", "sunburst"].includes(definition.id) && mapping.node && mapping.value) {
+    const nodes = dataset.rows.map((row) => row[mapping.node]?.trim()).filter(Boolean);
+    const nodeSet = new Set(nodes);
+    if (nodeSet.size !== nodes.length) errors.push("Hierarchy node labels must be unique.");
+    const roots = dataset.rows.filter((row) => !mapping.parent || !row[mapping.parent]?.trim());
+    if (roots.length !== 1) errors.push(`Hierarchy data require exactly one blank-parent root; detected ${roots.length}.`);
+    if (roots.length === 1) {
+      const expectedRootBlankWarning = warnings.indexOf("1 blank cell detected.");
+      if (expectedRootBlankWarning >= 0) warnings.splice(expectedRootBlankWarning, 1);
+      if (definition.id === "sunburst" && mapping.parent) {
+        const rootName = roots[0][mapping.node]?.trim();
+        const topLevelCount = dataset.rows.filter((row) => row[mapping.parent]?.trim() === rootName).length;
+        if (topLevelCount > 12) errors.push("Sunburst is limited to 12 top-level branches so every exported branch remains identifiable; combine small branches or use a treemap.");
+      }
+    }
+    const missingParents = dataset.rows.filter((row) => {
+      const parent = mapping.parent ? row[mapping.parent]?.trim() : "";
+      return Boolean(parent) && !nodeSet.has(parent);
+    }).length;
+    if (missingParents > 0) errors.push(`${missingParents} hierarchy node${missingParents === 1 ? " references" : "s reference"} a missing parent.`);
+    const selfParents = dataset.rows.filter((row) => mapping.parent && row[mapping.node]?.trim() === row[mapping.parent]?.trim()).length;
+    if (selfParents > 0) errors.push(`${selfParents} hierarchy node${selfParents === 1 ? " is" : "s are"} its own parent.`);
+    const negative = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) < 0).length;
+    if (negative > 0) errors.push(`Hierarchy leaf values must be non-negative; detected ${negative} negative value${negative === 1 ? "" : "s"}.`);
+    const parents = new Set(dataset.rows.map((row) => mapping.parent ? row[mapping.parent]?.trim() : "").filter(Boolean));
+    const internalValues = dataset.rows.filter((row) => parents.has(row[mapping.node]?.trim()) && (parseNumericValue(row[mapping.value]) ?? 0) !== 0).length;
+    if (internalValues > 0) errors.push(`${internalValues} internal hierarchy node${internalValues === 1 ? " has" : "s have"} a non-zero value; enter values on leaves only.`);
+    if (mapping.parent && roots.length === 1) {
+      const rootName = roots[0][mapping.node]?.trim();
+      const parentByNode = new Map(dataset.rows.map((row) => [row[mapping.node]?.trim(), row[mapping.parent]?.trim()]));
+      let cycleCount = 0;
+      let disconnectedCount = 0;
+      for (const node of nodes) {
+        const visited = new Set<string>();
+        let cursor = node;
+        while (cursor && cursor !== rootName) {
+          if (visited.has(cursor)) { cycleCount += 1; break; }
+          visited.add(cursor);
+          cursor = parentByNode.get(cursor) ?? "";
+        }
+        if (cursor !== rootName && ![...visited].some((visitedNode) => parentByNode.get(visitedNode) && !nodeSet.has(parentByNode.get(visitedNode)!))) disconnectedCount += 1;
+      }
+      if (cycleCount > 0) errors.push("Hierarchy parent relationships contain a cycle.");
+      else if (disconnectedCount > 0 && missingParents === 0) errors.push(`${disconnectedCount} hierarchy node${disconnectedCount === 1 ? " is" : "s are"} disconnected from the root.`);
+    }
+    const leafTotal = dataset.rows.filter((row) => !parents.has(row[mapping.node]?.trim())).reduce((sum, row) => sum + (parseNumericValue(row[mapping.value]) ?? 0), 0);
+    if (leafTotal <= 0) errors.push("Hierarchy data require a positive total across leaf nodes.");
+    if (dataset.rows.length > 80) warnings.push(`${definition.name} has ${dataset.rows.length} nodes; labels may be dense in a compact export.`);
+  }
+
+  if (["radar", "polar-profile"].includes(definition.id) && mapping.value) {
+    const categoryRole = definition.id === "radar" ? "feature" : "angle";
+    const categoryColumn = mapping[categoryRole];
+    const seriesColumn = mapping.series;
+    const series = [...new Set(dataset.rows.map((row) => seriesColumn ? row[seriesColumn] || "All" : "All"))];
+    const referenceCategories = categoryColumn ? [...new Set(dataset.rows.filter((row) => (seriesColumn ? row[seriesColumn] || "All" : "All") === series[0]).map((row) => row[categoryColumn]))] : [];
+    if (referenceCategories.length < 3) errors.push(`${definition.name} requires at least three ${definition.id === "radar" ? "features" : "ordered angle categories"}.`);
+    for (const currentSeries of series.slice(1)) {
+      const categories = categoryColumn ? new Set(dataset.rows.filter((row) => (seriesColumn ? row[seriesColumn] || "All" : "All") === currentSeries).map((row) => row[categoryColumn])) : new Set<string>();
+      if (categories.size !== referenceCategories.length || referenceCategories.some((category) => !categories.has(category))) {
+        errors.push(`Every ${definition.name} series must contain the same category set.`);
+        break;
+      }
+      if (definition.id === "polar-profile" && categoryColumn) {
+        const orderedCategories = dataset.rows.filter((row) => (seriesColumn ? row[seriesColumn] || "All" : "All") === currentSeries).map((row) => row[categoryColumn]);
+        if (orderedCategories.some((category, index) => category !== referenceCategories[index])) {
+          errors.push("Every Polar profile series must use the same category order.");
+          break;
+        }
+      }
+    }
+    const duplicates = new Set<string>();
+    const seen = new Set<string>();
+    dataset.rows.forEach((row) => {
+      const key = `${seriesColumn ? row[seriesColumn] || "All" : "All"}\u0000${categoryColumn ? row[categoryColumn] : ""}`;
+      if (seen.has(key)) duplicates.add(key); else seen.add(key);
+    });
+    if (duplicates.size > 0) errors.push(`${definition.name} requires one value per category and series; detected ${duplicates.size} duplicate pair${duplicates.size === 1 ? "" : "s"}.`);
+    const negative = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) < 0).length;
+    if (negative > 0) errors.push(`${definition.name} radial values must be non-negative; detected ${negative} negative value${negative === 1 ? "" : "s"}.`);
+    if (series.length > 5) warnings.push(`${definition.name} overlays ${series.length} series; use facets or fewer series to avoid occlusion.`);
+    if (settings?.radialMaximum !== null && settings?.radialMaximum !== undefined) {
+      if (settings.radialMaximum <= 0) errors.push("Radial maximum must be positive or left on Auto.");
+      else if (dataset.rows.some((row) => (parseNumericValue(row[mapping.value]) ?? 0) > settings.radialMaximum!)) warnings.push(`The manual radial maximum clips one or more ${definition.name} values.`);
+    }
+  }
+
+  if (definition.id === "population-pyramid" && mapping.category && mapping.value && mapping.group) {
+    const groups = [...new Set(dataset.rows.map((row) => row[mapping.group]).filter(Boolean))];
+    if (groups.length !== 2) errors.push(`Population pyramids require exactly two groups; detected ${groups.length}.`);
+    const negative = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) < 0).length;
+    if (negative > 0) errors.push(`Population-pyramid inputs must be non-negative; detected ${negative} negative value${negative === 1 ? "" : "s"}.`);
+    const pairs = dataset.rows.map((row) => `${row[mapping.category]}\u0000${row[mapping.group]}`);
+    if (new Set(pairs).size !== pairs.length) errors.push("Population pyramids require one value per category and group pair.");
+    const categories = [...new Set(dataset.rows.map((row) => row[mapping.category]).filter(Boolean))];
+    if (groups.length === 2 && categories.some((category) => groups.some((group) => !dataset.rows.some((row) => row[mapping.category] === category && row[mapping.group] === group)))) {
+      errors.push("Every population-pyramid category must contain both groups.");
+    }
+    if (groups.some((group) => dataset.rows.filter((row) => row[mapping.group] === group).reduce((sum, row) => sum + (parseNumericValue(row[mapping.value]) ?? 0), 0) <= 0)) {
+      errors.push("Each population-pyramid group requires a positive displayed total.");
+    }
   }
 
   if (definition.id === "bar" || definition.id === "line" || definition.id === "errorbar") {

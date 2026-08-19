@@ -32,7 +32,7 @@ function seed(id: string, overrides: Partial<PlotModuleSeed> = {}): PlotModuleSe
     definition,
     guidance,
     renderer: "standard",
-    capabilities: { dataShape: "long" },
+    capabilities: { dataShape: "long", settingKeys: [] },
     ...overrides,
   };
 }
@@ -46,6 +46,7 @@ describe("plot-module registry interface", () => {
     expect(plotModule.definition.id).toBe("bar");
     expect(plotModule.guidance).toEqual(guidance);
     expect(plotModule.renderer).toBe("standard");
+    expect(plotModule.capabilities.settingKeys).toEqual([]);
     expect(plotModule.examples).toEqual([
       {
         label: "Example 1",
@@ -60,8 +61,10 @@ describe("plot-module registry interface", () => {
 
   it("rejects duplicate identifiers and incomplete registrations", () => {
     expect(() => createPlotModuleRegistry([seed("bar"), seed("bar")])).toThrow(/duplicate.*bar/i);
-    expect(() => createPlotModuleRegistry([seed("bar", { guidance: undefined as never })])).toThrow(/guidance.*bar/i);
-    expect(() => createPlotModuleRegistry([seed("bar", { renderer: undefined as never })])).toThrow(/renderer.*bar/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { guidance: undefined as never })])).toThrow(/bar.*guidance\.definition/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { renderer: undefined as never })])).toThrow(/bar.*renderer/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { definition: { ...seed("bar").definition, summary: "" } })])).toThrow(/bar.*definition\.summary/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { capabilities: { dataShape: "long", settingKeys: undefined as never } })])).toThrow(/bar.*setting keys/i);
   });
 
   it("reports unknown plot modules instead of silently selecting another chart", () => {
@@ -77,8 +80,10 @@ describe("plot-module registry interface", () => {
       expect(plotModule.guidance.references.length).toBeGreaterThan(0);
       expect(["standard", "advanced"]).toContain(plotModule.renderer);
       expect(plotModule.capabilities.dataShape).toBeTruthy();
+      expect(plotModule.capabilities.settingKeys).toContain("width");
     });
     expect(getPlotModule("bar").renderer).toBe("standard");
+    expect(getPlotModule("bar").capabilities.settingKeys).toContain("barBorderWidth");
     expect(getPlotModule("circos").renderer).toBe("advanced");
   });
 });

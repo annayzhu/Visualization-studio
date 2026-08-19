@@ -4,6 +4,7 @@ import {
   categoricalColorForIndex,
   boxStatistics,
   confidenceInterval95,
+  compactLegendLabel,
   covarianceEllipsePoints,
   defaultVisualizationPaletteSeriesId,
   defaultVisualizationSettings,
@@ -23,6 +24,8 @@ import {
   loessSmooth,
   meanErrorStatistics,
   numericExtent,
+  ordinationLoadingLayout,
+  ordinationLegendLayout,
   parseDelimitedData,
   parseRatioValue,
   polynomialRegression,
@@ -105,11 +108,11 @@ describe("Visualization Studio data contracts", () => {
   it("ships every requested first-batch plot type with a sample data contract", () => {
     const requested = [
       "scatter", "correlation", "volcano", "ma", "quadrant", "bar", "errorbar", "line", "area", "lollipop",
-      "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "clustered-heatmap", "correlation-heatmap", "pca", "pcoa", "umap",
+      "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "clustered-heatmap", "correlation-heatmap", "pca", "pcoa", "umap", "tsne", "nmds",
       "enrichment", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn", "upset", "sankey", "chord", "circos",
       "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
     ];
-    expect(plotDefinitions).toHaveLength(43);
+    expect(plotDefinitions).toHaveLength(45);
     expect(requested.every((id) => plotDefinitions.some((definition) => definition.id === id && definition.sampleData.length > 20))).toBe(true);
     plotDefinitions.forEach((definition) => {
       const examples = getPlotExamples(definition);
@@ -123,12 +126,17 @@ describe("Visualization Studio data contracts", () => {
 
   it("uses representative demo sizes for dense scientific plots", () => {
     const umap = parseDelimitedData(getPlotDefinition("umap").sampleData);
+    const tsne = parseDelimitedData(getPlotDefinition("tsne").sampleData);
+    const nmds = parseDelimitedData(getPlotDefinition("nmds").sampleData);
     const gsea = parseDelimitedData(getPlotDefinition("gsea").sampleData);
     const survival = parseDelimitedData(getPlotDefinition("km").sampleData);
     const roc = parseDelimitedData(getPlotDefinition("roc").sampleData);
     const heatmap = parseDelimitedData(getPlotDefinition("heatmap").sampleData);
     expect(umap.rows.length).toBeGreaterThanOrEqual(60);
     expect(new Set(umap.rows.map((row) => row.group)).size).toBe(3);
+    expect(tsne.rows.length).toBeGreaterThanOrEqual(40);
+    expect(nmds.rows.length).toBeGreaterThanOrEqual(40);
+    expect(tsne.headers).toEqual(expect.arrayContaining(["dim1", "dim2", "dim3", "group", "shape"]));
     expect(gsea.rows).toHaveLength(100);
     expect(Number(gsea.rows[0].runningES)).toBeCloseTo(0, 1);
     expect(Number(gsea.rows.at(-1)?.runningES)).toBe(0);
@@ -141,6 +149,89 @@ describe("Visualization Studio data contracts", () => {
     expect(new Set(roc.rows.map((row) => row.model))).toEqual(new Set(["Model A", "Model B"]));
     expect(heatmap.rows).toHaveLength(24);
     expect(heatmap.headers).toHaveLength(13);
+  });
+
+  it("validates ordination overlays, upstream metadata, and 3D contracts", () => {
+    const pcoa = getPlotDefinition("pcoa");
+    const dataset = parseDelimitedData(pcoa.sampleData);
+    const mapping = pcoa.defaultMapping;
+    expect(validatePlotDataset(pcoa, dataset, { ...mapping, z: "" }, { ...defaultVisualizationSettings, ordinationView: "3d" }).errors.join(" ")).toMatch(/third coordinate/);
+    expect(validatePlotDataset(pcoa, dataset, { ...mapping, y: "dim1" }, defaultVisualizationSettings).errors.join(" ")).toMatch(/different coordinate column/);
+    expect(validatePlotDataset(pcoa, dataset, mapping, { ...defaultVisualizationSettings, ordinationXVariance: 45 }).errors.join(" ")).toMatch(/every displayed PCoA coordinate/);
+    expect(validatePlotDataset(pcoa, dataset, mapping, { ...defaultVisualizationSettings, ordinationXVariance: 70, ordinationYVariance: 40 }).errors.join(" ")).toMatch(/sum to more than 100/);
+    const remappedVariance = validatePlotDataset(pcoa, dataset, { ...mapping, x: "dim3", y: "dim1" }, { ...defaultVisualizationSettings, ordinationXVariance: 41.2, ordinationZVariance: 11.3 });
+    expect(remappedVariance.errors).toEqual([]);
+    expect(validatePlotDataset(pcoa, dataset, mapping, { ...defaultVisualizationSettings, ordinationPermanovaR2: 0.24 }).errors.join(" ")).toMatch(/requires R², P value, and permutation count/);
+    const validPermanova = validatePlotDataset(pcoa, dataset, mapping, { ...defaultVisualizationSettings, ordinationPermanovaR2: 0.24, ordinationPermanovaP: 0.013, ordinationPermanovaPermutations: 999, ordinationMethodNote: "Bray-Curtis; group; unrestricted permutations" });
+    expect(validPermanova.errors).toEqual([]);
+    expect(validPermanova.warnings.join(" ")).toMatch(/displayed as supplied/);
+    expect(validatePlotDataset(pcoa, dataset, mapping, { ...defaultVisualizationSettings, ordinationPermanovaR2: 0.24, ordinationPermanovaP: 0.013, ordinationPermanovaPermutations: 999 }).errors.join(" ")).toMatch(/method note/);
+
+    const oneGroup = parseDelimitedData("dim1\tdim2\tdim3\tgroup\tsample\n0\t0\t0\tOnly\tS1\n1\t1\t1\tOnly\tS2\n2\t2\t2\tOnly\tS3");
+    expect(validatePlotDataset(pcoa, oneGroup, mapping, { ...defaultVisualizationSettings, ordinationPermanovaR2: 0.2, ordinationPermanovaP: 0.03, ordinationPermanovaPermutations: 999, ordinationMethodNote: "Euclidean; group; unrestricted permutations" }).errors.join(" ")).toMatch(/at least two non-empty levels/);
+
+    const noGroup = validatePlotDataset(pcoa, dataset, { ...mapping, group: "" }, { ...defaultVisualizationSettings, ordinationShowEllipse: true });
+    expect(noGroup.errors.join(" ")).toMatch(/Map a group column/);
+    const tooManyShapes = parseDelimitedData("dim1\tdim2\tdim3\tgroup\tshape\tsample\n0\t0\t0\tG\tA\tS1\n1\t0\t0\tG\tB\tS2\n0\t1\t0\tG\tC\tS3\n1\t1\t1\tG\tD\tS4\n2\t1\t1\tG\tE\tS5");
+    expect(validatePlotDataset(pcoa, tooManyShapes, mapping, { ...defaultVisualizationSettings, ordinationUseShapes: true }).errors.join(" ")).toMatch(/at most four distinct shapes/);
+
+    const nmds = getPlotDefinition("nmds");
+    expect(validatePlotDataset(nmds, parseDelimitedData(nmds.sampleData), nmds.defaultMapping, { ...defaultVisualizationSettings, ordinationStress: -0.1 }).errors.join(" ")).toMatch(/stress must be non-negative/);
+
+    const pca = getPlotDefinition("pca");
+    const pcaDataset = { ...parseDelimitedData("sample\tgroup\tPC1\tPC2\nS1\tA\t1\t2\nS2\tB\t2\t1"), analysis: { pca: { explainedVariance: [0.7, 0.3], loadings: [] } } };
+    const hiddenLayerSettings = { ...defaultVisualizationSettings, ordinationView: "scree" as const, ordinationShowEllipse: true, ordinationShowHull: true, ordinationUseShapes: true, ordinationPermanovaR2: 4, ordinationPermanovaP: -1, ordinationPermanovaPermutations: -5 };
+    expect(validatePlotDataset(pca, pcaDataset, {}, hiddenLayerSettings).errors).toEqual([]);
+    const loadingDataset = { ...pcaDataset, analysis: { pca: { explainedVariance: [0.7, 0.3], loadings: [{ feature: "A", coordinates: [-0.8, 0.4] }] } } };
+    expect(validatePlotDataset(pca, loadingDataset, { x: "PC1", y: "PC2", group: "group", label: "sample" }, { ...defaultVisualizationSettings, ordinationShowLoadings: true, xMin: -0.1, xMax: 10 }).errors.join(" ")).toMatch(/every visible arrow and label/);
+    expect(validatePlotDataset(pca, loadingDataset, { x: "PC1", y: "PC2", group: "group", label: "sample" }, { ...defaultVisualizationSettings, ordinationShowLoadings: true, xMin: -4, xMax: 6 }).errors).toEqual([]);
+    const annotatedOverlayDataset = {
+      ...parseDelimitedData("sample\tgroup\tPC1\tPC2\nA1\tA\t1.0\t1.0\nA2\tA\t1.3\t1.2\nA3\tA\t0.8\t1.4\nB1\tB\t2.0\t2.0\nB2\tB\t2.4\t2.1\nB3\tB\t1.9\t2.5"),
+      analysis: { pca: { explainedVariance: [0.7, 0.3], loadings: [{ feature: "LongFeatureName", coordinates: [0.2, -0.9] }] } },
+    };
+    const annotatedOverlaySettings = {
+      ...defaultVisualizationSettings,
+      ordinationShowLoadings: true,
+      ordinationShowEllipse: true,
+      ordinationPermanovaR2: 0.21,
+      ordinationPermanovaP: 0.012,
+      ordinationPermanovaPermutations: 999,
+      ordinationMethodNote: "Euclidean distance; group tested with cohort strata and restricted permutations",
+      yMin: -0.001,
+    };
+    const annotatedMapping = { x: "PC1", y: "PC2", group: "group", label: "sample" };
+    expect(validatePlotDataset(pca, annotatedOverlayDataset, annotatedMapping, annotatedOverlaySettings).errors.join(" ")).toMatch(/final annotated plot/);
+    expect(ordinationLoadingLayout(annotatedOverlayDataset, annotatedMapping, annotatedOverlaySettings).minimumArrowLength).toBeLessThan(2);
+    const safeAnnotatedSettings = { ...annotatedOverlaySettings, yMin: -4, yMax: 6 };
+    expect(validatePlotDataset(pca, annotatedOverlayDataset, annotatedMapping, safeAnnotatedSettings).errors).toEqual([]);
+    expect(ordinationLoadingLayout(annotatedOverlayDataset, annotatedMapping, safeAnnotatedSettings).minimumArrowLength).toBeGreaterThanOrEqual(2);
+    const crowdedLegendData = parseDelimitedData(`dim1\tdim2\tgroup\tshape\tsample\n${Array.from({ length: 12 }, (_, index) => `${index}\t${index % 3}\tG${index + 1}\tShape${index % 4 + 1}\tS${index + 1}`).join("\n")}`);
+    const crowdedLegendMapping = { x: "dim1", y: "dim2", group: "group", shape: "shape", label: "sample" };
+    const crowdedLegendSettings = { ...defaultVisualizationSettings, ordinationMethodNote: "Long upstream annotation describing distance transformation normalization and reproducible coordinate generation" };
+    expect(ordinationLegendLayout("pcoa", crowdedLegendSettings, 12, 4).fits).toBe(false);
+    expect(compactLegendLabel("ExtremelyWideGroupName", 11, 90, 24)).toMatch(/^.{2,}…$/);
+    expect(validatePlotDataset(pcoa, crowdedLegendData, crowdedLegendMapping, crowdedLegendSettings).errors.join(" ")).toMatch(/combined ordination color and shape legends/);
+    const tallLegendSettings = { ...crowdedLegendSettings, height: 640 };
+    expect(ordinationLegendLayout("pcoa", tallLegendSettings, 12, 4).fits).toBe(true);
+    expect(validatePlotDataset(pcoa, crowdedLegendData, crowdedLegendMapping, tallLegendSettings).errors).toEqual([]);
+    const manyGroupRows = Array.from({ length: 13 }, (_, index) => ({ sample: `S${index + 1}`, group: `G${index + 1}`, PC1: String(index), PC2: String(index % 3) }));
+    expect(validatePlotDataset(pca, { ...pcaDataset, rows: manyGroupRows }, { group: "group" }, hiddenLayerSettings).errors).toEqual([]);
+
+    const nmdsWithStress = parseDelimitedData(nmds.sampleData);
+    expect(validatePlotDataset(nmds, nmdsWithStress, nmds.defaultMapping, { ...defaultVisualizationSettings, ordinationStress: 0.12 }).errors.join(" ")).toMatch(/stress requires a method note/);
+    expect(validatePlotDataset(nmds, nmdsWithStress, nmds.defaultMapping, { ...defaultVisualizationSettings, ordinationStress: 0.12, ordinationMethodNote: "Kruskal stress-1; Bray-Curtis; k=2; converged" }).errors).toEqual([]);
+  });
+
+  it("preserves precomputed embedding coordinates verbatim", () => {
+    for (const type of ["pcoa", "umap", "tsne", "nmds"] as const) {
+      const definition = getPlotDefinition(type);
+      const firstInputRow = definition.sampleData.split("\n")[1].split("\t");
+      const dataset = parseDelimitedData(definition.sampleData);
+      expect(dataset.analysis).toBeUndefined();
+      expect(dataset.rows[0].dim1).toBe(firstInputRow[1]);
+      expect(dataset.rows[0].dim2).toBe(firstInputRow[2]);
+      expect(dataset.rows[0].dim3).toBe(firstInputRow[3]);
+    }
   });
 
   it("shows all four Chai-dyed Brown categorical colors in the default bar demo", () => {

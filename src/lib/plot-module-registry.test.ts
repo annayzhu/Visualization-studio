@@ -77,7 +77,7 @@ describe("plot-module registry interface", () => {
   });
 
   it("adapts all existing plots to the shared module contract", () => {
-    expect(plotModuleRegistry.list()).toHaveLength(40);
+    expect(plotModuleRegistry.list()).toHaveLength(43);
     plotModuleRegistry.list().forEach((plotModule) => {
       expect(plotModule.definition.id).toBeTruthy();
       expect(plotModule.examples.length).toBeGreaterThan(0);
@@ -98,6 +98,8 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("pointSize");
     expect(getPlotModule("radar").capabilities.settingKeys).toEqual(expect.arrayContaining(["gridLineWidth", "dataLineWidth", "pointSize"]));
     expect(getPlotModule("population-pyramid").capabilities.settingKeys).toContain("pyramidDisplayMode");
+    expect(getPlotModule("raincloud").capabilities.numericAxes).toEqual(["x", "y"]);
+    expect(getPlotModule("raincloud").capabilities.settingKeys).toEqual(expect.arrayContaining(["xMin", "xMax", "yMin", "yMax", "distributionOrientation"]));
   });
 
   it("infers exact and normalized aliases deterministically", () => {

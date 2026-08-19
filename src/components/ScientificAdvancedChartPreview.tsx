@@ -14,15 +14,18 @@ import {
 } from "@/lib/visualization-advanced";
 import {
   boxStatistics,
+  confidenceInterval95,
+  deterministicBeeswarmLayout,
+  deterministicHistogram,
   divergingColor,
   figureFontPresets,
   formatTick,
   getPlotDefinition,
-  groupNumericValues,
   interpolateColor,
   journalThemes,
   kernelDensityEstimate,
   linearRegression,
+  meanErrorStatistics,
   numericExtent,
   parseNumericValue,
   parseRatioValue,
@@ -50,7 +53,7 @@ const TEXT = "#23242A";
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   const noAxes = ["venn", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const labelHeavy = ["enrichment-bar", "survival-forest", "upset"].includes(type);
-  const hasLegend = !["beeswarm", "raincloud", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"].includes(type);
+  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"].includes(type);
   const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
   const left = noAxes ? 14 : labelHeavy ? Math.min(178, settings.width * 0.32) : 66;
@@ -197,28 +200,92 @@ function LollipopPlot({ frame, dataset, mapping, settings, colors, gridColor }: 
   </>;
 }
 
-function DistributionPlot({ type, frame, dataset, mapping, settings, colors, gridColor }: { type: "beeswarm" | "raincloud"; frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
-  const entries = [...groupNumericValues(dataset.rows, mapping.group, mapping.value).entries()];
-  const rawDomain = numericExtent(entries.flatMap(([, values]) => values));
-  const rawSpan = rawDomain[1] - rawDomain[0];
-  const densityBoundaryDomain: [number, number] = [rawDomain[0] - rawSpan, rawDomain[1] + rawSpan];
-  const densityCurves = new Map(entries.map(([group, values]) => [group, kernelDensityEstimate(values, densityBoundaryDomain, settings.violinBandwidth).points]));
-  const densitySupport = [...densityCurves.values()].flatMap((curve) => curve.map((point) => point.position));
-  const automaticYDomain = type === "raincloud" && densitySupport.length > 0 ? numericExtent(densitySupport) : rawDomain;
-  const yDomain = resolveAxisDomain(automaticYDomain, settings.yMin, settings.yMax);
-  const band = frame.plotWidth / Math.max(1, entries.length);
-  const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
-  const colorMap = palette(entries.map(([group]) => group), colors);
-  const categoryPositions = entries.map((_, index) => frame.left + band * (index + 0.5));
+type DistributionPlotType = "box" | "violin" | "beeswarm" | "raincloud" | "histogram" | "density" | "ridge";
+
+function DistributionPlot({ type, frame, dataset, mapping, settings, colors, gridColor }: { type: DistributionPlotType; frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
+  const facetFor = (row: Record<string, string>) => mapping.facet ? row[mapping.facet] || "All" : "All";
+  const facets = [...new Set(dataset.rows.map(facetFor))];
+  const lanes = facets.flatMap((facet) => [...new Set(dataset.rows.filter((row) => facetFor(row) === facet).map((row) => row[mapping.group] || "All"))].map((group) => ({
+    facet,
+    group,
+    key: `${facet}\u0000${group}`,
+    rows: dataset.rows.filter((row) => facetFor(row) === facet && (row[mapping.group] || "All") === group),
+  }))).map((lane) => ({ ...lane, values: lane.rows.flatMap((row) => { const value = parseNumericValue(row[mapping.value]); return value === null ? [] : [value]; }) }));
+  const rawValues = lanes.flatMap((lane) => lane.values);
+  const rawDomain = numericExtent(rawValues);
+  const rawSpan = Math.max(rawDomain[1] - rawDomain[0], 1e-9);
+  const densityBoundaryDomain: [number, number] = [rawDomain[0] - rawSpan * 0.16, rawDomain[1] + rawSpan * 0.16];
+  const densityCurves = new Map(lanes.map((lane) => [lane.key, kernelDensityEstimate(lane.values, densityBoundaryDomain, settings.violinBandwidth).points]));
+  const histograms = new Map(lanes.map((lane) => [lane.key, deterministicHistogram(lane.values, settings.histogramBins, rawDomain)]));
+  const maximumDensity = Math.max(...[...densityCurves.values()].flatMap((curve) => curve.map((point) => point.density)), 1e-9);
+  const maximumBinCount = Math.max(...[...histograms.values()].flatMap((bins) => bins.map((bin) => bin.count)), 1);
+  const uncertaintyExtent = settings.boxErrorType === "none" ? [] : lanes.flatMap((lane) => {
+    const summary = meanErrorStatistics(lane.values);
+    if (summary.n < 2) return [];
+    const margin = settings.boxErrorType === "sd" ? summary.sd : settings.boxErrorType === "sem" ? summary.sem : confidenceInterval95(lane.values).margin;
+    return [summary.mean - margin, summary.mean + margin];
+  });
+  const densityExtent = settings.showDensity ? [...densityCurves.values()].flatMap((curve) => curve.map((point) => point.position)) : [];
+  const automaticDomain = numericExtent([...rawValues, ...uncertaintyExtent, ...densityExtent]);
+  const horizontal = settings.distributionOrientation === "horizontal";
+  const valueDomain = horizontal ? resolveAxisDomain(automaticDomain, settings.xMin, settings.xMax) : resolveAxisDomain(automaticDomain, settings.yMin, settings.yMax);
+  const laneRange: [number, number] = horizontal ? [frame.top, frame.top + frame.plotHeight] : [frame.left, frame.left + frame.plotWidth];
+  const band = Math.abs(laneRange[1] - laneRange[0]) / Math.max(1, lanes.length);
+  const laneAt = (index: number) => laneRange[0] + band * (index + 0.5);
+  const valueAt = (value: number) => horizontal ? scaleLinear(value, valueDomain, [frame.left, frame.left + frame.plotWidth]) : scaleLinear(value, valueDomain, [frame.top + frame.plotHeight, frame.top]);
+  const colorMap = palette([...new Set(lanes.map((lane) => lane.group))], colors);
+  const lanePositions = lanes.map((_, index) => laneAt(index));
+  const axes = horizontal
+    ? <Axes frame={frame} settings={settings} xDomain={valueDomain} yDomain={[0, lanes.length]} xLabel={settings.xLabel || "Value"} yLabel={settings.yLabel || "Group"} gridColor={gridColor} hideYTicks categoryYPositions={lanePositions} />
+    : <Axes frame={frame} settings={settings} xDomain={[0, lanes.length]} yDomain={valueDomain} xLabel={settings.xLabel || "Group"} yLabel={settings.yLabel || "Value"} gridColor={gridColor} hideXTicks categoryXPositions={lanePositions} />;
+  const subjectPaths = settings.distributionShowPairedLines && mapping.subject ? [...new Set(dataset.rows.map((row) => row[mapping.subject]).filter(Boolean))].flatMap((subject) => facets.map((facet) => {
+    const points = lanes.map((lane, index) => {
+      if (lane.facet !== facet) return null;
+      const row = lane.rows.find((entry) => entry[mapping.subject] === subject); const value = parseNumericValue(row?.[mapping.value]);
+      return value === null ? null : horizontal ? [valueAt(value), laneAt(index)] : [laneAt(index), valueAt(value)];
+    }).filter((point): point is number[] => Boolean(point));
+    return points.length > 1 ? <polyline key={`${facet}-${subject}`} data-plot-element="paired-line" points={points.map((point) => point.join(",")).join(" ")} fill="none" stroke={TEXT} strokeWidth={Math.max(0.7, settings.dataLineWidth * 0.55)} strokeOpacity={0.28} /> : null;
+  })) : [];
+  const facetStarts = facets.slice(1).map((facet) => lanes.findIndex((lane) => lane.facet === facet)).filter((index) => index > 0);
+
   return <>
-    <Axes frame={frame} settings={settings} xDomain={[0, entries.length]} yDomain={yDomain} xLabel={settings.xLabel} yLabel={settings.yLabel || "Value"} gridColor={gridColor} hideXTicks categoryXPositions={categoryPositions} />
-    <g data-plot-data>
-    {entries.map(([group, values], groupIndex) => { const center = frame.left + band * (groupIndex + 0.5); const color = colorMap.get(group) ?? colors[0]; const stats = boxStatistics(values); const curve = densityCurves.get(group) ?? []; const maxDensity = Math.max(...curve.map((point) => point.density), 1e-9); return <g key={group}>
-      {type === "raincloud" ? <><polygon points={`${center + 3},${yAt(curve[0]?.position ?? 0)} ${curve.map((point) => `${center + 3 + point.density / maxDensity * band * 0.35},${yAt(point.position)}`).join(" ")} ${center + 3},${yAt(curve.at(-1)?.position ?? 0)}`} fill={color} fillOpacity={settings.opacity * 0.38} stroke={color} strokeWidth={settings.dataLineWidth * 0.7} /><line x1={center - band * 0.18} x2={center - band * 0.18} y1={yAt(stats.q1)} y2={yAt(stats.q3)} stroke={color} strokeWidth={5} /><line x1={center - band * 0.26} x2={center - band * 0.1} y1={yAt(stats.median)} y2={yAt(stats.median)} stroke={TEXT} strokeWidth={1.6} /></> : null}
-      {settings.showPoints ? values.map((value, index) => { const signed = ((index * 37) % 17 - 8) / 8; const spread = type === "raincloud" ? band * 0.13 : band * 0.3; return <circle key={index} cx={center + signed * spread - (type === "raincloud" ? band * 0.18 : 0)} cy={yAt(value)} r={settings.pointSize * 0.7} fill={color} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.5} />; }) : null}
-      <text x={center} y={frame.top + frame.plotHeight + 20} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{group.slice(0, 15)}</text>
-      {settings.showSampleSize ? <text x={center} y={frame.top + frame.plotHeight + 36} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize - 1}>n={values.length}</text> : null}
-    </g>; })}
+    {axes}
+    <g data-plot-data data-plot-family="distribution">
+      {facetStarts.map((index) => horizontal ? <line key={index} x1={frame.left} x2={frame.left + frame.plotWidth} y1={laneRange[0] + index * band} y2={laneRange[0] + index * band} stroke={gridColor} strokeWidth={1.2} /> : <line key={index} x1={laneRange[0] + index * band} x2={laneRange[0] + index * band} y1={frame.top} y2={frame.top + frame.plotHeight} stroke={gridColor} strokeWidth={1.2} />)}
+      {mapping.facet ? facets.map((facet) => { const indices = lanes.map((lane, index) => lane.facet === facet ? index : -1).filter((index) => index >= 0); const first = Math.min(...indices); const last = Math.max(...indices); return horizontal ? <text key={facet} data-plot-element="facet-label" x={frame.left + 4} y={laneAt(first) - band * 0.36} fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)} fontWeight={700}>{facet.slice(0, 16)}</text> : <text key={facet} data-plot-element="facet-label" x={(laneAt(first) + laneAt(last)) / 2} y={frame.top + 10} textAnchor="middle" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)} fontWeight={700}>{facet.slice(0, 16)}</text>; }) : null}
+      {settings.distributionShowSignificance && mapping.pValue ? facets.map((facet) => { const indices = lanes.map((lane, index) => lane.facet === facet ? index : -1).filter((index) => index >= 0); const first = Math.min(...indices); const last = Math.max(...indices); const value = dataset.rows.filter((row) => facetFor(row) === facet).map((row) => parseNumericValue(row[mapping.pValue])).find((entry): entry is number => entry !== null) ?? null; if (value === null) return null; const label = value <= settings.significanceThreshold ? `p=${formatTick(value)}` : "ns"; return horizontal ? <text key={facet} data-plot-element="significance-label" x={frame.left + frame.plotWidth - 2} y={(laneAt(first) + laneAt(last)) / 2 + 3} textAnchor="end" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>{label}</text> : <text key={facet} data-plot-element="significance-label" x={(laneAt(first) + laneAt(last)) / 2} y={frame.top + 24} textAnchor="middle" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>{label}</text>; }) : null}
+      {subjectPaths}
+      {lanes.map((lane, laneIndex) => {
+        const center = laneAt(laneIndex); const color = colorMap.get(lane.group) ?? colors[0]; const stats = boxStatistics(lane.values); const summary = meanErrorStatistics(lane.values);
+        const curve = densityCurves.get(lane.key) ?? []; const densityWidth = band * settings.violinWidth;
+        const symmetric = type !== "raincloud" && type !== "ridge";
+        const densityPoints = horizontal
+          ? [...curve.map((point) => `${valueAt(point.position)},${center - point.density / maximumDensity * densityWidth}`), ...(symmetric ? [...curve].reverse().map((point) => `${valueAt(point.position)},${center + point.density / maximumDensity * densityWidth}`) : [...curve].reverse().map((point) => `${valueAt(point.position)},${center}`))]
+          : [...curve.map((point) => `${center + point.density / maximumDensity * densityWidth},${valueAt(point.position)}`), ...(symmetric ? [...curve].reverse().map((point) => `${center - point.density / maximumDensity * densityWidth},${valueAt(point.position)}`) : [...curve].reverse().map((point) => `${center},${valueAt(point.position)}`))];
+        const bins = histograms.get(lane.key) ?? [];
+        const summaryValue = settings.distributionSummary === "mean" ? summary.mean : stats.median;
+        const margin = settings.boxErrorType === "sd" ? summary.sd : settings.boxErrorType === "sem" ? summary.sem : settings.boxErrorType === "ci95" ? confidenceInterval95(lane.values).margin : 0;
+        const basePointRadius = Math.max(2.1, settings.pointSize * 0.62);
+        const lanePointRadius = type === "beeswarm" ? Math.min(basePointRadius, Math.max(Number.EPSILON, band * 0.2)) : basePointRadius;
+        const laneBoundaryGap = Math.min(0.4, band * 0.05);
+        const maximumBeeswarmOffset = Math.max(0, band / 2 - lanePointRadius - laneBoundaryGap);
+        const beeswarmLayout = type === "beeswarm" ? deterministicBeeswarmLayout(lane.values.map(valueAt), lanePointRadius, maximumBeeswarmOffset) : null;
+        const pointRadius = beeswarmLayout?.pointRadius ?? basePointRadius;
+        const pointOffsets = beeswarmLayout?.offsets ?? lane.values.map((_, index) => (((index * 37) % 17) - 8) / 8 * band * 0.22);
+        return <g key={lane.key}>
+          {settings.showDensity && densityPoints.length > 2 ? <polygon data-plot-element="density" data-density-scale-maximum={maximumDensity} points={densityPoints.join(" ")} fill={color} fillOpacity={settings.opacity * 0.28} stroke={color} strokeWidth={settings.dataLineWidth} /> : null}
+          {settings.showHistogram ? bins.map((bin) => {
+            const frequencySize = bin.count / maximumBinCount * band * 0.68;
+            if (horizontal) return <rect key={bin.index} data-plot-element="histogram-bin" data-bin-count={bin.count} data-bin-scale-maximum={maximumBinCount} x={valueAt(bin.lower)} y={center - frequencySize / 2} width={Math.max(0.7, valueAt(bin.upper) - valueAt(bin.lower) - 0.6)} height={frequencySize} fill={color} fillOpacity={settings.opacity * 0.48} stroke={color} strokeWidth={0.5} />;
+            return <rect key={bin.index} data-plot-element="histogram-bin" data-bin-count={bin.count} data-bin-scale-maximum={maximumBinCount} x={center - frequencySize / 2} y={valueAt(bin.upper)} width={frequencySize} height={Math.max(0.7, valueAt(bin.lower) - valueAt(bin.upper) - 0.6)} fill={color} fillOpacity={settings.opacity * 0.48} stroke={color} strokeWidth={0.5} />;
+          }) : null}
+          {settings.showBox ? horizontal ? <g data-plot-element="box-layer"><line x1={valueAt(stats.low)} x2={valueAt(stats.high)} y1={center} y2={center} stroke={TEXT} strokeWidth={settings.dataLineWidth} /><rect x={valueAt(stats.q1)} y={center - band * 0.13} width={Math.max(1, valueAt(stats.q3) - valueAt(stats.q1))} height={band * 0.26} fill={color} fillOpacity={0.24} stroke={color} strokeWidth={settings.dataLineWidth} /><line x1={valueAt(stats.median)} x2={valueAt(stats.median)} y1={center - band * 0.13} y2={center + band * 0.13} stroke={TEXT} strokeWidth={settings.dataLineWidth} /></g> : <g data-plot-element="box-layer"><line x1={center} x2={center} y1={valueAt(stats.low)} y2={valueAt(stats.high)} stroke={TEXT} strokeWidth={settings.dataLineWidth} /><rect x={center - band * 0.13} y={valueAt(stats.q3)} width={band * 0.26} height={Math.max(1, valueAt(stats.q1) - valueAt(stats.q3))} fill={color} fillOpacity={0.24} stroke={color} strokeWidth={settings.dataLineWidth} /><line x1={center - band * 0.13} x2={center + band * 0.13} y1={valueAt(stats.median)} y2={valueAt(stats.median)} stroke={TEXT} strokeWidth={settings.dataLineWidth} /></g> : null}
+          {settings.distributionSummary !== "none" ? horizontal ? <line data-plot-element="center-summary" x1={valueAt(summaryValue)} x2={valueAt(summaryValue)} y1={center - band * 0.2} y2={center + band * 0.2} stroke={TEXT} strokeWidth={2} /> : <line data-plot-element="center-summary" x1={center - band * 0.2} x2={center + band * 0.2} y1={valueAt(summaryValue)} y2={valueAt(summaryValue)} stroke={TEXT} strokeWidth={2} /> : null}
+          {settings.boxErrorType !== "none" && summary.n >= 2 ? horizontal ? <g data-plot-element="uncertainty" stroke={TEXT} strokeWidth={settings.errorBarLineWidth}><line x1={valueAt(summary.mean - margin)} x2={valueAt(summary.mean + margin)} y1={center} y2={center} /><line x1={valueAt(summary.mean - margin)} x2={valueAt(summary.mean - margin)} y1={center - settings.errorBarCapSize / 2} y2={center + settings.errorBarCapSize / 2} /><line x1={valueAt(summary.mean + margin)} x2={valueAt(summary.mean + margin)} y1={center - settings.errorBarCapSize / 2} y2={center + settings.errorBarCapSize / 2} /></g> : <g data-plot-element="uncertainty" stroke={TEXT} strokeWidth={settings.errorBarLineWidth}><line x1={center} x2={center} y1={valueAt(summary.mean - margin)} y2={valueAt(summary.mean + margin)} /><line x1={center - settings.errorBarCapSize / 2} x2={center + settings.errorBarCapSize / 2} y1={valueAt(summary.mean - margin)} y2={valueAt(summary.mean - margin)} /><line x1={center - settings.errorBarCapSize / 2} x2={center + settings.errorBarCapSize / 2} y1={valueAt(summary.mean + margin)} y2={valueAt(summary.mean + margin)} /></g> : null}
+          {settings.showPoints ? lane.values.map((value, index) => <circle key={index} data-plot-element="observation" data-beeswarm-offset={type === "beeswarm" ? pointOffsets[index] : undefined} data-beeswarm-scaled={beeswarmLayout?.scaled ? "true" : undefined} cx={horizontal ? valueAt(value) : center + pointOffsets[index]} cy={horizontal ? center + pointOffsets[index] : valueAt(value)} r={pointRadius} fill={color} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={Math.min(0.55, pointRadius * 0.25)} />) : null}
+          {horizontal ? <><text x={frame.left - 8} y={center + 3} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{lane.group.slice(0, 14)}</text>{settings.showSampleSize ? <text x={frame.left + frame.plotWidth - 2} y={center - 5} textAnchor="end" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>n={lane.values.length}</text> : null}</> : <><text x={center} y={frame.top + frame.plotHeight + 18} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{lane.group.slice(0, 12)}</text>{settings.showSampleSize ? <text x={center} y={frame.top + frame.plotHeight + 33} textAnchor="middle" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>n={lane.values.length}</text> : null}</>}
+        </g>;
+      })}
     </g>
   </>;
 }
@@ -588,7 +655,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "errorbar") content = <ErrorBarPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "area") content = <AreaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "lollipop") content = <LollipopPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
-  else if (type === "beeswarm" || type === "raincloud") content = <DistributionPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) content = <DistributionPlot type={type as DistributionPlotType} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "clustered-heatmap" || type === "correlation-heatmap") content = <MatrixPlot type={type} frame={frame} dataset={dataset} settings={settings} diverging={diverging} />;
   else if (type === "enrichment-bar") content = <EnrichmentBar frame={frame} dataset={dataset} mapping={mapping} settings={settings} sequential={sequential} gridColor={theme.grid} />;
   else if (type === "gsea") content = <GseaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;

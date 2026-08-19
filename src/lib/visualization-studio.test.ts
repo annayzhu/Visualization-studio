@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   boxStatistics,
+  confidenceInterval95,
   defaultVisualizationPaletteSeriesId,
   defaultVisualizationSettings,
   defaultVisualizationThemeId,
+  deterministicBeeswarmLayout,
+  deterministicBeeswarmOffsets,
+  deterministicHistogram,
+  distributionNumericLanes,
   figureFontPresets,
   getPlotDefinition,
   getPlotExamples,
@@ -16,6 +21,7 @@ import {
   parseDelimitedData,
   parseRatioValue,
   resolveAxisDomain,
+  studentTCritical95,
   plotDefinitions,
   plotGuidance,
   plotReferences,
@@ -93,11 +99,11 @@ describe("Visualization Studio data contracts", () => {
   it("ships every requested first-batch plot type with a sample data contract", () => {
     const requested = [
       "scatter", "correlation", "volcano", "ma", "quadrant", "bar", "errorbar", "line", "area", "lollipop",
-      "box", "violin", "beeswarm", "raincloud", "clustered-heatmap", "correlation-heatmap", "pca", "pcoa", "umap",
+      "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "clustered-heatmap", "correlation-heatmap", "pca", "pcoa", "umap",
       "enrichment", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn", "upset", "sankey", "chord", "circos",
       "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
     ];
-    expect(plotDefinitions).toHaveLength(40);
+    expect(plotDefinitions).toHaveLength(43);
     expect(requested.every((id) => plotDefinitions.some((definition) => definition.id === id && definition.sampleData.length > 20))).toBe(true);
     plotDefinitions.forEach((definition) => {
       const examples = getPlotExamples(definition);
@@ -275,6 +281,102 @@ describe("Visualization Studio data contracts", () => {
     const summary = meanErrorStatistics([1, 2, 3]);
     expect(summary).toEqual({ mean: 2, sd: 1, sem: 1 / Math.sqrt(3), n: 3 });
     expect(meanErrorStatistics([4])).toEqual({ mean: 4, sd: 0, sem: 0, n: 1 });
+  });
+
+  it("computes deterministic bins and Student t 95% confidence intervals", () => {
+    expect(deterministicHistogram([0, 1, 2, 3, 4], 4, [0, 4]).map((bin) => bin.count)).toEqual([1, 1, 1, 2]);
+    expect(deterministicHistogram([0, 1, 2, 3, 4], 4, [0, 4])).toEqual(deterministicHistogram([0, 1, 2, 3, 4], 4, [0, 4]));
+    const interval = confidenceInterval95([1, 2, 3]);
+    expect(interval.mean).toBe(2);
+    expect(interval.margin).toBeCloseTo(4.303 / Math.sqrt(3), 6);
+    expect(interval.lower).toBeCloseTo(2 - 4.303 / Math.sqrt(3), 6);
+    expect(interval.upper).toBeCloseTo(2 + 4.303 / Math.sqrt(3), 6);
+    expect(studentTCritical95(31)).toBeCloseTo(2.03951, 4);
+    const largerValues = Array.from({ length: 32 }, (_, index) => index + 1);
+    const largerSample = confidenceInterval95(largerValues);
+    const largerSummary = meanErrorStatistics(largerValues);
+    expect(largerSample.margin).toBeCloseTo(studentTCritical95(31) * largerSummary.sem, 8);
+    expect(largerSample.margin / largerSummary.sem).toBeGreaterThan(1.96);
+  });
+
+  it("packs duplicate and nearby beeswarm points deterministically without collisions", () => {
+    const valuePositions = [100, 100, 100, 100, 100, 101, 101.5, 102, 102];
+    const radius = 3;
+    const offsets = deterministicBeeswarmOffsets(valuePositions, radius, 42);
+    expect(offsets).toEqual(deterministicBeeswarmOffsets(valuePositions, radius, 42));
+    expect(offsets.every((offset) => Math.abs(offset) <= 42)).toBe(true);
+    for (let left = 0; left < offsets.length; left += 1) {
+      for (let right = left + 1; right < offsets.length; right += 1) {
+        expect(Math.hypot(valuePositions[left] - valuePositions[right], offsets[left] - offsets[right])).toBeGreaterThanOrEqual(radius * 2 + 0.8 - 1e-7);
+      }
+    }
+    const denseLayout = deterministicBeeswarmLayout(Array(64).fill(100), 3, 8);
+    expect(denseLayout.scaled).toBe(true);
+    expect(denseLayout.pointRadius).toBeGreaterThan(0);
+    expect(denseLayout.offsets.every((offset) => Math.abs(offset) <= 8 + 1e-7)).toBe(true);
+    for (let left = 0; left < denseLayout.offsets.length; left += 1) {
+      for (let right = left + 1; right < denseLayout.offsets.length; right += 1) {
+        expect(Math.abs(denseLayout.offsets[left] - denseLayout.offsets[right])).toBeGreaterThanOrEqual(denseLayout.minimumDistance - 1e-7);
+      }
+    }
+  });
+
+  it("validates layered, paired, and significance distribution contracts", () => {
+    const definition = getPlotDefinition("density");
+    const independent = parseDelimitedData("group\tvalue\nA\t1\nA\t2\nA\t3");
+    const empty = validatePlotDataset(definition, independent, { group: "group", value: "value", subject: "", facet: "", pValue: "" }, { ...defaultVisualizationSettings, showDensity: false, showHistogram: false, showBox: false, showPoints: false, distributionSummary: "none", boxErrorType: "none" });
+    expect(empty.errors).toContain("Enable at least one distribution layer before exporting.");
+    const missingPair = validatePlotDataset(definition, independent, { group: "group", value: "value", subject: "", facet: "", pValue: "" }, { ...defaultVisualizationSettings, showDensity: true, distributionShowPairedLines: true });
+    expect(missingPair.errors).toContain("Map a Subject / pair ID column before displaying paired lines.");
+    const invalidP = validatePlotDataset(definition, parseDelimitedData("group\tvalue\tp\nA\t1\t0\nA\t2\t1.2\nA\t3\t0.2"), { group: "group", value: "value", subject: "", facet: "", pValue: "p" }, { ...defaultVisualizationSettings, showDensity: true, distributionShowSignificance: true });
+    expect(invalidP.errors.some((error) => error.includes("outside (0, 1]"))).toBe(true);
+
+    const incompletePairs = validatePlotDataset(
+      definition,
+      parseDelimitedData("subject\tgroup\tvalue\nS1\tA\t1\nS1\tB\t2\nS2\tA\t3\n\tB\t4"),
+      { group: "group", value: "value", subject: "subject", facet: "", pValue: "" },
+      { ...defaultVisualizationSettings, showDensity: true, distributionShowPairedLines: true },
+    );
+    expect(incompletePairs.errors.some((error) => error.includes("blank value"))).toBe(true);
+    expect(incompletePairs.errors.some((error) => error.includes("missing one or more paired groups"))).toBe(true);
+
+    const faceted = parseDelimitedData("facet\tgroup\tvalue\nF1\tA\t1\nF1\tB\t2\nF1\tB\t3\nF2\tA\t10\nF2\tA\t12\nF2\tB\t8\nF2\tB\t9");
+    expect(distributionNumericLanes(faceted.rows, "group", "value", "facet").map((lane) => [lane.facet, lane.group, lane.values.length])).toEqual([
+      ["F1", "A", 1], ["F1", "B", 2], ["F2", "A", 2], ["F2", "B", 2],
+    ]);
+    const lowN = validatePlotDataset(
+      definition,
+      faceted,
+      { group: "group", value: "value", subject: "", facet: "facet", pValue: "" },
+      { ...defaultVisualizationSettings, showDensity: true, boxErrorType: "ci95" },
+    );
+    expect(lowN.errors).toContain("Uncertainty requires at least two observations in every facet × group lane; insufficient: F1 / A.");
+
+    const facetClip = validatePlotDataset(
+      definition,
+      parseDelimitedData("facet\tgroup\tvalue\nF1\tA\t0\nF1\tA\t2\nF2\tA\t10\nF2\tA\t12"),
+      { group: "group", value: "value", subject: "", facet: "facet", pValue: "" },
+      { ...defaultVisualizationSettings, showDensity: false, showPoints: true, boxErrorType: "sem", yMax: 11.5 },
+    );
+    expect(facetClip.errors).toEqual([]);
+    expect(facetClip.warnings).toContain("Manual axis limits clip 2 mapped values (0 on X, 2 on Y).");
+
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const densitySupportClip = validatePlotDataset(
+        definition,
+        parseDelimitedData("group\tvalue\nA\t0\nA\t1\nA\t2\nB\t3\nB\t4\nB\t5"),
+        { group: "group", value: "value", subject: "", facet: "", pValue: "" },
+        {
+          ...defaultVisualizationSettings,
+          showDensity: true,
+          distributionOrientation: orientation,
+          ...(orientation === "horizontal" ? { xMin: 0, xMax: 5 } : { yMin: 0, yMax: 5 }),
+        },
+      );
+      const warning = densitySupportClip.warnings.find((entry) => entry.startsWith("Manual axis limits clip"));
+      expect(warning).toBeTruthy();
+      expect(warning).toContain(orientation === "horizontal" ? "on X" : "on Y");
+    }
   });
 
   it("provides complete publication palettes for categorical and continuous plots", () => {

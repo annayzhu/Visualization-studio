@@ -13,7 +13,7 @@ import {
 } from "./visualization-studio";
 
 const expectedAdvancedRenderers = new Set([
-  "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -142,5 +142,81 @@ describe("registered plot-module examples", () => {
     const pyramidMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="population-pyramid" dataset={parseDelimitedData(pyramidExample.data)} mapping={pyramidExample.mapping ?? pyramidModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, pyramidDisplayMode: "percent" }} themeId={defaultVisualizationThemeId} />);
     expect(pyramidMarkup).toContain("%");
     expect(pyramidMarkup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
+
+  it("composes deterministic distribution layers in both orientations", () => {
+    const plotModule = plotModuleRegistry.get("raincloud");
+    const example = plotModule.examples[1];
+    const dataset = parseDelimitedData(example.data);
+    const mapping = example.mapping ?? plotModule.definition.defaultMapping;
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const settings = { ...defaultVisualizationSettings, distributionOrientation: orientation, showDensity: true, showHistogram: true, showBox: true, showPoints: true, distributionSummary: "mean" as const, boxErrorType: "ci95" as const, distributionShowPairedLines: true, distributionShowSignificance: true, histogramBins: 6 };
+      expect(validatePlotDataset(plotModule.definition, dataset, mapping, settings).errors).toEqual([]);
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="raincloud" dataset={dataset} mapping={mapping} settings={settings} themeId={defaultVisualizationThemeId} />);
+      for (const element of ["density", "histogram-bin", "box-layer", "observation", "center-summary", "uncertainty", "paired-line", "facet-label"]) expect(markup).toContain(`data-plot-element="${element}"`);
+      const densityScales = [...markup.matchAll(/data-density-scale-maximum="([^"]+)"/g)].map((match) => match[1]);
+      const histogramScales = [...markup.matchAll(/data-bin-scale-maximum="([^"]+)"/g)].map((match) => match[1]);
+      expect(new Set(densityScales).size).toBe(1);
+      expect(new Set(histogramScales).size).toBe(1);
+      expect(markup).toMatch(/data-bin-count="[2-9]/);
+      expect(markup).toContain("p=0.03");
+      expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    }
+  });
+
+  it("does not render pseudo-uncertainty for a one-observation distribution lane", () => {
+    const dataset = parseDelimitedData("group\tvalue\nA\t1\nB\t2\nB\t3");
+    const settings = { ...defaultVisualizationSettings, showDensity: false, showPoints: true, boxErrorType: "ci95" as const };
+    const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="density" dataset={dataset} mapping={{ group: "group", value: "value", subject: "", facet: "", pValue: "" }} settings={settings} themeId={defaultVisualizationThemeId} />);
+    expect((markup.match(/data-plot-element="uncertainty"/g) ?? [])).toHaveLength(1);
+  });
+
+  it("exports collision-free beeswarm coordinates in both orientations", () => {
+    const dataset = parseDelimitedData("group\tvalue\nA\t5\nA\t5\nA\t5\nA\t5\nA\t5.02\nA\t5.04\nA\t5.06\nA\t5.08");
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const settings = { ...defaultVisualizationSettings, distributionOrientation: orientation, showDensity: false, showHistogram: false, showBox: false, showPoints: true, distributionSummary: "none" as const, boxErrorType: "none" as const };
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="beeswarm" dataset={dataset} mapping={{ group: "group", value: "value", subject: "", facet: "", pValue: "" }} settings={settings} themeId={defaultVisualizationThemeId} />);
+      const points = [...markup.matchAll(/<circle[^>]*data-plot-element="observation"[^>]*cx="([^"]+)"[^>]*cy="([^"]+)"[^>]*r="([^"]+)"/g)].map((match) => ({ x: Number(match[1]), y: Number(match[2]), radius: Number(match[3]) }));
+      expect(points).toHaveLength(8);
+      for (let left = 0; left < points.length; left += 1) {
+        for (let right = left + 1; right < points.length; right += 1) {
+          expect(Math.hypot(points[left].x - points[right].x, points[left].y - points[right].y)).toBeGreaterThanOrEqual(points[left].radius + points[right].radius + 0.79);
+        }
+      }
+      expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    }
+  });
+
+  it("scales dense narrow-lane beeswarms without dropping or overlapping observations", () => {
+    const rows = ["group\tvalue", ...Array.from({ length: 4 }, (_, groupIndex) => Array.from({ length: 64 }, () => `G${groupIndex + 1}\t5`)).flat()];
+    const dataset = parseDelimitedData(rows.join("\n"));
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const settings = { ...defaultVisualizationSettings, width: 300, height: 300, distributionOrientation: orientation, showDensity: false, showHistogram: false, showBox: false, showPoints: true, distributionSummary: "none" as const, boxErrorType: "none" as const };
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="beeswarm" dataset={dataset} mapping={{ group: "group", value: "value", subject: "", facet: "", pValue: "" }} settings={settings} themeId={defaultVisualizationThemeId} />);
+      const points = [...markup.matchAll(/<circle[^>]*data-plot-element="observation"[^>]*cx="([^"]+)"[^>]*cy="([^"]+)"[^>]*r="([^"]+)"/g)].map((match) => ({ x: Number(match[1]), y: Number(match[2]), radius: Number(match[3]) }));
+      expect(points).toHaveLength(256);
+      expect(markup).toContain("data-beeswarm-scaled=\"true\"");
+      for (let left = 0; left < points.length; left += 1) {
+        for (let right = left + 1; right < points.length; right += 1) {
+          expect(Math.hypot(points[left].x - points[right].x, points[left].y - points[right].y)).toBeGreaterThanOrEqual(points[left].radius + points[right].radius - 1e-6);
+        }
+      }
+    }
+  });
+
+  it("keeps sparse observations inside their lanes when many groups compress the band", () => {
+    const rows = ["group\tvalue", ...Array.from({ length: 64 }, (_, groupIndex) => [`G${groupIndex + 1}\t5`, `G${groupIndex + 1}\t5`]).flat()];
+    const dataset = parseDelimitedData(rows.join("\n"));
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const settings = { ...defaultVisualizationSettings, width: 300, height: 300, distributionOrientation: orientation, showDensity: false, showHistogram: false, showBox: false, showPoints: true, distributionSummary: "none" as const, boxErrorType: "none" as const };
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="beeswarm" dataset={dataset} mapping={{ group: "group", value: "value", subject: "", facet: "", pValue: "" }} settings={settings} themeId={defaultVisualizationThemeId} />);
+      const points = [...markup.matchAll(/<circle[^>]*data-plot-element="observation"[^>]*cx="([^"]+)"[^>]*cy="([^"]+)"[^>]*r="([^"]+)"/g)].map((match) => ({ x: Number(match[1]), y: Number(match[2]), radius: Number(match[3]) }));
+      expect(points).toHaveLength(128);
+      for (let left = 0; left < points.length; left += 1) {
+        for (let right = left + 1; right < points.length; right += 1) {
+          expect(Math.hypot(points[left].x - points[right].x, points[left].y - points[right].y)).toBeGreaterThanOrEqual(points[left].radius + points[right].radius - 1e-6);
+        }
+      }
+    }
   });
 });

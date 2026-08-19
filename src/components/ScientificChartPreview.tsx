@@ -673,6 +673,7 @@ export function ScientificChartPreview({ svgRef, type, dataset, mapping, setting
       width={frame.width}
       height={frame.height}
       role="img"
+      data-plot-renderer="standard"
       data-chart-text-color={CHART_TEXT_COLOR}
       aria-label={`${definition.name} scientific figure preview`}
       style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}

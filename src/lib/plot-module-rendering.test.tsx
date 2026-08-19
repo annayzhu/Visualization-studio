@@ -13,7 +13,7 @@ import {
 } from "./visualization-studio";
 
 const expectedAdvancedRenderers = new Set([
-  "line", "scatter", "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -23,7 +23,7 @@ describe("registered plot-module examples", () => {
   it("parses, maps, validates, and renders every bundled example with finite SVG geometry", () => {
     for (const plotModule of plotModuleRegistry.list()) {
       for (const example of plotModule.examples) {
-        const analysis = plotModule.definition.id === "pca" ? analyzeExpressionMatrix(example.data) : null;
+        const analysis = plotModule.definition.id === "pca" ? analyzeExpressionMatrix(example.data, undefined, example.metadata ?? "") : null;
         const dataset = analysis?.dataset ?? parseDelimitedData(example.data);
         const inferredMapping = analysis ? plotModule.definition.defaultMapping : inferPlotMapping(plotModule.definition, dataset.headers);
         const selectedMapping = example.mapping ?? inferredMapping;
@@ -96,6 +96,70 @@ describe("registered plot-module examples", () => {
       }
       expect(markup, associationVariant).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
     }
+  });
+
+  it("renders ordination overlays, supplied statistics, scree, loadings, shapes, and 3D views", () => {
+    const pcaModule = plotModuleRegistry.get("pca");
+    const pca = analyzeExpressionMatrix(pcaModule.examples[0].data, undefined, pcaModule.examples[0].metadata ?? "");
+    expect(pca.dataset.errors).toEqual([]);
+    const pcaMapping = pcaModule.examples[0].mapping ?? pcaModule.definition.defaultMapping;
+    const scoreSettings = { ...defaultVisualizationSettings, ordinationShowEllipse: true, ordinationShowHull: true, ordinationShowCentroids: true, ordinationShowLoadings: true, ordinationUseShapes: true };
+    expect(validatePlotDataset(pcaModule.definition, pca.dataset, pcaMapping, scoreSettings).errors).toEqual([]);
+    const scoreMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pca" dataset={pca.dataset} mapping={pcaMapping} settings={scoreSettings} themeId={defaultVisualizationThemeId} />);
+    for (const element of ["ordination-ellipse", "ordination-hull", "ordination-centroid", "ordination-loading", "ordination-point"]) expect(scoreMarkup).toContain(`data-plot-element="${element}"`);
+    expect(scoreMarkup).toContain('data-plot-element="ordination-shape-legend"');
+    expect(scoreMarkup).toMatch(/PC1 \([\d.]+%\)/);
+    expect(scoreMarkup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    const swappedMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pca" dataset={pca.dataset} mapping={pcaMapping} settings={{ ...defaultVisualizationSettings, swapAxes: true, ordinationShowLoadings: true }} themeId={defaultVisualizationThemeId} />);
+    expect(swappedMarkup).toMatch(/PC2 \([\d.]+%\)/);
+    expect(swappedMarkup).toContain('data-plot-element="ordination-loading"');
+
+    const screeSettings = { ...defaultVisualizationSettings, ordinationView: "scree" as const };
+    expect(validatePlotDataset(pcaModule.definition, pca.dataset, {}, screeSettings).errors).toEqual([]);
+    const screeMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pca" dataset={pca.dataset} mapping={{}} settings={screeSettings} themeId={defaultVisualizationThemeId} />);
+    expect(screeMarkup).toContain('data-plot-family="ordination-scree"');
+    expect(screeMarkup).toContain('data-plot-element="scree-bar"');
+    const pca3dSettings = { ...defaultVisualizationSettings, ordinationView: "3d" as const, ordinationShowCentroids: true };
+    expect(validatePlotDataset(pcaModule.definition, pca.dataset, pcaMapping, pca3dSettings).errors).toEqual([]);
+    const pca3dMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pca" dataset={pca.dataset} mapping={pcaMapping} settings={pca3dSettings} themeId={defaultVisualizationThemeId} />);
+    expect(pca3dMarkup).toContain('data-plot-family="ordination-3d"');
+    expect(pca3dMarkup).toContain('data-plot-element="ordination-shape-legend"');
+    expect(pca3dMarkup).toContain("PC3 (");
+    expect(pca3dMarkup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+
+    const pcoaModule = plotModuleRegistry.get("pcoa");
+    const pcoaData = parseDelimitedData(pcoaModule.definition.sampleData);
+    const suppliedSettings = { ...defaultVisualizationSettings, ordinationView: "3d" as const, ordinationShowCentroids: true, ordinationXVariance: 41.2, ordinationYVariance: 22.4, ordinationZVariance: 11.3, ordinationPermanovaR2: 0.183, ordinationPermanovaP: 0.004, ordinationPermanovaPermutations: 999, ordinationMethodNote: "Bray-Curtis; blocked permutations by cohort" };
+    expect(validatePlotDataset(pcoaModule.definition, pcoaData, pcoaModule.definition.defaultMapping, suppliedSettings).errors).toEqual([]);
+    const pcoaMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pcoa" dataset={pcoaData} mapping={pcoaModule.definition.defaultMapping} settings={suppliedSettings} themeId={defaultVisualizationThemeId} />);
+    expect(pcoaMarkup).toContain('data-plot-family="ordination-3d"');
+    expect(pcoaMarkup).toContain("PERMANOVA (supplied)");
+    expect(pcoaMarkup).toContain("PCoA 3 (11.3%)");
+    expect(pcoaMarkup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+
+    const swappedPcoaMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pcoa" dataset={pcoaData} mapping={{ ...pcoaModule.definition.defaultMapping, x: "dim2", y: "dim1" }} settings={{ ...defaultVisualizationSettings, ordinationXVariance: 41.2, ordinationYVariance: 22.4 }} themeId={defaultVisualizationThemeId} />);
+    expect(swappedPcoaMarkup).toContain("PCoA 2 (22.4%)");
+    expect(swappedPcoaMarkup).toContain("PCoA 1 (41.2%)");
+    const explicitSuffixData = parseDelimitedData("cohort2024_axis1\tcohort2024_axis2\tgroup\tsample\n0\t1\tA\tLeftBoundaryLabel\n1\t0\tB\tRightBoundaryLabel");
+    const suffixMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pcoa" dataset={explicitSuffixData} mapping={{ x: "cohort2024_axis1", y: "cohort2024_axis2", group: "group", label: "sample" }} settings={{ ...defaultVisualizationSettings, showLabels: true, ordinationXVariance: 60, ordinationYVariance: 40 }} themeId={defaultVisualizationThemeId} />);
+    expect(suffixMarkup).toContain("PCoA 1 (60.0%)");
+    expect(suffixMarkup).toContain("PCoA 2 (40.0%)");
+    expect(suffixMarkup).not.toContain("PCoA 2024");
+    expect(suffixMarkup).toContain('data-full-label="RightBoundaryLabel"');
+    expect(suffixMarkup).toMatch(/data-plot-label[^>]*text-anchor="middle"[^>]*>.*RightBou…/);
+  });
+
+  it("blocks overflowing ordination legends and keeps hidden-legend colors distinct", () => {
+    const pcoaModule = plotModuleRegistry.get("pcoa");
+    const rows = Array.from({ length: 13 }, (_, index) => `${index}\t${index % 4}\t${index % 3}\tGroup ${index + 1}\tS${index + 1}`).join("\n");
+    const dataset = parseDelimitedData(`dim1\tdim2\tdim3\tgroup\tsample\n${rows}`);
+    const mapping = { ...pcoaModule.definition.defaultMapping, shape: "" };
+    expect(validatePlotDataset(pcoaModule.definition, dataset, mapping, defaultVisualizationSettings).errors.join(" ")).toMatch(/at most 12/);
+    const hiddenLegendSettings = { ...defaultVisualizationSettings, legendPosition: "none" as const };
+    expect(validatePlotDataset(pcoaModule.definition, dataset, mapping, hiddenLegendSettings).errors).toEqual([]);
+    const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pcoa" dataset={dataset} mapping={mapping} settings={hiddenLegendSettings} themeId={defaultVisualizationThemeId} />);
+    const pointColors = [...markup.matchAll(/data-plot-element="ordination-point"[^>]*fill="([^"]+)"/g)].map((match) => match[1]);
+    expect(new Set(pointColors).size).toBe(13);
   });
 
   it("keeps dense correlation summaries inside the reclaimed compact canvas", () => {

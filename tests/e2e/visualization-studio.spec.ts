@@ -210,6 +210,142 @@ test.describe("Visualization Studio browser acceptance", () => {
     expect(escapedGeometry).toEqual([]);
   });
 
+  test("configures reproducible ordination views without recomputing supplied coordinates", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop ordination controls");
+    await page.goto("/");
+    await page.getByRole("button", { name: /^PCA/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "PCA observation metadata" })).toHaveValue(/Control_1\tControl\tBatch 1\tC1/);
+    await expect(page.getByRole("combobox", { name: "Shape" })).toHaveValue("batch");
+    const pcaSvg = page.locator("svg[aria-label='PCA scientific figure preview']");
+    await expect(pcaSvg).toHaveAttribute("data-plot-renderer", "advanced");
+    await expect(pcaSvg.locator("[data-plot-element='ordination-shape-legend']")).toBeVisible();
+    await page.getByRole("checkbox", { name: "Group covariance ellipses" }).check({ force: true });
+    await page.getByRole("checkbox", { name: "Group centroids" }).check({ force: true });
+    await page.getByRole("checkbox", { name: "Feature loading arrows" }).check({ force: true });
+    await page.getByRole("checkbox", { name: "Point labels" }).check({ force: true });
+    await expect(pcaSvg.locator("[data-plot-element='ordination-ellipse']")).toHaveCount(2);
+    await expect(pcaSvg.locator("[data-plot-element='ordination-centroid']")).toHaveCount(2);
+    await expect(pcaSvg.locator("[data-plot-element='ordination-loading']").first()).toBeVisible();
+    await expect(pcaSvg).toContainText(/PC1 \([\d.]+%\)/);
+    const clippedPcaLabels = await pcaSvg.evaluate((element) => {
+      const svg = element as SVGSVGElement;
+      const canvas = svg.getBoundingClientRect();
+      const clip = svg.querySelector("clipPath rect")!;
+      const scaleX = canvas.width / svg.viewBox.baseVal.width;
+      const scaleY = canvas.height / svg.viewBox.baseVal.height;
+      const plot = { left: canvas.left + Number(clip.getAttribute("x")) * scaleX, top: canvas.top + Number(clip.getAttribute("y")) * scaleY, right: canvas.left + (Number(clip.getAttribute("x")) + Number(clip.getAttribute("width"))) * scaleX, bottom: canvas.top + (Number(clip.getAttribute("y")) + Number(clip.getAttribute("height"))) * scaleY };
+      return [...element.querySelectorAll("[data-plot-label]")].flatMap((label) => {
+        const box = label.getBoundingClientRect();
+        return box.left < plot.left - 1 || box.top < plot.top - 1 || box.right > plot.right + 1 || box.bottom > plot.bottom + 1 ? [label.textContent] : [];
+      });
+    });
+    expect(clippedPcaLabels).toEqual([]);
+    await page.getByRole("textbox", { name: "Method note", exact: true }).fill("Euclidean distance; group tested with cohort strata and restricted permutations");
+    for (const [label, value] of [["R²", "0.21"], ["P value", "0.012"], ["Permutations", "999"]] as const) {
+      await page.getByRole("textbox", { name: label, exact: true }).fill(value);
+      await page.getByRole("textbox", { name: label, exact: true }).press("Enter");
+    }
+    await expect(pcaSvg).toContainText("PERMANOVA (supplied)");
+    await page.getByRole("textbox", { name: "Y minimum", exact: true }).fill("-0.001");
+    await page.getByRole("textbox", { name: "Y minimum", exact: true }).press("Enter");
+    await expect(page.getByText(/loading arrows require manual domains/)).toBeVisible();
+    await page.getByRole("textbox", { name: "Y minimum", exact: true }).fill("");
+    await page.getByRole("textbox", { name: "Y minimum", exact: true }).press("Enter");
+    for (const [label, value] of [["X minimum", "-0.1"], ["X maximum", "10"]] as const) {
+      await page.getByRole("textbox", { name: label, exact: true }).fill(value);
+      await page.getByRole("textbox", { name: label, exact: true }).press("Enter");
+    }
+    await expect(page.getByText(/loading arrows require manual domains/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+    for (const [label, value] of [["X minimum", "-4"], ["X maximum", "6"]] as const) {
+      await page.getByRole("textbox", { name: label, exact: true }).fill(value);
+      await page.getByRole("textbox", { name: label, exact: true }).press("Enter");
+    }
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const unsafeLoadings = await pcaSvg.evaluate((element) => {
+      const svg = element as SVGSVGElement;
+      const canvas = svg.getBoundingClientRect();
+      const clip = svg.querySelector("clipPath rect")!;
+      const scaleX = canvas.width / svg.viewBox.baseVal.width;
+      const scaleY = canvas.height / svg.viewBox.baseVal.height;
+      const plot = { left: canvas.left + Number(clip.getAttribute("x")) * scaleX, top: canvas.top + Number(clip.getAttribute("y")) * scaleY, right: canvas.left + (Number(clip.getAttribute("x")) + Number(clip.getAttribute("width"))) * scaleX, bottom: canvas.top + (Number(clip.getAttribute("y")) + Number(clip.getAttribute("height"))) * scaleY };
+      return [...svg.querySelectorAll("[data-plot-element='ordination-loading']")].flatMap((loading) => {
+        const label = loading.querySelector("text")?.getBoundingClientRect();
+        const line = loading.querySelector("line");
+        const length = line ? Math.hypot(Number(line.getAttribute("x2")) - Number(line.getAttribute("x1")), Number(line.getAttribute("y2")) - Number(line.getAttribute("y1"))) : 0;
+        const labelInside = label && label.left >= plot.left - 1 && label.top >= plot.top - 1 && label.right <= plot.right + 1 && label.bottom <= plot.bottom + 1;
+        return length >= 2 && labelInside ? [] : [{ label: loading.textContent, length, scale: loading.getAttribute("data-loading-scale") }];
+      });
+    });
+    expect(unsafeLoadings).toEqual([]);
+
+    await page.getByRole("combobox", { name: "View" }).selectOption("scree");
+    await expect(page.getByText("Supplied PERMANOVA", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "Group covariance ellipses" })).toHaveCount(0);
+    await expect(pcaSvg.locator("[data-plot-family='ordination-scree']")).toBeVisible();
+    await expect(pcaSvg.locator("[data-plot-element='scree-bar']").first()).toBeVisible();
+    await expect(pcaSvg).toContainText("Principal component");
+    await expect(pcaSvg).toContainText("Explained variance (%)");
+    await page.getByRole("combobox", { name: "View" }).selectOption("3d");
+    await expect(page.getByRole("combobox", { name: "Z component" })).toHaveValue("PC3");
+    await expect(pcaSvg.locator("[data-plot-family='ordination-3d']")).toBeVisible();
+    await expect(pcaSvg.locator("[data-plot-element='ordination-shape-legend']")).toBeVisible();
+
+    await page.getByRole("button", { name: /^PCoA/ }).click();
+    await page.getByRole("button", { name: "Example 2" }).click();
+    await page.getByRole("combobox", { name: "View" }).selectOption("3d");
+    for (const [label, value] of [["PCoA 1 variance (%)", "41.2"], ["PCoA 2 variance (%)", "22.4"], ["PCoA 3 variance (%)", "11.3"], ["R²", "0.183"], ["P value", "0.004"], ["Permutations", "999"]] as const) {
+      await page.getByRole("textbox", { name: label, exact: true }).fill(value);
+      await page.getByRole("textbox", { name: label, exact: true }).press("Enter");
+    }
+    await page.getByRole("textbox", { name: "Method note" }).fill("Bray-Curtis; blocked permutations by cohort");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const pcoaSvg = page.locator("svg[aria-label='PCoA scientific figure preview']");
+    await expect(pcoaSvg).toContainText("PERMANOVA (supplied)");
+    await expect(pcoaSvg).toContainText("PCoA 3 (11.3%)");
+    const escapedText = await pcoaSvg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("text")].flatMap((label) => {
+        const box = label.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : [];
+      });
+    });
+    expect(escapedText).toEqual([]);
+
+    for (const name of ["t-SNE", "NMDS"]) {
+      await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      await expect(page.locator(`svg[aria-label='${name} scientific figure preview'] [data-plot-family='ordination-scores']`)).toBeVisible();
+    }
+  });
+
+  test("blocks crowded combined ordination legends until the export canvas can contain them", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop ordination legend boundary");
+    await page.goto("/");
+    await page.getByRole("button", { name: /^PCoA/ }).click();
+    const crowdedRows = Array.from({ length: 12 }, (_, index) => `${index}\t${index % 3}\tExtremelyWideGroupName${index + 1}\tShape${index % 4 + 1}\tS${index + 1}`);
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`dim1\tdim2\tgroup\tshape\tsample\n${crowdedRows.join("\n")}`);
+    await expect(page.getByRole("combobox", { name: "Group" })).toHaveValue("group");
+    await expect(page.getByRole("combobox", { name: "Shape" })).toHaveValue("shape");
+    await page.getByRole("textbox", { name: "Method note" }).fill("Long upstream annotation describing distance transformation normalization and reproducible coordinate generation");
+    await expect(page.getByText(/combined ordination color and shape legends/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+    await page.getByRole("textbox", { name: "Height value" }).fill("640");
+    await page.getByRole("textbox", { name: "Height value" }).press("Enter");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const pcoaSvg = page.locator("svg[aria-label='PCoA scientific figure preview']");
+    const escapedLegendText = await pcoaSvg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='plot-legend'] text, [data-plot-element='ordination-shape-legend'] text")].flatMap((label) => {
+        const box = label.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : [];
+      });
+    });
+    expect(escapedLegendText).toEqual([]);
+    await expect(pcoaSvg.locator("[data-plot-element='plot-legend'] text[data-full-label^='ExtremelyWideGroupName']").first()).toContainText("…");
+  });
+
   test("switches categorical variants and computes long-form uncertainty", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop categorical-family baseline");
     await page.goto("/");

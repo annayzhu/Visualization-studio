@@ -241,7 +241,21 @@ export type VisualizationSettings = {
   foldChangeThreshold: number;
   pValueThreshold: number;
   labelLimit: number;
-  heatmapScale: "row" | "none";
+  heatmapScale: "row" | "column" | "none";
+  heatmapColorMode: "diverging" | "sequential";
+  heatmapDisplay: "rectangular" | "circular";
+  heatmapTriangle: "full" | "lower" | "upper";
+  heatmapDistance: "euclidean" | "correlation";
+  heatmapLinkage: "average" | "complete" | "single";
+  heatmapShowDendrograms: boolean;
+  heatmapRowClusters: number;
+  heatmapColumnClusters: number;
+  heatmapShowValues: boolean;
+  heatmapShowSidePlot: boolean;
+  heatmapSidePlotStatistic: "mean" | "sd" | "range";
+  heatmapLabelDensity: "auto" | "all" | "none";
+  heatmapRowAnnotationData: string;
+  heatmapColumnAnnotationData: string;
   correlationMethod: "pearson" | "spearman";
   xThreshold: number;
   yThreshold: number;
@@ -332,6 +346,20 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   pValueThreshold: 0.05,
   labelLimit: 8,
   heatmapScale: "row",
+  heatmapColorMode: "diverging",
+  heatmapDisplay: "rectangular",
+  heatmapTriangle: "lower",
+  heatmapDistance: "euclidean",
+  heatmapLinkage: "average",
+  heatmapShowDendrograms: true,
+  heatmapRowClusters: 3,
+  heatmapColumnClusters: 3,
+  heatmapShowValues: false,
+  heatmapShowSidePlot: false,
+  heatmapSidePlotStatistic: "mean",
+  heatmapLabelDensity: "auto",
+  heatmapRowAnnotationData: "",
+  heatmapColumnAnnotationData: "",
   correlationMethod: "pearson",
   xThreshold: 0,
   yThreshold: 0,
@@ -1245,7 +1273,7 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id,
     name: id === "clustered-heatmap" ? "Clustered heatmap" : "Correlation heatmap",
     family: "Matrix",
-    summary: id === "clustered-heatmap" ? "Expression heatmap with deterministic average-linkage row and column ordering." : "Pearson or Spearman correlation calculated across numeric columns and displayed as a symmetric matrix.",
+    summary: id === "clustered-heatmap" ? "Matrix heatmap with explicit, deterministic row and column clustering." : "Pearson or Spearman correlation calculated across numeric columns and displayed as a symmetric matrix.",
     inputHint: "First column supplies row labels; every remaining column must be numeric.",
     roles: [],
     defaultMapping: {},
@@ -1483,6 +1511,7 @@ export const plotReferences = {
   lollipop: { citation: "Jay & Brouwer, 2016. Lollipops in the Clinic: Information Dense Mutation Plots for Precision Medicine. PLoS ONE.", href: "https://doi.org/10.1371/journal.pone.0160519" },
   heatmap: { citation: "Wilkinson & Friendly, 2009. The History of the Cluster Heat Map. The American Statistician.", href: "https://doi.org/10.1198/tas.2009.0033" },
   clusteredHeatmap: { citation: "Eisen et al., 1998. Cluster analysis and display of genome-wide expression patterns. PNAS.", href: "https://doi.org/10.1073/pnas.95.25.14863" },
+  complexHeatmap: { citation: "Gu, Eils & Schlesner, 2016. Complex heatmaps reveal patterns and correlations in multidimensional genomic data. Bioinformatics.", href: "https://doi.org/10.1093/bioinformatics/btw313" },
   corrgram: { citation: "Friendly, 2002. Corrgrams: Exploratory Displays for Correlation Matrices. The American Statistician.", href: "https://doi.org/10.1198/000313002533" },
   enrichment: { citation: "Yu et al., 2012. clusterProfiler: an R package for comparing biological themes among gene clusters. OMICS.", href: "https://doi.org/10.1089/omi.2011.0118" },
   gsea: { citation: "Subramanian et al., 2005. Gene set enrichment analysis: a knowledge-based approach. PNAS.", href: "https://doi.org/10.1073/pnas.0506580102" },
@@ -1645,21 +1674,21 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     suitableData: "行列结构明确的数值矩阵，可使用原始尺度或经过合理标准化的值。",
     answers: "二维矩阵中哪些区域呈现高低模式、梯度、块状结构或异常值。",
     origin: "矩阵着色可追溯到 19 世纪统计图形；Wilkinson 与 Friendly 的历史综述梳理了它发展为现代热图的过程。",
-    references: [plotReferences.heatmap],
+    references: [plotReferences.heatmap, plotReferences.complexHeatmap],
   },
   "clustered-heatmap": {
     definition: "先按指定距离和连接方法对行列进行层次聚类，再按树状图顺序重排热图；颜色和树结构表达的是两层信息。",
     suitableData: "可比较的数值矩阵；行列聚类前应明确缩放、距离和连接方法。",
     answers: "哪些行或列具有相似模式，是否形成候选亚群、模块或共变结构。",
     origin: "聚类热图有更早的统计学前身；Eisen 等人在 1998 年把它用于全基因组表达模式后，使其成为组学分析的经典图形。",
-    references: [plotReferences.clusteredHeatmap, plotReferences.heatmap],
+    references: [plotReferences.clusteredHeatmap, plotReferences.heatmap, plotReferences.complexHeatmap],
   },
   "correlation-heatmap": {
     definition: "以同一组变量同时作为行和列，用颜色编码每对变量的相关系数，因此矩阵通常对称且对角线为 1。",
     suitableData: "同一批观察上测量的多个连续或有序变量。",
     answers: "变量之间的相关方向、强度、冗余和潜在模块结构是什么。",
     origin: "Friendly 在 2002 年提出 corrgram 体系，强调同时用颜色、顺序和符号阅读相关矩阵结构。",
-    references: [plotReferences.corrgram],
+    references: [plotReferences.corrgram, plotReferences.complexHeatmap],
   },
   enrichment: {
     definition: "每个功能条目用一个点表示，通常以位置编码富集比例、点大小编码命中数、颜色编码校正 P 值。",
@@ -1801,7 +1830,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 
 const advancedRendererIds = new Set<PlotType>([
   "line", "scatter", "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
-  "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
+  "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
@@ -1827,9 +1856,9 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   volcano: ["showLabels", "foldChangeThreshold", "pValueThreshold", "labelLimit"],
   ma: ["showLabels", "foldChangeThreshold", "pValueThreshold", "labelLimit"], quadrant: ["showLabels", "xThreshold", "yThreshold"],
   errorbar: ["errorBarLineWidth", "errorBarCapSize"],
-  heatmap: ["heatmapScale", "divergingLow", "divergingMid", "divergingHigh"],
-  "clustered-heatmap": ["heatmapScale", "clusterRows", "clusterColumns", "divergingLow", "divergingMid", "divergingHigh"],
-  "correlation-heatmap": ["correlationMethod", "clusterRows", "clusterColumns", "divergingLow", "divergingMid", "divergingHigh"],
+  heatmap: ["heatmapScale", "heatmapColorMode", "heatmapDisplay", "heatmapShowValues", "heatmapShowSidePlot", "heatmapSidePlotStatistic", "heatmapLabelDensity", "heatmapRowAnnotationData", "heatmapColumnAnnotationData", "continuousLow", "continuousHigh", "divergingLow", "divergingMid", "divergingHigh"],
+  "clustered-heatmap": ["heatmapScale", "heatmapColorMode", "heatmapDisplay", "clusterRows", "clusterColumns", "heatmapDistance", "heatmapLinkage", "heatmapShowDendrograms", "heatmapRowClusters", "heatmapColumnClusters", "heatmapShowValues", "heatmapShowSidePlot", "heatmapSidePlotStatistic", "heatmapLabelDensity", "heatmapRowAnnotationData", "heatmapColumnAnnotationData", "continuousLow", "continuousHigh", "divergingLow", "divergingMid", "divergingHigh"],
+  "correlation-heatmap": ["correlationMethod", "heatmapDisplay", "heatmapTriangle", "clusterRows", "clusterColumns", "heatmapDistance", "heatmapLinkage", "heatmapShowDendrograms", "heatmapRowClusters", "heatmapColumnClusters", "heatmapShowValues", "heatmapShowSidePlot", "heatmapSidePlotStatistic", "heatmapLabelDensity", "heatmapRowAnnotationData", "heatmapColumnAnnotationData", "divergingLow", "divergingMid", "divergingHigh"],
   enrichment: ["continuousLow", "continuousHigh"], "enrichment-bar": ["continuousLow", "continuousHigh"],
   km: ["showRiskTable"], "survival-forest": ["forestReferenceValue"],
   pie: ["compositionLabelMode"], donut: ["compositionLabelMode", "donutHole"], waffle: ["compositionLabelMode", "waffleCells"],
@@ -2007,6 +2036,153 @@ export function parseNumericValue(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+export type HeatmapAnnotationTrack = {
+  name: string;
+  kind: "continuous" | "categorical";
+  values: Map<string, string>;
+  numericExtent: [number, number] | null;
+  categories: string[];
+};
+
+export type HeatmapAnnotationAlignment = {
+  tracks: HeatmapAnnotationTrack[];
+  errors: string[];
+  warnings: string[];
+  matchedIds: number;
+  missingIds: string[];
+  extraIds: string[];
+};
+
+export type HeatmapLayoutOptions = {
+  hasAnnotationLegend: boolean;
+  rowAnnotationTracks: number;
+  columnAnnotationTracks: number;
+  showRowCut: boolean;
+  showColumnCut: boolean;
+  showRowDendrogram: boolean;
+  showColumnDendrogram: boolean;
+  showSidePlot: boolean;
+  rowCount: number;
+  columnCount: number;
+  maxColumnLabelCharacters: number;
+  maxCutClusters: number;
+};
+
+/**
+ * One source of truth for compact heatmap geometry. Validation and rendering
+ * deliberately share these exact measurements so a view that passes the
+ * safety gate cannot later grow beyond its export frame.
+ */
+export function heatmapLayoutMetrics(settings: VisualizationSettings, options: HeatmapLayoutOptions) {
+  const annotationLegendWidth = options.hasAnnotationLegend ? Math.max(104, Math.ceil(Math.max(8, settings.legendSize) * 8)) : 0;
+  const left = Math.min(108, settings.width * 0.27);
+  const top = settings.title ? 48 : 24;
+  const bottom = 58;
+  const right = 22 + annotationLegendWidth;
+  const plotWidth = Math.max(0, settings.width - left - right);
+  const plotHeight = Math.max(0, settings.height - top - bottom);
+  const rowTrackCount = options.rowAnnotationTracks + (options.showRowCut ? 1 : 0);
+  const columnTrackCount = options.columnAnnotationTracks + (options.showColumnCut ? 1 : 0);
+  const rowTrackWidth = rowTrackCount * 6;
+  const columnTrackHeight = columnTrackCount * 6;
+  const rowDendrogramWidth = options.showRowDendrogram ? 28 : 0;
+  const columnDendrogramHeight = options.showColumnDendrogram ? 28 : 0;
+  const sidePlotWidth = options.showSidePlot ? 48 : 0;
+  const legendFontSize = Math.max(8, settings.legendSize);
+  const cutItemStep = Math.max(13, legendFontSize * 1.15);
+  const cutLegendWidth = options.maxCutClusters > 1 ? 12 + options.maxCutClusters * cutItemStep + legendFontSize * 0.7 : 0;
+  const colorLegendHeight = options.showRowCut || options.showColumnCut ? Math.max(36, legendFontSize * 3 + 10) : Math.max(18, legendFontSize + 8);
+  const matrixWidth = plotWidth - rowDendrogramWidth - rowTrackWidth - sidePlotWidth;
+  const matrixHeight = plotHeight - colorLegendHeight - columnDendrogramHeight - columnTrackHeight;
+  const labelReserve = settings.heatmapLabelDensity === "none"
+    ? 4
+    : Math.ceil(12 + Math.min(12, options.maxColumnLabelCharacters) * Math.max(8, settings.tickSize) * 0.58);
+  const circularOuterRadius = Math.min(plotWidth, plotHeight) / 2 - labelReserve - options.columnAnnotationTracks * 5;
+  const circularInnerRadius = Math.max(12, circularOuterRadius * 0.2);
+  const circularRingWidth = (circularOuterRadius - circularInnerRadius) / Math.max(1, options.rowCount);
+  const circularSectorArc = Math.PI * 2 * Math.max(0, circularOuterRadius) / Math.max(1, options.columnCount);
+  const circularRingListAvailableHeight = Math.max(0, plotHeight - (legendFontSize * 2 + 4) - colorLegendHeight);
+  return {
+    frame: { width: settings.width, height: settings.height, left, right, top, bottom, plotWidth, plotHeight },
+    annotationLegendWidth,
+    rowTrackCount,
+    columnTrackCount,
+    rowTrackWidth,
+    columnTrackHeight,
+    rowDendrogramWidth,
+    columnDendrogramHeight,
+    sidePlotWidth,
+    colorLegendHeight,
+    matrixWidth,
+    matrixHeight,
+    circularOuterRadius,
+    circularInnerRadius,
+    circularRingWidth,
+    circularSectorArc,
+    circularRingListAvailableHeight,
+    cutLegendWidth,
+  };
+}
+
+/** Expand a chosen categorical palette without silently reusing a color. */
+export function categoricalColorForIndex(index: number, colors: string[]) {
+  const safeColors = colors.length > 0 ? colors : ["#A7A5A0"];
+  const base = safeColors[index % safeColors.length];
+  const tier = Math.floor(index / safeColors.length);
+  if (tier === 0) return base;
+  // Golden-angle hues remain deterministic and unique across the browser
+  // safety ceiling (250 categories) while keeping restrained saturation.
+  const hue = ((index * 137.50776405003785) % 360).toFixed(6);
+  const saturation = 34 + (tier % 4) * 4;
+  const lightness = 42 + (tier % 5) * 5;
+  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
+/** Parse and align a row/column annotation table by its stable first-column identifier. */
+export function alignHeatmapAnnotations(text: string, targetIds: string[], targetLabel: "row" | "column"): HeatmapAnnotationAlignment {
+  if (!text.trim()) return { tracks: [], errors: [], warnings: [], matchedIds: 0, missingIds: [], extraIds: [] };
+  const parsed = parseDelimitedData(text);
+  const errors = [...parsed.errors];
+  const warnings = [...parsed.warnings];
+  if (parsed.headers.length < 2) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotations need an ID column and at least one track.`);
+  if (parsed.headers.length > 7) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotations are limited to six tracks in the browser preview.`);
+  const idColumn = parsed.headers[0] ?? "id";
+  const ids = parsed.rows.map((row) => row[idColumn]?.trim()).filter(Boolean);
+  const duplicateIds = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+  if (duplicateIds.length > 0) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotation IDs must be unique; duplicates: ${duplicateIds.slice(0, 6).join(", ")}.`);
+  const idSet = new Set(ids);
+  const targetSet = new Set(targetIds);
+  const missingIds = targetIds.filter((id) => !idSet.has(id));
+  const extraIds = ids.filter((id) => !targetSet.has(id));
+  if (missingIds.length > 0) warnings.push(`${missingIds.length} ${targetLabel} ID${missingIds.length === 1 ? " is" : "s are"} missing from the annotation table: ${missingIds.slice(0, 5).join(", ")}${missingIds.length > 5 ? "…" : ""}.`);
+  if (extraIds.length > 0) warnings.push(`${extraIds.length} annotation ID${extraIds.length === 1 ? " does" : "s do"} not match the matrix and will be ignored: ${extraIds.slice(0, 5).join(", ")}${extraIds.length > 5 ? "…" : ""}.`);
+  const trackHeaders = parsed.headers.slice(1, 7);
+  const normalizedTrackNames = trackHeaders.map((header) => header.match(/^(.*?)\s*\[(categorical|continuous)\]\s*$/i)?.[1]?.trim() || header);
+  const duplicateTrackNames = [...new Set(normalizedTrackNames.filter((name, index) => normalizedTrackNames.indexOf(name) !== index))];
+  if (duplicateTrackNames.length > 0) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotation track names must remain unique after type declarations are removed; duplicates: ${duplicateTrackNames.join(", ")}.`);
+  const tracks = trackHeaders.map((header) => {
+    const declaration = header.match(/^(.*?)\s*\[(categorical|continuous)\]\s*$/i);
+    const name = declaration?.[1]?.trim() || header;
+    const declaredKind = declaration?.[2]?.toLowerCase() as "categorical" | "continuous" | undefined;
+    const values = new Map(parsed.rows.map((row) => [row[idColumn]?.trim(), row[header]?.trim() ?? ""]));
+    const matchedValues = targetIds.map((id) => values.get(id) ?? "").filter((value) => value !== "");
+    const numericValues = matchedValues.map((value) => parseNumericValue(value));
+    const allNumeric = matchedValues.length > 0 && numericValues.every((value) => value !== null);
+    if (declaredKind === "continuous" && !allNumeric) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotation track ${name} is declared continuous but contains non-numeric values.`);
+    const continuous = declaredKind === "continuous" || (declaredKind === undefined && allNumeric);
+    if (declaredKind === undefined && allNumeric) warnings.push(`Numeric annotation track ${name} was inferred as continuous; add [categorical] to the header for codes such as batch, stage, or cluster IDs.`);
+    const finite = numericValues.filter((value): value is number => value !== null);
+    return {
+      name,
+      kind: continuous ? "continuous" as const : "categorical" as const,
+      values,
+      numericExtent: continuous && finite.length > 0 ? [Math.min(...finite), Math.max(...finite)] as [number, number] : null,
+      categories: continuous ? [] : [...new Set(matchedValues)].sort((left, right) => left.localeCompare(right)),
+    };
+  });
+  return { tracks, errors, warnings, matchedIds: targetIds.filter((id) => idSet.has(id)).length, missingIds, extraIds };
+}
+
 export function parseRatioValue(value: string | undefined) {
   if (!value) return null;
   if (value.includes("/")) {
@@ -2076,6 +2252,39 @@ export function inferPlotMapping(definition: PlotDefinition, headers: string[]) 
   }));
 }
 
+function heatmapStandardize(values: number[]) {
+  const average = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, values.length - 1)) || 1;
+  return values.map((value) => (value - average) / deviation);
+}
+
+function heatmapRanks(values: number[]) {
+  const ordered = values.map((value, index) => ({ value, index })).sort((left, right) => left.value - right.value || left.index - right.index);
+  const ranks = Array(values.length).fill(0) as number[];
+  for (let start = 0; start < ordered.length;) {
+    let end = start;
+    while (end + 1 < ordered.length && ordered[end + 1].value === ordered[start].value) end += 1;
+    const rank = (start + end + 2) / 2;
+    for (let cursor = start; cursor <= end; cursor += 1) ranks[ordered[cursor].index] = rank;
+    start = end + 1;
+  }
+  return ranks;
+}
+
+function heatmapCorrelation(left: number[], right: number[], method: VisualizationSettings["correlationMethod"]) {
+  const x = method === "spearman" ? heatmapRanks(left) : left;
+  const y = method === "spearman" ? heatmapRanks(right) : right;
+  const xMean = x.reduce((sum, value) => sum + value, 0) / x.length;
+  const yMean = y.reduce((sum, value) => sum + value, 0) / y.length;
+  const numerator = x.reduce((sum, value, index) => sum + (value - xMean) * (y[index] - yMean), 0);
+  const denominator = Math.sqrt(x.reduce((sum, value) => sum + (value - xMean) ** 2, 0) * y.reduce((sum, value) => sum + (value - yMean) ** 2, 0));
+  return denominator > 0 ? numerator / denominator : Number.NaN;
+}
+
+function isZeroVariance(values: number[]) {
+  return values.length < 2 || values.every((value) => Math.abs(value - values[0]) <= 1e-12);
+}
+
 export function validatePlotDataset(
   definition: PlotDefinition,
   dataset: ParsedDataset,
@@ -2099,15 +2308,98 @@ export function validatePlotDataset(
 
   if (["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(definition.id)) {
     if (dataset.headers.length < 3) errors.push("Heatmap data needs one row-label column and at least two numeric sample columns.");
+    const labelHeader = dataset.headers[0];
     const numericHeaders = dataset.headers.slice(1);
+    const rowIds = dataset.rows.map((row) => row[labelHeader]?.trim()).filter(Boolean);
+    if (rowIds.length !== dataset.rows.length) errors.push("Heatmap row identifiers must not be blank.");
+    if (new Set(rowIds).size !== rowIds.length) errors.push("Heatmap row identifiers must be unique so annotations and labels align reproducibly.");
     const invalid = dataset.rows.filter((row) => numericHeaders.some((header) => parseNumericValue(row[header]) === null));
     if (invalid.length > 0) errors.push(`${invalid.length} heatmap row${invalid.length === 1 ? "" : "s"} contain non-numeric or blank values.`);
     if (definition.id === "correlation-heatmap" && invalid.length === 0) {
       const constantHeaders = numericHeaders.filter((header) => new Set(dataset.rows.map((row) => parseNumericValue(row[header]))).size < 2);
       if (constantHeaders.length > 0) errors.push(`Correlation is undefined for constant columns: ${constantHeaders.join(", ")}.`);
     }
-    if (definition.id !== "correlation-heatmap" && dataset.rows.length > 250) errors.push("Heatmap previews are limited to 250 rows; select biologically justified features before plotting.");
-    if (numericHeaders.length > 100) errors.push("Heatmap previews are limited to 100 numeric columns to preserve legibility and browser performance.");
+    const circular = settings?.heatmapDisplay === "circular";
+    const rowLimit = circular ? 80 : 250;
+    const columnLimit = circular ? 60 : 100;
+    if (definition.id !== "correlation-heatmap" && dataset.rows.length > rowLimit) errors.push(`${circular ? "Circular h" : "H"}eatmap previews are limited to ${rowLimit} rows; select biologically justified features before plotting.`);
+    if (numericHeaders.length > columnLimit) errors.push(`${circular ? "Circular h" : "H"}eatmap previews are limited to ${columnLimit} numeric columns to preserve legibility and browser performance.`);
+    if (settings) {
+      if (invalid.length === 0 && settings.heatmapDistance === "correlation" && definition.id !== "heatmap") {
+        const rawMatrix = dataset.rows.map((row) => numericHeaders.map((header) => parseNumericValue(row[header]) ?? 0));
+        let clusteringMatrix = rawMatrix;
+        if (definition.id === "correlation-heatmap") {
+          const variables = numericHeaders.map((_, columnIndex) => rawMatrix.map((row) => row[columnIndex]));
+          clusteringMatrix = variables.map((left) => variables.map((right) => heatmapCorrelation(left, right, settings.correlationMethod)));
+        } else if (settings.heatmapScale === "row") clusteringMatrix = rawMatrix.map(heatmapStandardize);
+        else if (settings.heatmapScale === "column") {
+          const scaledColumns = numericHeaders.map((_, columnIndex) => heatmapStandardize(rawMatrix.map((row) => row[columnIndex])));
+          clusteringMatrix = rawMatrix.map((_, rowIndex) => scaledColumns.map((column) => column[rowIndex]));
+        }
+        const clusteringRowLabels = definition.id === "correlation-heatmap" ? numericHeaders : rowIds;
+        if (settings.clusterRows) {
+          const constantRows = clusteringMatrix.map((values, index) => isZeroVariance(values) || values.some((value) => !Number.isFinite(value)) ? clusteringRowLabels[index] : "").filter(Boolean);
+          if (constantRows.length > 0) errors.push(`Correlation distance is undefined for zero-variance row vectors: ${constantRows.slice(0, 8).join(", ")}${constantRows.length > 8 ? "…" : ""}. Use Euclidean distance or remove/transform these rows.`);
+        }
+        if (settings.clusterColumns) {
+          const constantColumns = numericHeaders.map((header, columnIndex) => ({ header, values: clusteringMatrix.map((row) => row[columnIndex]) })).filter(({ values }) => isZeroVariance(values) || values.some((value) => !Number.isFinite(value))).map(({ header }) => header);
+          if (constantColumns.length > 0) errors.push(`Correlation distance is undefined for zero-variance column vectors: ${constantColumns.slice(0, 8).join(", ")}${constantColumns.length > 8 ? "…" : ""}. Use Euclidean distance or remove/transform these columns.`);
+        }
+      }
+      const displayedRowIds = definition.id === "correlation-heatmap" ? numericHeaders : rowIds;
+      const rowAnnotations = alignHeatmapAnnotations(settings.heatmapRowAnnotationData, displayedRowIds, "row");
+      const columnAnnotations = alignHeatmapAnnotations(settings.heatmapColumnAnnotationData, numericHeaders, "column");
+      errors.push(...rowAnnotations.errors, ...columnAnnotations.errors);
+      warnings.push(...rowAnnotations.warnings, ...columnAnnotations.warnings);
+      const annotationTracks = [...rowAnnotations.tracks, ...columnAnnotations.tracks];
+      if (annotationTracks.length > 6) errors.push("The compact export supports at most six annotation tracks in total across rows and columns.");
+      const legendRows = annotationTracks.reduce((sum, track) => sum + 1 + (track.kind === "continuous" ? 2 : track.categories.length), 0) + (rowAnnotations.tracks.length > 0 ? 1 : 0) + (columnAnnotations.tracks.length > 0 ? 1 : 0);
+      const legendRowHeight = Math.max(8, settings.legendSize) + 3;
+      const maximumLegendRows = Math.max(4, Math.floor((settings.height - 54) / legendRowHeight));
+      if (legendRows > maximumLegendRows) errors.push(`Annotation legends need ${legendRows} compact rows but this ${settings.height}px-high export can display ${maximumLegendRows}; increase height or reduce tracks/categories.`);
+      if (settings.heatmapShowValues && settings.heatmapDisplay === "rectangular" && displayedRowIds.length * numericHeaders.length > 225) warnings.push("Cell values are shown only when the selected view has enough room for legible text.");
+      const linkedCorrelation = definition.id === "correlation-heatmap";
+      if (linkedCorrelation && settings.clusterRows !== settings.clusterColumns) errors.push("Correlation heatmap row and column clustering must be enabled or disabled together because both axes represent the same variables.");
+      const rowCutCount = settings.heatmapRowClusters;
+      const columnCutCount = linkedCorrelation ? rowCutCount : settings.heatmapColumnClusters;
+      const canCluster = definition.id !== "heatmap";
+      const clusterRows = linkedCorrelation ? settings.clusterRows && settings.clusterColumns : settings.clusterRows;
+      const clusterColumns = linkedCorrelation ? settings.clusterRows && settings.clusterColumns : settings.clusterColumns;
+      const showRowCut = canCluster && clusterRows && rowCutCount > 1;
+      const showColumnCut = canCluster && clusterColumns && columnCutCount > 1;
+      const showDendrograms = settings.heatmapDisplay === "rectangular" && canCluster && settings.heatmapShowDendrograms;
+      const layout = heatmapLayoutMetrics(settings, {
+        hasAnnotationLegend: annotationTracks.length > 0,
+        rowAnnotationTracks: rowAnnotations.tracks.length,
+        columnAnnotationTracks: columnAnnotations.tracks.length,
+        showRowCut,
+        showColumnCut,
+        showRowDendrogram: showDendrograms && clusterRows,
+        showColumnDendrogram: showDendrograms && clusterColumns,
+        showSidePlot: settings.heatmapDisplay === "rectangular" && settings.heatmapShowSidePlot,
+        rowCount: displayedRowIds.length,
+        columnCount: numericHeaders.length,
+        maxColumnLabelCharacters: Math.max(0, ...numericHeaders.map((label) => label.length)),
+        maxCutClusters: Math.max(showRowCut ? Math.min(rowCutCount, displayedRowIds.length) : 0, showColumnCut ? Math.min(columnCutCount, numericHeaders.length) : 0),
+      });
+      if (settings.heatmapDisplay === "circular") {
+        if (layout.circularOuterRadius <= layout.circularInnerRadius) errors.push(`Circular heatmap tracks do not fit inside the ${settings.width} × ${settings.height} export after labels, annotation rings, and legends; increase the figure size or reduce annotations.`);
+        if (layout.circularRingWidth < 0.75) errors.push(`Circular heatmap rings would be ${Math.max(0, layout.circularRingWidth).toFixed(2)} px at ${settings.width} × ${settings.height}; reduce rows or increase the figure size.`);
+        else if (layout.circularRingWidth < 1.5) warnings.push(`Circular heatmap rings are approximately ${layout.circularRingWidth.toFixed(1)} px; increase the figure size or reduce rows for reliable print reproduction.`);
+        if (layout.circularSectorArc < 0.75) errors.push(`Circular heatmap sectors would be ${layout.circularSectorArc.toFixed(2)} px along the outer arc; reduce columns or increase the figure size.`);
+        if (settings.heatmapLabelDensity === "all") {
+          const requiredRingListHeight = displayedRowIds.length * (Math.max(8, settings.legendSize) + 3);
+          if (requiredRingListHeight > layout.circularRingListAvailableHeight) errors.push(`All ${displayedRowIds.length} ring identities need ${requiredRingListHeight.toFixed(0)} px, but only ${layout.circularRingListAvailableHeight.toFixed(0)} px is available; use Auto label density, increase height, or reduce rows.`);
+        }
+        if (layout.cutLegendWidth > layout.frame.plotWidth) errors.push(`The cluster-cut legend needs ${layout.cutLegendWidth.toFixed(0)} px of width, but the circular plot frame has ${layout.frame.plotWidth.toFixed(0)} px; increase width, reduce the cut count, or reduce legend size.`);
+      } else {
+        if (layout.matrixWidth < 70) errors.push(`The heatmap matrix has only ${Math.max(0, layout.matrixWidth).toFixed(0)} px of usable width after dendrograms, annotations, legends, and the side plot; increase width or hide optional layers (minimum 70 px).`);
+        if (layout.matrixHeight < 70) errors.push(`The heatmap matrix has only ${Math.max(0, layout.matrixHeight).toFixed(0)} px of usable height after dendrograms, annotations, and legends; increase height or hide optional layers (minimum 70 px).`);
+        if (layout.cutLegendWidth > Math.max(0, layout.matrixWidth)) errors.push(`The cluster-cut legend needs ${layout.cutLegendWidth.toFixed(0)} px, but the matrix header has ${Math.max(0, layout.matrixWidth).toFixed(0)} px; increase width, reduce the cut count, or reduce legend size.`);
+      }
+      if (settings.heatmapRowClusters > displayedRowIds.length) warnings.push(`Row cluster cut is capped at ${displayedRowIds.length}, the number of displayed rows.`);
+      if (columnCutCount > numericHeaders.length) warnings.push(`Column cluster cut is capped at ${numericHeaders.length}, the number of displayed columns.`);
+    }
     return { errors, warnings };
   }
 

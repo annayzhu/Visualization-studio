@@ -71,6 +71,28 @@ function assertSeed<PlotId extends string, SettingKey extends string>(seed: Plot
   requireText(seed?.definition?.sampleData, "definition.sampleData", id);
   if (!Array.isArray(seed?.definition?.roles)) throw new Error(`Plot module ${id} is missing definition.roles.`);
   if (!seed?.definition?.defaultMapping) throw new Error(`Plot module ${id} is missing definition.defaultMapping.`);
+  const roleKeys = new Set<string>();
+  seed.definition.roles.forEach((role, roleIndex) => {
+    requireText(role?.key, `definition.roles[${roleIndex}].key`, id);
+    requireText(role?.label, `definition.roles[${roleIndex}].label`, id);
+    if (!["category", "number", "label"].includes(role?.kind)) throw new Error(`Plot module ${id} has an invalid definition.roles[${roleIndex}].kind.`);
+    if (typeof role?.required !== "boolean") throw new Error(`Plot module ${id} has an invalid definition.roles[${roleIndex}].required flag.`);
+    if (roleKeys.has(role.key)) throw new Error(`Plot module ${id} has a duplicate role key: ${role.key}.`);
+    roleKeys.add(role.key);
+  });
+  Object.entries(seed.definition.defaultMapping).forEach(([key, value]) => {
+    if (!roleKeys.has(key)) throw new Error(`Plot module ${id} maps an unknown role: ${key}.`);
+    if (typeof value !== "string") throw new Error(`Plot module ${id} has a non-text default mapping for ${key}.`);
+  });
+  seed.definition.examples?.forEach((example, exampleIndex) => {
+    requireText(example?.label, `definition.examples[${exampleIndex}].label`, id);
+    requireText(example?.description, `definition.examples[${exampleIndex}].description`, id);
+    requireText(example?.data, `definition.examples[${exampleIndex}].data`, id);
+    Object.entries(example.mapping ?? {}).forEach(([key, value]) => {
+      if (!roleKeys.has(key)) throw new Error(`Plot module ${id} example ${exampleIndex + 1} maps an unknown role: ${key}.`);
+      if (typeof value !== "string") throw new Error(`Plot module ${id} example ${exampleIndex + 1} has a non-text mapping for ${key}.`);
+    });
+  });
   requireText(seed?.guidance?.definition, "guidance.definition", id);
   requireText(seed?.guidance?.suitableData, "guidance.suitableData", id);
   requireText(seed?.guidance?.answers, "guidance.answers", id);
@@ -82,16 +104,21 @@ function assertSeed<PlotId extends string, SettingKey extends string>(seed: Plot
   if (!rendererIds.has(seed.renderer)) throw new Error(`Plot module ${id} has an invalid renderer: ${String(seed.renderer)}.`);
   if (!dataShapes.has(seed.capabilities?.dataShape)) throw new Error(`Plot module ${id} has an invalid data shape: ${String(seed.capabilities?.dataShape)}.`);
   if (!Array.isArray(seed.capabilities?.settingKeys)) throw new Error(`Plot module ${id} is missing adjustable setting keys.`);
+  if (new Set(seed.capabilities.settingKeys).size !== seed.capabilities.settingKeys.length) throw new Error(`Plot module ${id} has duplicate adjustable setting keys.`);
 }
 
 export function createPlotModuleRegistry<PlotId extends string, SettingKey extends string = string>(
   seeds: readonly PlotModuleSeed<PlotId, SettingKey>[],
+  options: { allowedSettingKeys?: readonly SettingKey[] } = {},
 ): PlotModuleRegistry<PlotId, SettingKey> {
   const byId = new Map<PlotId, PlotModule<PlotId, SettingKey>>();
+  const allowedSettingKeys = options.allowedSettingKeys ? new Set(options.allowedSettingKeys) : null;
   const modules = seeds.map((seed, index) => {
     assertSeed(seed, index);
     const id = seed.definition.id;
     if (byId.has(id)) throw new Error(`Duplicate plot module identifier: ${id}.`);
+    const unknownSettingKey = allowedSettingKeys && seed.capabilities.settingKeys.find((key) => !allowedSettingKeys.has(key));
+    if (unknownSettingKey) throw new Error(`Plot module ${id} has an unknown adjustable setting key: ${unknownSettingKey}.`);
     const plotModule = Object.freeze({
       definition: Object.freeze({ ...seed.definition }),
       examples: normalizedExamples(seed.definition),
@@ -120,13 +147,15 @@ const advancedRendererIds = new Set([
 ]);
 const commonSettingKeys = [
   "title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize",
-  "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid", "legendPosition",
+  "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ] as const;
+const hiddenLegendIds = new Set(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"]);
 const specializedSettingKeys: Record<string, readonly string[]> = {
   bar: ["swapAxes", "barErrorType", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
-  line: ["showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
-  scatter: ["showTrend", "showLabels"], correlation: ["showTrend", "showLabels", "correlationMethod"], pca: ["showLabels"],
+  line: ["swapAxes", "showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
+  scatter: ["swapAxes", "showTrend", "showLabels"], correlation: ["showTrend", "showLabels", "correlationMethod"], pca: ["swapAxes", "showLabels"],
+  pcoa: ["showLabels"], umap: ["showLabels"],
   box: ["showBox", "showPoints", "showSampleSize", "boxErrorType", "errorBarLineWidth", "errorBarCapSize"],
   violin: ["showPoints", "showSampleSize", "violinBandwidth", "violinWidth"], beeswarm: ["showPoints", "showSampleSize"],
   raincloud: ["showPoints", "showSampleSize", "violinBandwidth"],
@@ -152,6 +181,7 @@ function legacyDataShape(id: string): PlotDataShape {
 export function createLegacyPlotModuleRegistry<PlotId extends string, SettingKey extends string>(
   definitions: readonly PlotDefinitionLike<PlotId>[],
   guidance: Record<PlotId, PlotGuidanceLike>,
+  allowedSettingKeys: readonly SettingKey[],
 ): PlotModuleRegistry<PlotId, SettingKey> {
   return createPlotModuleRegistry(definitions.map((definition) => ({
     definition,
@@ -159,9 +189,13 @@ export function createLegacyPlotModuleRegistry<PlotId extends string, SettingKey
     renderer: advancedRendererIds.has(definition.id) ? "advanced" : "standard",
     capabilities: {
       dataShape: legacyDataShape(definition.id),
-      settingKeys: [...commonSettingKeys, ...(specializedSettingKeys[definition.id] ?? [])] as SettingKey[],
+      settingKeys: [
+        ...commonSettingKeys,
+        ...(hiddenLegendIds.has(definition.id) ? [] : ["legendPosition"]),
+        ...(specializedSettingKeys[definition.id] ?? []),
+      ] as SettingKey[],
       grouping: definition.roles.some((role) => role.key === "group" || role.key === "series"),
       multipleExamples: (definition.examples?.length ?? 0) > 1,
     },
-  })));
+  })), { allowedSettingKeys });
 }

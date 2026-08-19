@@ -5,7 +5,7 @@ A browser-local scientific visualization workspace for creating compact, publica
 ## Highlights
 
 - Publication-oriented defaults with Arial typography and compact figure dimensions
-- Bar, line, scatter, PCA, box, violin, volcano, heatmap, enrichment, survival, ROC, Venn, UpSet, Sankey, chord, Circos, and additional scientific plot types
+- A categorical Bar family with grouped, stacked, 100% stacked, horizontal, bidirectional, faceted, polar, bullet, pyramid, axis-break, dual-axis, and overlay variants, plus line, scatter, PCA, box, violin, volcano, heatmap, enrichment, survival, ROC, Venn, UpSet, Sankey, chord, Circos, and additional scientific plot types
 - Adjustable labels, dimensions, line weights, marks, grids, legends, uncertainty bars, palettes, and plot-specific parameters
 - Built-in journal-inspired and traditional Chinese color palettes
 - SVG, 600 dpi PNG, and reproducible JSON configuration export

@@ -131,4 +131,48 @@ test.describe("Visualization Studio browser acceptance", () => {
     const previewCard = page.getByRole("heading", { name: "Correlation heatmap preview" }).locator("xpath=ancestor::section");
     await expect(previewCard).toHaveScreenshot("correlation-heatmap-mobile.png", { animations: "disabled" });
   });
+
+  test("switches categorical variants and computes long-form uncertainty", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop categorical-family baseline");
+    await page.goto("/");
+    const variant = page.getByRole("combobox", { name: "Variant" });
+    const svg = page.locator("svg[aria-label='Bar scientific figure preview']");
+    for (const value of ["stacked", "percentage", "horizontal", "bidirectional", "faceted", "polar", "bullet", "pyramid", "axis-break", "dual-axis", "overlay"]) {
+      await variant.selectOption(value);
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      await expect(svg.locator("[data-plot-element='bar']").first()).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Secondary value" })).toHaveCount(["dual-axis", "overlay"].includes(value) ? 1 : 0);
+      await expect(page.getByRole("combobox", { name: "Target value" })).toHaveCount(value === "bullet" ? 1 : 0);
+      await expect(page.getByRole("combobox", { name: "Facet" })).toHaveCount(value === "faceted" ? 1 : 0);
+      await expect(page.getByRole("combobox", { name: "Error representation" })).toHaveCount(["stacked", "percentage", "polar"].includes(value) ? 0 : 1);
+    }
+
+    await variant.selectOption("grouped");
+    await page.getByRole("button", { name: "Example 2" }).click();
+    await expect(page.getByRole("combobox", { name: "Input structure" })).toHaveValue("long");
+    await page.getByRole("combobox", { name: "Error representation" }).selectOption("sem");
+    await expect(svg.locator("[data-plot-element='error-bar']")).toHaveCount(4);
+
+    await page.getByRole("button", { name: "Example 1" }).click();
+    await variant.selectOption("dual-axis");
+    await expect(page.getByRole("textbox", { name: "Secondary axis label" })).toHaveValue("Secondary value");
+    const previewCard = page.getByRole("heading", { name: "Bar preview" }).locator("xpath=ancestor::section");
+    await expect(previewCard).toHaveScreenshot("bar-dual-axis-desktop.png", { animations: "disabled" });
+
+    await variant.selectOption("bidirectional");
+    await page.getByRole("combobox", { name: "Error representation" }).selectOption("none");
+    for (const values of [[2, 5, 8], [-2, -5, -8], [-4, 1, 7]]) {
+      await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`category\tvalue\tgroup\nA\t${values[0]}\tG1\nB\t${values[1]}\tG2\nC\t${values[2]}\tG3`);
+      await page.getByRole("button", { name: "Auto-map" }).click();
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      const downloadEvent = page.waitForEvent("download");
+      await page.getByRole("button", { name: "SVG" }).click();
+      const download = await downloadEvent; const path = await download.path();
+      expect(path).not.toBeNull();
+      const source = await readFile(path!, "utf8");
+      expect(source.match(/data-plot-element="bar"/g)).toHaveLength(3);
+      if (values.some((value) => value < 0)) expect(source).toMatch(/data-value="-/);
+      expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    }
+  });
 });

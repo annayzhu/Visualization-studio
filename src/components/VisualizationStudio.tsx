@@ -18,9 +18,11 @@ import {
   getPlotDefinition,
   getPlotModule,
   inferPlotMapping,
+  isPlotRoleActive,
   journalThemes,
   paletteSeries,
   parseDelimitedData,
+  parseNumericValue,
   plotModuleRegistry,
   validatePlotDataset,
   type JournalThemeId,
@@ -439,11 +441,22 @@ export function VisualizationStudio() {
   const definition = plotModule.definition;
   const dataExamples = plotModule.examples;
   const guidance = plotModule.guidance;
+  const visibleRoles = definition.roles.filter((role) => isPlotRoleActive(plotType, role.key, settings));
   const manualAxes = activeNumericAxes(plotType, settings);
   const invalidXLimits = manualAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
   const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions) : null, [plotType, rawData, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
+  const barBreakRange = useMemo(() => {
+    if (plotType !== "bar" || !mapping.value) return { minimum: -100, maximum: 100, step: 0.5 };
+    const values = dataset.rows.flatMap((row) => {
+      const value = parseNumericValue(row[mapping.value]);
+      return value === null ? [] : [value];
+    });
+    if (!values.length) return { minimum: -100, maximum: 100, step: 0.5 };
+    const low = Math.min(...values); const high = Math.max(...values); const span = Math.max(1, high - low, Math.abs(low) * .2, Math.abs(high) * .2);
+    return { minimum: Math.floor(low - span * .25), maximum: Math.ceil(high + span * .25), step: Math.max(0.01, Number((span / 200).toPrecision(2))) };
+  }, [dataset.rows, mapping.value, plotType]);
   const validation = useMemo(
     () => validatePlotDataset(getPlotDefinition(plotType), dataset, mapping, settings),
     [plotType, dataset, mapping, settings],
@@ -496,6 +509,7 @@ export function VisualizationStudio() {
     setLoadedFileName("");
     setFileError("");
     if (plotType === "pca") setPcaOptions(defaultPcaOptions);
+    if (plotType === "bar") updateSetting("barInputMode", exampleIndex === 1 ? "long" : "summary");
   };
 
   const selectPlot = (nextType: PlotType) => {
@@ -601,6 +615,15 @@ export function VisualizationStudio() {
     const normalizedHeaders = new Map(dataset.headers.map((header) => [header.toLowerCase().replace(/[^a-z0-9]/g, ""), header]));
     const preferredColumn = preferredAliases.map((alias) => normalizedHeaders.get(alias)).find(Boolean);
     if (preferredColumn) setMapping((current) => ({ ...current, error: preferredColumn }));
+  };
+
+  const selectBarVariant = (value: VisualizationSettings["barVariant"]) => {
+    setSettings((current) => ({
+      ...current,
+      barVariant: value,
+      swapAxes: ["dual-axis", "overlay", "polar", "faceted"].includes(value) ? false : current.swapAxes,
+      legendPosition: value === "dual-axis" && current.legendPosition === "right" ? "bottom" : current.legendPosition,
+    }));
   };
 
   const loadFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -854,8 +877,8 @@ export function VisualizationStudio() {
                     <p>{pcaAnalysis.groups.length} inferred group{pcaAnalysis.groups.length === 1 ? "" : "s"}: {pcaAnalysis.groups.join(" · ") || "—"}</p>
                     {pcaAnalysis.availableLayers.length > 1 ? <p>Detected layers: {pcaAnalysis.availableLayers.map((layer) => `${layer.label} (${layer.columns})`).join(" · ")}</p> : null}
                   </div>
-                </> : definition.roles.length === 0 ? <p className="rounded-[8px] bg-stone px-3 py-2 text-xs leading-5 text-graphite">The first column supplies row labels; all remaining columns form the numeric matrix.</p> : definition.roles.map((role) => (
-                  <SelectControl key={role.key} label={`${mappingRoleLabel(plotType, role, settings.swapAxes)}${role.required ? " *" : ""}`} value={mapping[role.key] ?? ""} onChange={(value) => setMapping((current) => ({ ...current, [role.key]: value }))}>
+                </> : visibleRoles.length === 0 ? <p className="rounded-[8px] bg-stone px-3 py-2 text-xs leading-5 text-graphite">The first column supplies row labels; all remaining columns form the numeric matrix.</p> : visibleRoles.map((role) => (
+                  <SelectControl key={role.key} label={`${mappingRoleLabel(plotType, role, settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant))}${role.required ? " *" : ""}`} value={mapping[role.key] ?? ""} onChange={(value) => setMapping((current) => ({ ...current, [role.key]: value }))}>
                     <option value="">{role.required ? "Select column" : "None"}</option>
                     {dataset.headers.map((header) => <option key={header} value={header}>{header}</option>)}
                   </SelectControl>
@@ -905,18 +928,34 @@ export function VisualizationStudio() {
               <RangeControl label="Opacity" value={settings.opacity} minimum={0.25} maximum={1} step={0.05} onChange={(value) => updateSetting("opacity", value)} />
               <SelectControl label="Grid" value={settings.grid} onChange={(value) => updateSetting("grid", value as VisualizationSettings["grid"])}><option value="none">None</option><option value="y">Horizontal only</option><option value="both">Both axes</option></SelectControl>
               {!(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"] as PlotType[]).includes(plotType) ? <SelectControl label="Legend" value={settings.legendPosition} onChange={(value) => updateSetting("legendPosition", value as VisualizationSettings["legendPosition"])}><option value="right">Right</option>{plotType !== "enrichment" && plotType !== "enrichment-bar" ? <option value="bottom">Bottom</option> : null}<option value="none">Hidden</option></SelectControl> : null}
-              {(["bar", "line", "scatter", "pca"] as PlotType[]).includes(plotType) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
+              {(["line", "scatter", "pca"] as PlotType[]).includes(plotType) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant)) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
               {plotType === "scatter" || plotType === "correlation" ? <><ToggleControl label="Linear trend" checked={settings.showTrend} onChange={(value) => updateSetting("showTrend", value)} /><ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /></> : null}
               {(["pca", "pcoa", "umap", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
               {(["box", "violin", "beeswarm", "raincloud"] as PlotType[]).includes(plotType) ? <><ToggleControl label="Show observations" checked={settings.showPoints} onChange={(value) => updateSetting("showPoints", value)} /><ToggleControl label="Show sample size" checked={settings.showSampleSize} onChange={(value) => updateSetting("showSampleSize", value)} /></> : null}
             </ControlGroup>
 
-            {plotType === "bar" || plotType === "line" ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} error bars`}>
+            {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} error bars`}>
               <SelectControl label="Error representation" value={plotType === "bar" ? settings.barErrorType : settings.lineErrorType} onChange={(value) => selectErrorType(plotType === "bar" ? "barErrorType" : "lineErrorType", value as VisualizationSettings["barErrorType"])}><option value="none">None</option><option value="sd">Mean ± SD</option><option value="sem">Mean ± SEM</option></SelectControl>
               {(plotType === "bar" ? settings.barErrorType : settings.lineErrorType) !== "none" ? <><RangeControl label="Error line" value={settings.errorBarLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("errorBarLineWidth", value)} /><RangeControl label="Cap width" value={settings.errorBarCapSize} minimum={4} maximum={30} step={1} unit=" px" onChange={(value) => updateSetting("errorBarCapSize", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Map the column containing the already-calculated {(plotType === "bar" ? settings.barErrorType : settings.lineErrorType).toUpperCase()} values under Data &amp; mapping. SD and SEM are not interchangeable; SEM = SD / √n.</p></> : null}
             </ControlGroup> : null}
 
-            {plotType === "bar" ? <ControlGroup title="Bar appearance"><RangeControl label="Border width" value={settings.barBorderWidth} minimum={0} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("barBorderWidth", value)} />{settings.barBorderWidth > 0 ? <ColorControl label="Border color" value={settings.barBorderColor} onChange={(value) => updateSetting("barBorderColor", value)} /> : null}<p className="text-[11px] leading-4 text-muted">Set the width to 0 for borderless bars. The outline remains fully opaque so it stays legible when fill opacity is reduced.</p></ControlGroup> : null}
+            {plotType === "bar" ? <>
+              <ControlGroup title="Categorical design">
+                <SelectControl label="Variant" value={settings.barVariant} onChange={(value) => selectBarVariant(value as VisualizationSettings["barVariant"])}>
+                  <option value="grouped">Grouped</option><option value="stacked">Stacked</option><option value="percentage">100% stacked</option><option value="horizontal">Horizontal</option><option value="bidirectional">Bidirectional</option><option value="faceted">Faceted</option><option value="polar">Polar bars</option><option value="bullet">Bullet</option><option value="pyramid">Pyramid</option><option value="axis-break">Axis break</option><option value="dual-axis">Dual axis</option><option value="overlay">Bar + overlay</option>
+                </SelectControl>
+                <SelectControl label="Input structure" value={settings.barInputMode} onChange={(value) => updateSetting("barInputMode", value as VisualizationSettings["barInputMode"])}><option value="summary">Summary values</option><option value="long">Long-form observations</option></SelectControl>
+                <RangeControl label={settings.barVariant === "polar" ? "Angular gap" : "Gap"} value={settings.barGap} minimum={0.04} maximum={0.5} step={0.01} onChange={(value) => updateSetting("barGap", value)} />
+                {["dual-axis", "overlay"].includes(settings.barVariant) ? <SelectControl label="Secondary mark" value={settings.barOverlayType} onChange={(value) => updateSetting("barOverlayType", value as VisualizationSettings["barOverlayType"])}><option value="line">Line + points</option><option value="points">Points only</option></SelectControl> : null}
+                {settings.barVariant === "dual-axis" ? <TextControl label="Secondary axis label" value={settings.secondaryAxisLabel} onChange={(value) => updateSetting("secondaryAxisLabel", value)} placeholder="Secondary value (unit)" /> : null}
+                {settings.barVariant === "dual-axis" ? <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The secondary column uses an independently labelled right-side scale. Use only when the two units are explicit and a shared baseline would be misleading.</p> : null}
+                {settings.barVariant === "overlay" ? <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The secondary column shares the primary value axis and should use the same unit.</p> : null}
+                {settings.barVariant === "axis-break" ? <><RangeControl label="Break start" value={settings.axisBreakStart} minimum={barBreakRange.minimum} maximum={barBreakRange.maximum} step={barBreakRange.step} onChange={(value) => updateSetting("axisBreakStart", value)} /><RangeControl label="Break end" value={settings.axisBreakEnd} minimum={barBreakRange.minimum} maximum={barBreakRange.maximum} step={barBreakRange.step} onChange={(value) => updateSetting("axisBreakEnd", value)} /></> : null}
+                {settings.barVariant !== "polar" ? <ToggleControl label="Significance annotations" checked={settings.showSignificance} onChange={(value) => updateSetting("showSignificance", value)} /> : null}
+                {settings.showSignificance && settings.barVariant !== "polar" ? <RangeControl label="P-value threshold" value={settings.significanceThreshold} minimum={0.001} maximum={0.1} step={0.001} onChange={(value) => updateSetting("significanceThreshold", value)} /> : null}
+              </ControlGroup>
+              {settings.barVariant !== "polar" ? <ControlGroup title="Bar appearance"><RangeControl label="Border width" value={settings.barBorderWidth} minimum={0} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("barBorderWidth", value)} />{settings.barBorderWidth > 0 ? <ColorControl label="Border color" value={settings.barBorderColor} onChange={(value) => updateSetting("barBorderColor", value)} /> : null}<p className="text-[11px] leading-4 text-muted">Set the width to 0 for borderless bars. The outline remains fully opaque so it stays legible when fill opacity is reduced.</p></ControlGroup> : null}
+            </> : null}
 
             {plotType === "box" ? <ControlGroup title="Box & summary">
               <ToggleControl label="Show box & whiskers" checked={settings.showBox} onChange={(value) => updateSetting("showBox", value)} />

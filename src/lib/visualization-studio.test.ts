@@ -103,7 +103,7 @@ describe("Visualization Studio data contracts", () => {
       expect(examples.length).toBeGreaterThan(0);
       expect(examples.every((example) => example.label.startsWith("Example ") && example.data.length > 20)).toBe(true);
     });
-    expect(getPlotExamples(getPlotDefinition("bar"))).toHaveLength(2);
+    expect(getPlotExamples(getPlotDefinition("bar"))).toHaveLength(3);
     expect(getPlotExamples(getPlotDefinition("line"))).toHaveLength(2);
     expect(getPlotExamples(getPlotDefinition("pca"))).toHaveLength(2);
   });
@@ -226,6 +226,27 @@ describe("Visualization Studio data contracts", () => {
 
     const negative = validatePlotDataset(definition, dataset, { category: "category", value: "value", error: "error" }, { ...defaultVisualizationSettings, barErrorType: "sem" });
     expect(negative.errors.join(" ")).toMatch(/SD and SEM must be non-negative/);
+  });
+
+  it("rejects misleading percentage and axis-break inputs while ignoring hidden uncertainty", () => {
+    const definition = getPlotDefinition("bar");
+    const signed = parseDelimitedData("category\tvalue\tgroup\nA\t-2\tG1\nA\t5\tG2");
+    const mapping = { category: "category", value: "value", group: "group", error: "", secondary: "", target: "", pValue: "", facet: "" };
+    const percentage = validatePlotDataset(definition, signed, mapping, { ...defaultVisualizationSettings, barVariant: "percentage", barErrorType: "sd" });
+    expect(percentage.errors).toContain("100% stacked bars require non-negative parts; use Bidirectional for signed values.");
+    expect(percentage.errors.join(" ")).not.toMatch(/Map an error column/);
+
+    const inactive = parseDelimitedData("category\tvalue\tbad\nA\t2\tnot-a-number");
+    const inactiveMapping = { ...mapping, group: "", secondary: "bad", target: "bad", pValue: "bad", error: "bad" };
+    expect(validatePlotDataset(definition, inactive, inactiveMapping, { ...defaultVisualizationSettings, barVariant: "grouped" }).errors).toEqual([]);
+
+    const broken = parseDelimitedData("category\tvalue\tgroup\nA\t4\tG1\nB\t6\tG1\nC\t8\tG1");
+    const axisBreak = validatePlotDataset(definition, broken, mapping, { ...defaultVisualizationSettings, barVariant: "axis-break", axisBreakStart: 5, axisBreakEnd: 7 });
+    expect(axisBreak.errors.join(" ")).toMatch(/Axis break contains 1 displayed value/);
+
+    const long = parseDelimitedData("category\tvalue\tgroup\nA\t3\tG1\nA\t4\tG1\nA\t5\tG1\nB\t8\tG1\nB\t9\tG1\nB\t10\tG1");
+    const longBreak = validatePlotDataset(definition, long, mapping, { ...defaultVisualizationSettings, barVariant: "axis-break", barInputMode: "long", barErrorType: "sd", axisBreakStart: 4.8, axisBreakEnd: 5.2 });
+    expect(longBreak.errors.join(" ")).toMatch(/uncertainty bound/);
   });
 
   it("requires a mapped non-negative error column when line SD or SEM is enabled", () => {

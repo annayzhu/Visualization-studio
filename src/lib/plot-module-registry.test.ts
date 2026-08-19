@@ -65,6 +65,9 @@ describe("plot-module registry interface", () => {
     expect(() => createPlotModuleRegistry([seed("bar", { renderer: undefined as never })])).toThrow(/bar.*renderer/i);
     expect(() => createPlotModuleRegistry([seed("bar", { definition: { ...seed("bar").definition, summary: "" } })])).toThrow(/bar.*definition\.summary/i);
     expect(() => createPlotModuleRegistry([seed("bar", { capabilities: { dataShape: "long", settingKeys: undefined as never } })])).toThrow(/bar.*setting keys/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { definition: { ...seed("bar").definition, roles: [{ key: "value", label: "Value", kind: "number", required: true }, { key: "value", label: "Again", kind: "number", required: false }] } })])).toThrow(/bar.*duplicate role key.*value/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { definition: { ...seed("bar").definition, examples: [{ label: "", description: "Bad", data: "x\n1" }] } })])).toThrow(/bar.*examples\[0\]\.label/i);
+    expect(() => createPlotModuleRegistry([seed("bar", { capabilities: { dataShape: "long", settingKeys: ["widht"] } })], { allowedSettingKeys: ["width"] })).toThrow(/bar.*unknown adjustable setting key.*widht/i);
   });
 
   it("reports unknown plot modules instead of silently selecting another chart", () => {
@@ -84,6 +87,10 @@ describe("plot-module registry interface", () => {
     });
     expect(getPlotModule("bar").renderer).toBe("standard");
     expect(getPlotModule("bar").capabilities.settingKeys).toContain("barBorderWidth");
+    expect(getPlotModule("line").capabilities.settingKeys).toContain("swapAxes");
+    expect(getPlotModule("scatter").capabilities.settingKeys).toContain("swapAxes");
+    expect(getPlotModule("pca").capabilities.settingKeys).toContain("swapAxes");
+    expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");
   });
 });

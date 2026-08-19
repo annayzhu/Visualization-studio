@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  alignHeatmapAnnotations,
+  categoricalColorForIndex,
   boxStatistics,
   confidenceInterval95,
   covarianceEllipsePoints,
@@ -230,6 +232,106 @@ describe("Visualization Studio data contracts", () => {
 
     const constantCorrelation = validatePlotDataset(getPlotDefinition("correlation-heatmap"), parseDelimitedData("sample\tA\tB\nS1\t1\t2\nS2\t1\t3\nS3\t1\t4"), {});
     expect(constantCorrelation.errors).toContain("Correlation is undefined for constant columns: A.");
+  });
+
+  it("aligns heatmap annotations by stable IDs and reports every mismatch class", () => {
+    const aligned = alignHeatmapAnnotations("id\tgroup\tage\nS2\tB\t42\nS1\tA\t37\nS4\tC\t55", ["S1", "S2", "S3"], "column");
+    expect(aligned.matchedIds).toBe(2);
+    expect(aligned.tracks.map((track) => [track.name, track.kind])).toEqual([["group", "categorical"], ["age", "continuous"]]);
+    expect(aligned.tracks[0].values.get("S1")).toBe("A");
+    expect(aligned.missingIds).toEqual(["S3"]);
+    expect(aligned.extraIds).toEqual(["S4"]);
+    expect(aligned.warnings.join(" ")).toMatch(/missing.*S3/i);
+    expect(aligned.warnings.join(" ")).toMatch(/ignored.*S4/i);
+    expect(aligned.warnings.join(" ")).toMatch(/inferred as continuous/i);
+
+    const coded = alignHeatmapAnnotations("id\tbatch[categorical]\tage[continuous]\nS1\t1\t37\nS2\t2\t42", ["S1", "S2"], "column");
+    expect(coded.tracks.map((track) => [track.name, track.kind])).toEqual([["batch", "categorical"], ["age", "continuous"]]);
+    expect(coded.warnings.join(" ")).not.toMatch(/batch.*inferred/i);
+    expect(alignHeatmapAnnotations("id\tage[continuous]\nS1\told", ["S1"], "row").errors.join(" ")).toMatch(/declared continuous.*non-numeric/);
+
+    const duplicate = alignHeatmapAnnotations("id\tgroup\nS1\tA\nS1\tB", ["S1"], "row");
+    expect(duplicate.errors.join(" ")).toMatch(/unique.*S1/i);
+
+    const duplicateDeclaredNames = alignHeatmapAnnotations("id\tbatch\tbatch[categorical]\nS1\tA\t1", ["S1"], "row");
+    expect(duplicateDeclaredNames.errors.join(" ")).toMatch(/track names.*unique.*batch/i);
+  });
+
+  it("applies tighter browser safety limits to circular heatmaps and surfaces annotation mismatches", () => {
+    const rows = Array.from({ length: 81 }, (_, index) => `G${index}\t${index}\t${index + 1}`).join("\n");
+    const settings = { ...defaultVisualizationSettings, heatmapDisplay: "circular" as const, heatmapRowAnnotationData: "id\tmodule\nG0\tA\nEXTRA\tB" };
+    const result = validatePlotDataset(getPlotDefinition("clustered-heatmap"), parseDelimitedData(`gene\tS1\tS2\n${rows}`), {}, settings);
+    expect(result.errors.join(" ")).toMatch(/limited to 80 rows/);
+    expect(result.warnings.join(" ")).toMatch(/80 row IDs are missing/);
+    expect(result.warnings.join(" ")).toMatch(/EXTRA/);
+  });
+
+  it("uses rendered heatmap geometry to block cramped rectangular and circular exports", () => {
+    const dataset = parseDelimitedData("gene\tS1\tS2\tS3\nG1\t1\t2\t3\nG2\t2\t4\t5\nG3\t3\t2\t7");
+    const crowdedRectangular = validatePlotDataset(getPlotDefinition("clustered-heatmap"), dataset, {}, {
+      ...defaultVisualizationSettings,
+      width: 340,
+      height: 340,
+      heatmapShowSidePlot: true,
+      heatmapRowAnnotationData: "id\ta\tb\tc\nG1\tA\tB\tC\nG2\tB\tC\tA\nG3\tC\tA\tB",
+      heatmapColumnAnnotationData: "id\tgroup\tbatch\tphase\nS1\tA\t1\tX\nS2\tB\t2\tY\nS3\tC\t3\tZ",
+    });
+    expect(crowdedRectangular.errors.join(" ")).toMatch(/usable width.*minimum 70 px/i);
+
+    const circularRows = Array.from({ length: 28 }, (_, index) => `G${index}\t${index + 1}\t${index + 2}\t${index + 3}`).join("\n");
+    const crampedCircular = validatePlotDataset(getPlotDefinition("clustered-heatmap"), parseDelimitedData(`gene\tS1\tS2\tS3\n${circularRows}`), {}, {
+      ...defaultVisualizationSettings,
+      width: 340,
+      height: 340,
+      heatmapDisplay: "circular",
+      heatmapColumnAnnotationData: "id\ta\tb\tc\td\te\tf\nS1\tA\tB\tC\tD\tE\tF\nS2\tB\tC\tD\tE\tF\tG\nS3\tC\tD\tE\tF\tG\tH",
+    });
+    expect(crampedCircular.errors.join(" ")).toMatch(/rings would be|tracks do not fit/i);
+
+    const twentyRows = Array.from({ length: 20 }, (_, index) => `G${index}\t${index + 1}\t${index + 2}\t${index + 3}`).join("\n");
+    const allLargeRingLabels = validatePlotDataset(getPlotDefinition("clustered-heatmap"), parseDelimitedData(`gene\tA\tB\tC\n${twentyRows}`), {}, {
+      ...defaultVisualizationSettings,
+      width: 340,
+      height: 340,
+      legendSize: 16,
+      heatmapDisplay: "circular",
+      heatmapLabelDensity: "all",
+    });
+    expect(allLargeRingLabels.errors.join(" ")).toMatch(/ring identities.*Auto label density/i);
+
+    const eightColumns = Array.from({ length: 8 }, (_, index) => `S${index + 1}`);
+    const eightRows = Array.from({ length: 8 }, (_, rowIndex) => `G${rowIndex + 1}\t${eightColumns.map((_, columnIndex) => rowIndex * 8 + columnIndex + 1).join("\t")}`).join("\n");
+    const wideCutLegend = validatePlotDataset(getPlotDefinition("clustered-heatmap"), parseDelimitedData(`gene\t${eightColumns.join("\t")}\n${eightRows}`), {}, {
+      ...defaultVisualizationSettings,
+      width: 300,
+      height: 340,
+      legendSize: 16,
+      heatmapRowClusters: 8,
+      heatmapColumnClusters: 8,
+    });
+    expect(wideCutLegend.errors.join(" ")).toMatch(/cluster-cut legend needs/i);
+  });
+
+  it("keeps synthesized annotation colors unique through the heatmap category ceiling", () => {
+    const colors = Array.from({ length: 250 }, (_, index) => categoricalColorForIndex(index, defaultVisualizationSettings.categoricalColors));
+    expect(new Set(colors).size).toBe(250);
+  });
+
+  it("rejects stale correlation configurations with one-sided clustering", () => {
+    const dataset = parseDelimitedData("sample\tA\tB\tC\nS1\t1\t3\t2\nS2\t2\t2\t4\nS3\t4\t1\t5\nS4\t5\t4\t7");
+    const result = validatePlotDataset(getPlotDefinition("correlation-heatmap"), dataset, {}, {
+      ...defaultVisualizationSettings,
+      clusterRows: true,
+      clusterColumns: false,
+    });
+    expect(result.errors.join(" ")).toMatch(/enabled or disabled together/i);
+  });
+
+  it("rejects undefined correlation distances instead of treating zero variance as zero correlation", () => {
+    const dataset = parseDelimitedData("gene\tS1\tS2\tS3\nConstant\t4\t4\t4\nVariable\t1\t2\t4\nOther\t2\t5\t7");
+    const settings = { ...defaultVisualizationSettings, heatmapDistance: "correlation" as const, clusterRows: true, clusterColumns: false };
+    const result = validatePlotDataset(getPlotDefinition("clustered-heatmap"), dataset, {}, settings);
+    expect(result.errors.join(" ")).toMatch(/zero-variance row vectors: Constant/);
   });
 
   it("requires a mapped non-negative error column when bar SD or SEM is enabled", () => {

@@ -12,6 +12,8 @@ export type PlotType =
   | "pca"
   | "pcoa"
   | "umap"
+  | "tsne"
+  | "nmds"
   | "box"
   | "violin"
   | "beeswarm"
@@ -84,6 +86,12 @@ export type ParsedDataset = {
   delimiter: "tab" | "comma";
   errors: string[];
   warnings: string[];
+  analysis?: {
+    pca?: {
+      explainedVariance: number[];
+      loadings: Array<{ feature: string; coordinates: number[] }>;
+    };
+  };
 };
 
 export type FieldRole = {
@@ -118,6 +126,7 @@ export type PlotDataExample = {
   description: string;
   data: string;
   mapping?: Record<string, string>;
+  metadata?: string;
 };
 
 export type PlotReference = {
@@ -256,6 +265,21 @@ export type VisualizationSettings = {
   heatmapLabelDensity: "auto" | "all" | "none";
   heatmapRowAnnotationData: string;
   heatmapColumnAnnotationData: string;
+  ordinationView: "scores" | "scree" | "3d";
+  ordinationShowEllipse: boolean;
+  ordinationShowHull: boolean;
+  ordinationShowCentroids: boolean;
+  ordinationShowLoadings: boolean;
+  ordinationLoadingCount: number;
+  ordinationUseShapes: boolean;
+  ordinationXVariance: number | null;
+  ordinationYVariance: number | null;
+  ordinationZVariance: number | null;
+  ordinationPermanovaR2: number | null;
+  ordinationPermanovaP: number | null;
+  ordinationPermanovaPermutations: number | null;
+  ordinationStress: number | null;
+  ordinationMethodNote: string;
   correlationMethod: "pearson" | "spearman";
   xThreshold: number;
   yThreshold: number;
@@ -360,6 +384,21 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   heatmapLabelDensity: "auto",
   heatmapRowAnnotationData: "",
   heatmapColumnAnnotationData: "",
+  ordinationView: "scores",
+  ordinationShowEllipse: false,
+  ordinationShowHull: false,
+  ordinationShowCentroids: false,
+  ordinationShowLoadings: false,
+  ordinationLoadingCount: 8,
+  ordinationUseShapes: true,
+  ordinationXVariance: null,
+  ordinationYVariance: null,
+  ordinationZVariance: null,
+  ordinationPermanovaR2: null,
+  ordinationPermanovaP: null,
+  ordinationPermanovaPermutations: null,
+  ordinationStress: null,
+  ordinationMethodNote: "",
   correlationMethod: "pearson",
   xThreshold: 0,
   yThreshold: 0,
@@ -381,6 +420,192 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   divergingMid: "#FAF7F2",
   divergingHigh: "#D3BBA4",
 };
+
+export type OrdinationType = "pca" | "pcoa" | "umap" | "tsne" | "nmds";
+
+export function ordinationAnnotationLayout(type: OrdinationType, settings: VisualizationSettings) {
+  const sources = [
+    settings.ordinationPermanovaR2 !== null && settings.ordinationPermanovaP !== null && settings.ordinationPermanovaPermutations !== null
+      ? `PERMANOVA (supplied) · R²=${settings.ordinationPermanovaR2.toFixed(3)} · p=${settings.ordinationPermanovaP < 0.001 ? "<0.001" : settings.ordinationPermanovaP.toFixed(3)} · nperm=${settings.ordinationPermanovaPermutations}`
+      : "",
+    type === "nmds" && settings.ordinationStress !== null ? `Supplied NMDS stress = ${settings.ordinationStress.toFixed(3)}` : "",
+    settings.ordinationMethodNote.trim() ? `Upstream: ${settings.ordinationMethodNote.trim().slice(0, 72)}` : "",
+  ].filter(Boolean);
+  const fontSize = Math.max(8, settings.legendSize - 1);
+  const charactersPerLine = Math.max(28, Math.floor((settings.width - 28) / (fontSize * 0.56)));
+  const lines = sources.flatMap((source) => {
+    const words = source.split(/\s+/);
+    const wrapped: string[] = [];
+    let line = "";
+    words.forEach((word) => {
+      if (!line || `${line} ${word}`.length <= charactersPerLine) line = line ? `${line} ${word}` : word;
+      else { wrapped.push(line); line = word; }
+    });
+    if (line) wrapped.push(line);
+    return wrapped;
+  });
+  return { lines, fontSize, lineHeight: Math.max(11, settings.legendSize + 3) };
+}
+
+/** Shared ordination plot geometry used by validation and SVG rendering. */
+export function ordinationFrameMetrics(type: OrdinationType, settings: VisualizationSettings) {
+  const left = 66;
+  const top = settings.title ? 48 : 24;
+  const bottom = settings.legendPosition === "bottom" ? 80 : 58;
+  const right = 22 + (settings.legendPosition === "right" ? 145 : 0);
+  const plotWidth = Math.max(100, settings.width - left - right);
+  const basePlotHeight = Math.max(90, settings.height - top - bottom);
+  const annotation = ordinationAnnotationLayout(type, settings);
+  const annotationHeight = annotation.lines.length * annotation.lineHeight;
+  return {
+    width: settings.width,
+    height: settings.height,
+    left,
+    right,
+    top: top + annotationHeight,
+    bottom,
+    plotWidth,
+    plotHeight: annotation.lines.length ? Math.max(80, basePlotHeight - annotationHeight) : basePlotHeight,
+    annotation,
+    annotationTop: top,
+  };
+}
+
+export function ordinationLegendLayout(
+  type: OrdinationType,
+  settings: VisualizationSettings,
+  groupCount: number,
+  shapeCount: number,
+) {
+  const frame = ordinationFrameMetrics(type, settings);
+  const visibleGroups = Math.min(12, groupCount);
+  const visibleShapes = Math.min(4, shapeCount);
+  const hasColorLegend = settings.legendPosition !== "none" && visibleGroups >= 2;
+  const hasShapeLegend = settings.legendPosition !== "none" && settings.ordinationUseShapes && visibleShapes >= 2;
+  if (settings.legendPosition === "none") return { fits: true, shapeX: frame.left, shapeY: frame.height, colorBottom: frame.top, shapeBottom: frame.top };
+  if (settings.legendPosition === "right") {
+    const colorBottom = hasColorLegend
+      ? frame.top + 5 + (visibleGroups - 1) * (settings.legendSize + 10) + settings.legendSize
+      : frame.top;
+    const shapeX = frame.left + frame.plotWidth + 10;
+    const shapeY = frame.top + visibleGroups * (settings.legendSize + 8) + 20;
+    const shapeBottom = hasShapeLegend
+      ? shapeY + 17 + (visibleShapes - 1) * (settings.legendSize + 6)
+      : frame.top;
+    return { fits: Math.max(colorBottom, shapeBottom) <= settings.height - 4, shapeX, shapeY, colorBottom, shapeBottom };
+  }
+  const groupsPerRow = Math.max(2, Math.min(4, Math.floor(frame.plotWidth / 90)));
+  const colorRows = hasColorLegend ? Math.ceil(visibleGroups / groupsPerRow) : 0;
+  const colorBottom = colorRows ? frame.height - 72 + (colorRows - 1) * (settings.legendSize + 7) + settings.legendSize : frame.top;
+  const shapeX = frame.left;
+  const shapeY = frame.height - 24;
+  const shapeBottom = hasShapeLegend ? shapeY + 17 : frame.top;
+  const conservativeShapeRight = hasShapeLegend ? shapeX + (visibleShapes - 1) * 74 + 12 + 10 * Math.max(8, settings.legendSize - 1) : shapeX;
+  const noVerticalCollision = !hasColorLegend || !hasShapeLegend || colorBottom + 4 < shapeY;
+  return { fits: noVerticalCollision && shapeBottom <= settings.height - 4 && conservativeShapeRight <= settings.width - 4, shapeX, shapeY, colorBottom, shapeBottom };
+}
+
+export function estimateLegendTextWidth(label: string, fontSize: number) {
+  const em = [...label].reduce((sum, character) => {
+    if (character === "…") return sum + 1;
+    if (/[^\u0000-\u00ff]/.test(character)) return sum + 1;
+    if (/[WM@%&]/.test(character)) return sum + 0.98;
+    if (/[A-Z]/.test(character)) return sum + 0.74;
+    if (/[a-z0-9]/.test(character)) return sum + 0.62;
+    if (/\s/.test(character)) return sum + 0.34;
+    return sum + 0.46;
+  }, 0);
+  return em * Math.max(1, fontSize);
+}
+
+/** Character-aware conservative truncation keeps Arial legend text inside its assigned cell. */
+export function compactLegendLabel(label: string, fontSize: number, availablePixels: number, maximumCharacters: number) {
+  const maximum = Math.max(1, maximumCharacters);
+  if (label.length <= maximum && estimateLegendTextWidth(label, fontSize) <= availablePixels) return label;
+  for (let capacity = Math.min(maximum, label.length); capacity >= 2; capacity -= 1) {
+    const candidate = `${label.slice(0, capacity - 1)}…`;
+    if (estimateLegendTextWidth(candidate, fontSize) <= availablePixels) return candidate;
+  }
+  return "…";
+}
+
+export function ordinationScoreDomains(
+  type: OrdinationType,
+  dataset: ParsedDataset,
+  mapping: Record<string, string>,
+  settings: VisualizationSettings,
+) {
+  const displayedXColumn = type === "pca" && settings.swapAxes ? mapping.y : mapping.x;
+  const displayedYColumn = type === "pca" && settings.swapAxes ? mapping.x : mapping.y;
+  const points = dataset.rows.map((row) => ({
+    x: parseNumericValue(row[displayedXColumn]) ?? 0,
+    y: parseNumericValue(row[displayedYColumn]) ?? 0,
+    group: mapping.group ? row[mapping.group] || "All" : "All",
+  }));
+  const groups = [...new Set(points.map((point) => point.group))];
+  const ellipseBoundary = settings.ordinationShowEllipse
+    ? groups.flatMap((group) => covarianceEllipsePoints(points.filter((point) => point.group === group)))
+    : [];
+  // A convex hull cannot extend beyond the raw extrema, so raw points plus the
+  // covariance boundary fully determine the renderer's automatic score domain.
+  const rawXExtent = numericExtent([...points.map((point) => point.x), ...ellipseBoundary.map((point) => point.x)]);
+  const rawYExtent = numericExtent([...points.map((point) => point.y), ...ellipseBoundary.map((point) => point.y)]);
+  const symmetricExtent = (extent: [number, number]): [number, number] => {
+    const maximum = Math.max(Math.abs(extent[0]), Math.abs(extent[1]), 1e-6);
+    return [-maximum, maximum];
+  };
+  return {
+    displayedXColumn,
+    displayedYColumn,
+    xDomain: resolveAxisDomain(settings.ordinationShowLoadings && type === "pca" && settings.xMin === null && settings.xMax === null ? symmetricExtent(rawXExtent) : rawXExtent, settings.xMin, settings.xMax),
+    yDomain: resolveAxisDomain(settings.ordinationShowLoadings && type === "pca" && settings.yMin === null && settings.yMax === null ? symmetricExtent(rawYExtent) : rawYExtent, settings.yMin, settings.yMax),
+  };
+}
+
+export function ordinationLoadingLayout(
+  dataset: ParsedDataset,
+  mapping: Record<string, string>,
+  settings: VisualizationSettings,
+) {
+  const frame = ordinationFrameMetrics("pca", settings);
+  const domains = ordinationScoreDomains("pca", dataset, mapping, settings);
+  const componentIndex = (header: string) => Math.max(0, Number(header?.match(/\d+/)?.[0] ?? 1) - 1);
+  const selected = (dataset.analysis?.pca?.loadings ?? [])
+    .map((loading) => ({
+      feature: loading.feature,
+      x: loading.coordinates[componentIndex(domains.displayedXColumn)] ?? 0,
+      y: loading.coordinates[componentIndex(domains.displayedYColumn)] ?? 0,
+    }))
+    .filter((loading) => Math.hypot(loading.x, loading.y) > Number.EPSILON)
+    .sort((left, right) => Math.hypot(right.x, right.y) - Math.hypot(left.x, left.y))
+    .slice(0, settings.ordinationLoadingCount);
+  const loadingMaximum = Math.max(...selected.flatMap((loading) => [Math.abs(loading.x), Math.abs(loading.y)]), Number.EPSILON);
+  const originX = scaleLinear(0, domains.xDomain, [frame.left, frame.left + frame.plotWidth]);
+  const originY = scaleLinear(0, domains.yDomain, [frame.top + frame.plotHeight, frame.top]);
+  const fontSize = Math.max(8, settings.tickSize - 1);
+  const labelCapacity = Math.max(2, Math.min(12, Math.floor((frame.plotWidth * 0.5 - 14) / fontSize)));
+  const desired = selected.map((loading) => ({
+    ...loading,
+    displayFeature: loading.feature.length <= labelCapacity ? loading.feature : `${loading.feature.slice(0, Math.max(1, labelCapacity - 1))}…`,
+    dx: loading.x / loadingMaximum * frame.plotWidth * 0.28,
+    dy: -loading.y / loadingMaximum * frame.plotHeight * 0.28,
+  }));
+  const safetyScale = Math.max(0, Math.min(1, ...desired.flatMap((loading) => {
+    const labelWidth = loading.displayFeature.length * fontSize + 5;
+    const horizontal = loading.dx > 0 ? (frame.left + frame.plotWidth - originX - labelWidth) / loading.dx : loading.dx < 0 ? (originX - frame.left - labelWidth) / -loading.dx : 1;
+    const vertical = loading.dy > 0 ? (frame.top + frame.plotHeight - originY - 3) / loading.dy : loading.dy < 0 ? (originY - frame.top - fontSize - 3) / -loading.dy : 1;
+    return [horizontal, vertical];
+  })));
+  const geometries = desired.map((loading) => ({
+    ...loading,
+    endX: originX + loading.dx * safetyScale,
+    endY: originY + loading.dy * safetyScale,
+  }));
+  const minimumArrowLength = geometries.length
+    ? Math.min(...geometries.map((loading) => Math.hypot(loading.endX - originX, loading.endY - originY)))
+    : Number.POSITIVE_INFINITY;
+  return { frame, ...domains, originX, originY, fontSize, safetyScale, geometries, minimumArrowLength };
+}
 
 export const journalThemes: Record<JournalThemeId, JournalTheme> = {
   nature: {
@@ -612,9 +837,29 @@ function buildUmapExample() {
     const radius = 0.18 + 0.11 * Math.sqrt(index + 1);
     const x = cx + Math.cos(angle) * radius * 1.35 + Math.sin(index * 0.73) * 0.12;
     const y = cy + Math.sin(angle) * radius * 0.82 + Math.cos(index * 0.51) * 0.1;
-    return `${group.slice(0, 3)}_${String(index + 1).padStart(2, "0")}\t${x.toFixed(3)}\t${y.toFixed(3)}\t${group}`;
+    const z = Math.sin(angle * 0.7) * 0.9 + (group === "Responder" ? -0.7 : group === "Resistant" ? 0.8 : 0);
+    const batch = index % 2 === 0 ? "Batch 1" : "Batch 2";
+    return `${group.slice(0, 3)}_${String(index + 1).padStart(2, "0")}\t${x.toFixed(3)}\t${y.toFixed(3)}\t${z.toFixed(3)}\t${group}\t${batch}`;
   }));
-  return `sample\tdim1\tdim2\tgroup\n${rows.join("\n")}`;
+  return `sample\tdim1\tdim2\tdim3\tgroup\tshape\n${rows.join("\n")}`;
+}
+
+function buildOrdinationExample(kind: "pcoa" | "tsne" | "nmds") {
+  const clusters = kind === "nmds"
+    ? [{ group: "Forest", cx: -0.62, cy: 0.28 }, { group: "Grassland", cx: 0.04, cy: -0.42 }, { group: "Wetland", cx: 0.62, cy: 0.31 }]
+    : kind === "tsne"
+      ? [{ group: "Type A", cx: -7.2, cy: 4.8 }, { group: "Type B", cx: 0.4, cy: -5.6 }, { group: "Type C", cx: 7.4, cy: 3.9 }]
+      : [{ group: "Control", cx: -2.4, cy: 0.8 }, { group: "Treatment A", cx: 0.15, cy: -1.55 }, { group: "Treatment B", cx: 2.55, cy: 0.95 }];
+  const rows = clusters.flatMap(({ group, cx, cy }, groupIndex) => Array.from({ length: 14 }, (_, index) => {
+    const angle = index * 2.3999632297 + groupIndex * 0.37;
+    const scale = kind === "nmds" ? 0.055 : kind === "tsne" ? 0.58 : 0.2;
+    const radius = (1.3 + Math.sqrt(index + 1) * 0.42) * scale;
+    const x = cx + Math.cos(angle) * radius * 1.25;
+    const y = cy + Math.sin(angle) * radius * 0.78;
+    const z = groupIndex * 0.8 - 0.8 + Math.sin(angle * 0.8) * scale * 2;
+    return `${group.replaceAll(" ", "_").slice(0, 5)}_${String(index + 1).padStart(2, "0")}\t${x.toFixed(4)}\t${y.toFixed(4)}\t${z.toFixed(4)}\t${group}\t${index % 2 === 0 ? "Cohort 1" : "Cohort 2"}`;
+  }));
+  return `sample\tdim1\tdim2\tdim3\tgroup\tshape\n${rows.join("\n")}`;
 }
 
 function buildGseaExample() {
@@ -781,6 +1026,13 @@ Feature_E\t1.0\t1.2\t1.1\t4.6\t4.3\t4.8
 Feature_F\t15.8\t15.1\t16.0\t9.2\t8.8\t9.5
 Feature_G\t4.9\t5.1\t4.7\t11.3\t11.9\t10.8
 Feature_H\t3.6\t3.4\t3.8\t3.7\t3.5\t3.9`,
+  pcaMetadata: `sample\tgroup\tbatch\tlabel
+Control_1\tControl\tBatch 1\tC1
+Control_2\tControl\tBatch 2\tC2
+Control_3\tControl\tBatch 1\tC3
+Treatment_1\tTreatment\tBatch 2\tT1
+Treatment_2\tTreatment\tBatch 1\tT2
+Treatment_3\tTreatment\tBatch 2\tT3`,
   distribution: `group\tvalue
 Control\t4.1
 Control\t4.6
@@ -873,14 +1125,10 @@ DNA repair\t6.8\tBP
 PI3K-AKT\t5.9\tKEGG
 p53 signaling\t4.7\tKEGG
 Apoptosis\t3.8\tBP`,
-  pcoa: `sample\tdim1\tdim2\tgroup
-Control_1\t-2.1\t0.8\tControl
-Control_2\t-1.6\t1.2\tControl
-Control_3\t-1.9\t0.2\tControl
-Treatment_1\t1.4\t-0.5\tTreatment
-Treatment_2\t2.0\t-0.9\tTreatment
-Treatment_3\t1.7\t0.1\tTreatment`,
+  pcoa: buildOrdinationExample("pcoa"),
   umap: buildUmapExample(),
+  tsne: buildOrdinationExample("tsne"),
+  nmds: buildOrdinationExample("nmds"),
   gsea: buildGseaExample(),
   km: buildKaplanMeierExample(),
   forest: `label\testimate\tlower\tupper\tgroup
@@ -1047,14 +1295,16 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     roles: [
       { key: "x", label: "X component", kind: "number", required: true },
       { key: "y", label: "Y component", kind: "number", required: true },
+      { key: "z", label: "Z component (3D only)", kind: "number", required: false },
       { key: "group", label: "Group", kind: "category", required: false },
+      { key: "shape", label: "Shape", kind: "category", required: false },
       { key: "label", label: "Observation label", kind: "label", required: false },
     ],
-    defaultMapping: { x: "PC1", y: "PC2", group: "group", label: "sample" },
+    defaultMapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "", label: "sample" },
     sampleData: samples.pca,
     examples: [
-      { label: "Example 1", description: "Wide feature matrix with raw count columns.", data: samples.pca },
-      { label: "Example 2", description: "Wide feature matrix with TPM/abundance columns.", data: samples.pcaAbundance },
+      { label: "Example 1", description: "Wide feature matrix with raw count columns plus sample metadata joined by exact sample ID.", data: samples.pca, metadata: samples.pcaMetadata, mapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "batch", label: "label" } },
+      { label: "Example 2", description: "Wide TPM/abundance matrix plus sample metadata joined by exact sample ID.", data: samples.pcaAbundance, metadata: samples.pcaMetadata, mapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "batch", label: "label" } },
     ],
   },
   {
@@ -1254,20 +1504,26 @@ const plotDefinitionSeeds: PlotDefinition[] = [
       { label: "Example 2", description: "Paired observations with subject IDs, facets, and supplied group P values.", data: samples.distributionPaired, mapping: { group: "group", value: "value", subject: "subject", facet: "facet", pValue: "p_value" } },
     ],
   })),
-  ...(["pcoa", "umap"] as const).map((id) => ({
+  ...(["pcoa", "umap", "tsne", "nmds"] as const).map((id) => ({
     id,
-    name: id === "pcoa" ? "PCoA" : "UMAP",
+    name: id === "pcoa" ? "PCoA" : id === "umap" ? "UMAP" : id === "tsne" ? "t-SNE" : "NMDS",
     family: "Dimension reduction",
-    summary: id === "pcoa" ? "Publication-ready display of principal-coordinate scores from a distance analysis." : "Publication-ready display of a precomputed UMAP embedding.",
-    inputHint: id === "pcoa" ? "Upload PCoA coordinates produced from a documented distance metric. This plotter does not silently choose a distance." : "Upload precomputed UMAP coordinates; preserve the upstream seed and parameters in your analysis record.",
+    summary: id === "pcoa" ? "Publication-ready display of principal-coordinate scores from a documented distance analysis." : id === "umap" ? "Publication-ready display of a precomputed UMAP embedding." : id === "tsne" ? "Publication-ready display of a precomputed t-SNE embedding." : "Publication-ready display of precomputed non-metric multidimensional scaling coordinates.",
+    inputHint: id === "pcoa" ? "Upload precomputed PCoA coordinates and document the upstream distance metric; coordinates are never silently recomputed." : id === "umap" ? "Upload precomputed UMAP coordinates; preserve the upstream seed, neighbors, minimum distance, and metric in your analysis record." : id === "tsne" ? "Upload precomputed t-SNE coordinates; preserve the upstream seed, perplexity, metric, initialization, and iterations." : "Upload precomputed NMDS coordinates; preserve the dissimilarity, dimensions, starts, convergence, and stress.",
     roles: [
-      { key: "x", label: id === "pcoa" ? "PCoA axis 1" : "UMAP 1", kind: "number" as const, required: true },
-      { key: "y", label: id === "pcoa" ? "PCoA axis 2" : "UMAP 2", kind: "number" as const, required: true },
+      { key: "x", label: "Dimension 1", kind: "number" as const, required: true },
+      { key: "y", label: "Dimension 2", kind: "number" as const, required: true },
+      { key: "z", label: "Dimension 3 (3D only)", kind: "number" as const, required: false },
       { key: "group", label: "Group", kind: "category" as const, required: false },
+      { key: "shape", label: "Shape", kind: "category" as const, required: false },
       { key: "label", label: "Observation label", kind: "label" as const, required: false },
     ],
-    defaultMapping: { x: "dim1", y: "dim2", group: "group", label: "sample" },
-    sampleData: id === "pcoa" ? samples.pcoa : samples.umap,
+    defaultMapping: { x: "dim1", y: "dim2", z: "dim3", group: "group", shape: "shape", label: "sample" },
+    sampleData: samples[id],
+    examples: [
+      { label: "Example 1", description: "Precomputed two-dimensional coordinates with color groups, shapes, and labels.", data: samples[id], mapping: { x: "dim1", y: "dim2", z: "", group: "group", shape: "shape", label: "sample" } },
+      { label: "Example 2", description: "The same documented embedding with a supplied third coordinate for the optional 3D projection.", data: samples[id], mapping: { x: "dim1", y: "dim2", z: "dim3", group: "group", shape: "shape", label: "sample" } },
+    ],
   })),
   ...(["clustered-heatmap", "correlation-heatmap"] as const).map((id) => ({
     id,
@@ -1499,6 +1755,9 @@ export const plotReferences = {
   pca: { citation: "Jolliffe & Cadima, 2016. Principal component analysis: a review and recent developments. Phil Trans R Soc A.", href: "https://doi.org/10.1098/rsta.2015.0202" },
   pcoa: { citation: "Gower, 1966. Some distance properties of latent root and vector methods used in multivariate analysis. Biometrika.", href: "https://doi.org/10.1093/biomet/53.3-4.325" },
   umap: { citation: "McInnes et al., 2018. UMAP: Uniform Manifold Approximation and Projection. JOSS.", href: "https://doi.org/10.21105/joss.00861" },
+  tsne: { citation: "van der Maaten & Hinton, 2008. Visualizing Data using t-SNE. JMLR.", href: "https://doi.org/10.5555/1390156.1390177" },
+  nmds: { citation: "Kruskal, 1964. Nonmetric multidimensional scaling: a numerical method. Psychometrika.", href: "https://doi.org/10.1007/BF02289694" },
+  permanova: { citation: "Anderson, 2001. A new method for non-parametric multivariate analysis of variance. Austral Ecology.", href: "https://doi.org/10.1111/j.1442-9993.2001.01070.pp.x" },
   boxplot: { citation: "McGill, Tukey & Larsen, 1978. Variations of Box Plots. The American Statistician.", href: "https://doi.org/10.1080/00031305.1978.10479236" },
   violin: { citation: "Hintze & Nelson, 1998. Violin Plots: A Box Plot-Density Trace Synergism. The American Statistician.", href: "https://doi.org/10.1080/00031305.1998.10480559" },
   rawData: { citation: "Weissgerber et al., 2015. Beyond Bar and Line Graphs: Time for a New Data Presentation Paradigm. PLoS Biol.", href: "https://doi.org/10.1371/journal.pbio.1002128" },
@@ -1564,25 +1823,39 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     references: [plotReferences.anscombe, plotReferences.correlationTest, plotReferences.loess],
   },
   pca: {
-    definition: "一种线性无监督降维方法，把高维数据旋转到相互正交、按解释方差由高到低排列的主成分轴。",
-    suitableData: "高维特征×观察矩阵，如组学、影像特征、形态学、光谱、传感器或标准化临床特征。",
-    answers: "主要变异轴是什么，观察对象是否聚集、分离或存在离群点，以及分组或批次是否与总体结构相关。",
+    definition: "一种线性无监督降维方法，把高维数据旋转到相互正交、按解释方差由高到低排列的主成分轴；scores 表示观察对象，loadings 表示特征对各轴的贡献。",
+    suitableData: "高维特征×观察矩阵，如组学、影像特征、形态学、光谱、传感器或标准化临床特征。矩阵模式会透明记录过滤、变换、中心化与缩放。",
+    answers: "主要变异轴是什么，观察对象是否聚集、分离或存在离群点，哪些特征推动这些轴，以及分组或批次是否与总体结构相关。Scree 图用于判断方差在各主成分间如何分配。",
     origin: "Karl Pearson 于 1901 年提出空间点的最佳拟合直线与平面，Harold Hotelling 在 1933 年进一步建立并命名主成分分析。",
-    references: [plotReferences.pca],
+    references: [plotReferences.pca, plotReferences.permanova],
   },
   pcoa: {
     definition: "从样本间距离或相异度矩阵出发，通过特征分解构造低维坐标；它不是直接对原始特征矩阵做 PCA。",
     suitableData: "由明确距离或相异度度量得到的 PCoA 坐标，常见于生态、微生物群、组成或其他距离型数据。",
     answers: "在所选距离定义下，各观察对象的相似性结构和组间分离情况如何。",
     origin: "J. C. Gower 在 1966 年系统阐述了从距离关系恢复主坐标的数学性质，因此 PCoA 也常称为 Gower 主坐标分析。",
-    references: [plotReferences.pcoa],
+    references: [plotReferences.pcoa, plotReferences.permanova],
   },
   umap: {
     definition: "一种非线性流形学习方法，先构建高维邻域图，再寻找尽量保留局部邻域结构的低维嵌入。",
     suitableData: "高维数据上游计算得到的 UMAP 坐标，如单细胞、多组学、影像或表型特征。",
     answers: "局部邻域、亚群和异质性结构如何；不宜把远距离直接解释为定量差异。",
     origin: "McInnes 等人在 2018 年发布 UMAP，把黎曼几何与拓扑思想转化为可扩展的通用降维算法。",
-    references: [plotReferences.umap],
+    references: [plotReferences.umap, plotReferences.permanova],
+  },
+  tsne: {
+    definition: "t-SNE 以高维与低维邻域概率分布之间的差异为目标进行非线性嵌入；本模块只展示上游已计算坐标，不重新拟合。",
+    suitableData: "由记录了随机种子、perplexity、距离度量、初始化与迭代设置的 t-SNE 流程产生的样本或细胞坐标。",
+    answers: "局部邻域和潜在亚群在所给嵌入中如何组织。簇间距离、簇面积与全局方向通常没有直接定量含义。",
+    origin: "van der Maaten 与 Hinton 于 2008 年以重尾 Student t 分布缓解拥挤问题，形成今天广泛使用的 t-SNE。",
+    references: [plotReferences.tsne, plotReferences.permanova],
+  },
+  nmds: {
+    definition: "非度量多维尺度分析仅要求低维距离保持原始相异度的秩次关系，通过最小化 stress 得到配置；本模块展示预计算结果。",
+    suitableData: "由明确相异度（如 Bray–Curtis）和多次随机起点得到的 NMDS 坐标，并应同时记录维数、收敛状态与 stress。",
+    answers: "在相异度排序意义下样本结构、梯度和组间重叠如何；轴方向与绝对尺度本身通常没有固定含义。",
+    origin: "Kruskal 于 1964 年系统建立非度量多维尺度分析与 stress 优化框架，使秩次相异度能够映射到低维空间。",
+    references: [plotReferences.nmds, plotReferences.permanova],
   },
   box: {
     definition: "用中位数、上下四分位数、四分位距和按规则定义的“须”概括分布；须不一定代表最小值和最大值。",
@@ -1829,7 +2102,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 };
 
 const advancedRendererIds = new Set<PlotType>([
-  "line", "scatter", "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -1844,8 +2117,12 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
   scatter: ["swapAxes", "showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"],
-  correlation: ["showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"], pca: ["swapAxes", "showLabels"],
-  pcoa: ["showLabels"], umap: ["showLabels"],
+  correlation: ["showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"],
+  pca: ["swapAxes", "showLabels", "ordinationView", "ordinationShowEllipse", "ordinationShowHull", "ordinationShowCentroids", "ordinationShowLoadings", "ordinationLoadingCount", "ordinationUseShapes", "ordinationPermanovaR2", "ordinationPermanovaP", "ordinationPermanovaPermutations", "ordinationMethodNote"],
+  pcoa: ["showLabels", "ordinationView", "ordinationShowEllipse", "ordinationShowHull", "ordinationShowCentroids", "ordinationUseShapes", "ordinationXVariance", "ordinationYVariance", "ordinationZVariance", "ordinationPermanovaR2", "ordinationPermanovaP", "ordinationPermanovaPermutations", "ordinationMethodNote"],
+  umap: ["showLabels", "ordinationView", "ordinationShowEllipse", "ordinationShowHull", "ordinationShowCentroids", "ordinationUseShapes", "ordinationPermanovaR2", "ordinationPermanovaP", "ordinationPermanovaPermutations", "ordinationMethodNote"],
+  tsne: ["showLabels", "ordinationView", "ordinationShowEllipse", "ordinationShowHull", "ordinationShowCentroids", "ordinationUseShapes", "ordinationPermanovaR2", "ordinationPermanovaP", "ordinationPermanovaPermutations", "ordinationMethodNote"],
+  nmds: ["showLabels", "ordinationView", "ordinationShowEllipse", "ordinationShowHull", "ordinationShowCentroids", "ordinationUseShapes", "ordinationPermanovaR2", "ordinationPermanovaP", "ordinationPermanovaPermutations", "ordinationStress", "ordinationMethodNote"],
   box: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
   violin: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
   beeswarm: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
@@ -1881,7 +2158,7 @@ const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof Visuali
 
 function dataShapeFor(type: PlotType): PlotDataShape {
   if (["heatmap", "clustered-heatmap", "correlation-heatmap", "pca"].includes(type)) return "matrix";
-  if (["pcoa", "umap"].includes(type)) return "coordinates";
+  if (["pcoa", "umap", "tsne", "nmds"].includes(type)) return "coordinates";
   if (["venn", "upset"].includes(type)) return "sets";
   if (["sankey", "chord"].includes(type)) return "network";
   if (["treemap", "sunburst"].includes(type)) return "hierarchy";
@@ -1898,17 +2175,22 @@ function numericAxesFor(type: PlotType): Array<"x" | "y"> {
   return ["x", "y"];
 }
 
-export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation" | "associationVariant">): Array<"x" | "y"> {
+export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation" | "associationVariant" | "ordinationView">): Array<"x" | "y"> {
   if (type === "bar") {
     if (settings.barVariant === "polar") return [];
     return settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant) ? ["x"] : ["y"];
   }
   if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return settings.distributionOrientation === "horizontal" ? ["x"] : ["y"];
   if (["scatter", "correlation"].includes(type) && ["pair-matrix", "3d", "ternary"].includes(settings.associationVariant)) return [];
+  if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(type) && settings.ordinationView !== "scores") return [];
   return numericAxesFor(type);
 }
 
 export function isPlotRoleActive(type: PlotType, roleKey: string, settings: VisualizationSettings) {
+  if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(type)) {
+    if (settings.ordinationView === "scree") return false;
+    if (roleKey === "z") return settings.ordinationView === "3d";
+  }
   if (type !== "bar") return true;
   if (roleKey === "secondary") return ["dual-axis", "overlay"].includes(settings.barVariant);
   if (roleKey === "target") return settings.barVariant === "bullet";
@@ -2201,8 +2483,10 @@ const mappingAliases: Record<string, string[]> = {
   subject: ["subject", "subjectid", "pair", "pairid", "participant", "sampleid"],
   group: ["group", "class", "condition", "cluster", "ontology"],
   series: ["series", "group", "condition", "class"],
-  x: ["x", "time", "dose", "pc1", "dim1", "dimension1", "umap1"],
-  y: ["y", "response", "pc2", "dim2", "dimension2", "umap2"],
+  x: ["x", "time", "dose", "pc1", "dim1", "dimension1", "umap1", "tsne1", "nmds1"],
+  y: ["y", "response", "pc2", "dim2", "dimension2", "umap2", "tsne2", "nmds2"],
+  z: ["z", "pc3", "dim3", "dimension3", "umap3", "tsne3", "nmds3"],
+  shape: ["shape", "batch", "cohort", "site", "sex"],
   error: ["error", "sd", "sem", "se", "stderr", "standarddeviation", "standarderror"],
   label: ["label", "gene", "feature", "id", "name"],
   effect: ["log2fc", "logfc", "effect", "estimate"],
@@ -2421,6 +2705,113 @@ export function validatePlotDataset(
       if (blankCount > 0) errors.push(`${role.label} contains ${blankCount} blank value${blankCount === 1 ? "" : "s"}.`);
     }
   });
+
+  if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(definition.id) && settings) {
+    const ordinationName = definition.name;
+    if (settings.ordinationView === "3d" && !mapping.z) errors.push(`${ordinationName} 3D projection requires a mapped third coordinate.`);
+    if (settings.ordinationView !== "scree") {
+      const coordinateColumns = [mapping.x, mapping.y, ...(settings.ordinationView === "3d" ? [mapping.z] : [])].filter(Boolean);
+      if (new Set(coordinateColumns).size !== coordinateColumns.length) errors.push("Every displayed ordination axis must map to a different coordinate column.");
+    }
+    if (settings.ordinationView === "scree") {
+      if (definition.id !== "pca") errors.push("Scree view is available only for PCA.");
+      if (!(dataset.analysis?.pca?.explainedVariance.length)) errors.push("PCA scree view requires explained-variance metadata from the matrix analysis.");
+    }
+
+    const scoreView = settings.ordinationView === "scores";
+    const threeDimensionalView = settings.ordinationView === "3d";
+    const groupedLayers = scoreView
+      ? settings.ordinationShowEllipse || settings.ordinationShowHull || settings.ordinationShowCentroids
+      : threeDimensionalView && settings.ordinationShowCentroids;
+    if (groupedLayers && !mapping.group) errors.push("Map a group column before displaying group ellipses, hulls, or centroids.");
+    if (scoreView && mapping.group && (settings.ordinationShowEllipse || settings.ordinationShowHull)) {
+      const groupedPoints = new Map<string, Array<{ x: number; y: number }>>();
+      dataset.rows.forEach((row) => {
+        const x = parseNumericValue(row[mapping.x]);
+        const y = parseNumericValue(row[mapping.y]);
+        if (x === null || y === null) return;
+        const group = row[mapping.group] || "All";
+        const points = groupedPoints.get(group) ?? [];
+        points.push({ x, y });
+        groupedPoints.set(group, points);
+      });
+      const undersized = [...groupedPoints].filter(([, points]) => points.length < 3).map(([group, points]) => `${group} (n=${points.length})`);
+      if (undersized.length > 0) errors.push(`${settings.ordinationShowEllipse ? "Covariance ellipses" : "Convex hulls"} require at least three observations per group; insufficient: ${undersized.join(", ")}.`);
+      if (settings.ordinationShowEllipse || settings.ordinationShowHull) {
+        const collinear = [...groupedPoints].filter(([, points]) => {
+          if (points.length < 3) return false;
+          const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+          const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+          const xx = points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+          const yy = points.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0);
+          const xy = points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0);
+          return xx * yy - xy * xy <= 1e-12;
+        }).map(([group]) => group);
+        if (collinear.length > 0) errors.push(`${settings.ordinationShowEllipse && settings.ordinationShowHull ? "Covariance ellipses and convex hulls" : settings.ordinationShowEllipse ? "Covariance ellipses" : "Convex hulls"} require non-collinear coordinates; affected: ${collinear.join(", ")}.`);
+      }
+      if (settings.ordinationShowEllipse && [settings.xMin, settings.xMax, settings.yMin, settings.yMax].some((limit) => limit !== null)) {
+        const boundary = [...groupedPoints.values()].flatMap((points) => covarianceEllipsePoints(points.map((point) => definition.id === "pca" && settings.swapAxes ? { x: point.y, y: point.x } : point)));
+        const clipped = boundary.some((point) => (settings.xMin !== null && point.x < settings.xMin) || (settings.xMax !== null && point.x > settings.xMax) || (settings.yMin !== null && point.y < settings.yMin) || (settings.yMax !== null && point.y > settings.yMax));
+        if (clipped) warnings.push("Manual axis limits clip part of at least one ordination 95% covariance ellipse boundary.");
+      }
+    }
+
+    const pointView = scoreView || threeDimensionalView;
+    const displayedGroups = pointView && mapping.group ? dataset.rows.map((row) => row[mapping.group]?.trim()).filter(Boolean) : [];
+    const groupCount = new Set(displayedGroups).size;
+    if (pointView && mapping.group && displayedGroups.length !== dataset.rows.length) errors.push("Mapped ordination groups must not contain blank values.");
+    if (pointView && groupCount > 12 && settings.legendPosition !== "none") errors.push(`Ordination has ${groupCount} color groups, but the compact legend supports at most 12. Filter/facet the display or intentionally hide the legend.`);
+    if (pointView && groupCount > 12 && settings.legendPosition === "none") warnings.push(`${groupCount} groups use deterministic distinct colors with the legend intentionally hidden; preserve an external color key.`);
+    const shapeCount = pointView && settings.ordinationUseShapes && mapping.shape
+      ? new Set(dataset.rows.map((row) => row[mapping.shape]).filter(Boolean)).size
+      : 0;
+    if ((scoreView || threeDimensionalView) && settings.ordinationUseShapes && mapping.shape) {
+      if (shapeCount > 4) errors.push(`Mapped shape contains ${shapeCount} levels; the compact ordination view supports at most four distinct shapes.`);
+    }
+    if (pointView && settings.legendPosition !== "none" && !ordinationLegendLayout(definition.id as OrdinationType, settings, groupCount, shapeCount).fits) {
+      errors.push("The combined ordination color and shape legends do not fit inside the annotated compact canvas. Reduce group/shape levels, move or hide the legend, shorten annotations, or increase figure height.");
+    }
+    if (definition.id === "pca" && settings.ordinationShowLoadings && settings.ordinationView === "scores" && !(dataset.analysis?.pca?.loadings.length)) {
+      errors.push("PCA loading arrows require loading metadata from the matrix analysis.");
+    }
+    if (definition.id === "pca" && scoreView && settings.ordinationShowLoadings && [settings.xMin, settings.xMax, settings.yMin, settings.yMax].some((limit) => limit !== null)) {
+      const loadingLayout = ordinationLoadingLayout(dataset, mapping, settings);
+      if (loadingLayout.minimumArrowLength < 2) errors.push("PCA loading arrows require manual domains that include zero with enough room for every visible arrow and label in the final annotated plot. Use automatic or more balanced limits.");
+    }
+
+    const allPcoaVariances = [settings.ordinationXVariance, settings.ordinationYVariance, settings.ordinationZVariance];
+    const displayedPcoaIndexes = [mapping.x, mapping.y, ...(settings.ordinationView === "3d" ? [mapping.z] : [])].map((column, axisIndex) => {
+      const explicitAxis = column?.match(/(?:^|[_ .-])(?:dim|axis|component|pc|pcoa)[_ .-]?(\d+)$/i)?.[1];
+      return Math.max(0, Number(explicitAxis ?? axisIndex + 1) - 1);
+    });
+    const displayedPcoaVariances = displayedPcoaIndexes.map((index) => allPcoaVariances[index] ?? null);
+    if (definition.id === "pcoa" && allPcoaVariances.some((value) => value !== null)) {
+      if (displayedPcoaVariances.some((value) => value === null)) errors.push(`Supply explained variance for every displayed PCoA coordinate or leave all displayed values blank.`);
+      const numericVariances = allPcoaVariances.filter((value): value is number => value !== null);
+      if (numericVariances.some((value) => value < 0 || value > 100)) errors.push("PCoA explained-variance percentages must lie between 0 and 100.");
+      if (numericVariances.reduce((sum, value) => sum + value, 0) > 100.01) errors.push("Supplied PCoA explained-variance percentages cannot sum to more than 100%.");
+      const unusedSupplied = allPcoaVariances.flatMap((value, index) => value !== null && !displayedPcoaIndexes.includes(index) ? [`PCoA ${index + 1}`] : []);
+      if (unusedSupplied.length > 0) warnings.push(`Supplied variance for ${unusedSupplied.join(", ")} is preserved but not displayed in the current coordinate view.`);
+    }
+
+    const permanovaValues = [settings.ordinationPermanovaR2, settings.ordinationPermanovaP, settings.ordinationPermanovaPermutations];
+    if (settings.ordinationView !== "scree" && permanovaValues.some((value) => value !== null)) {
+      if (permanovaValues.some((value) => value === null)) errors.push("Supplied PERMANOVA requires R², P value, and permutation count together.");
+      if (!mapping.group) errors.push("Map the tested group column before displaying supplied PERMANOVA results.");
+      if (mapping.group && groupCount < 2) errors.push("Supplied PERMANOVA requires at least two non-empty levels in the mapped tested-group column.");
+      if (settings.ordinationMethodNote.trim().length < 12) errors.push("Supplied PERMANOVA requires a method note identifying the distance, tested formula/factor, and any strata or permutation constraints.");
+      if (settings.ordinationPermanovaR2 !== null && (settings.ordinationPermanovaR2 < 0 || settings.ordinationPermanovaR2 > 1)) errors.push("PERMANOVA R² must lie between 0 and 1.");
+      if (settings.ordinationPermanovaP !== null && (settings.ordinationPermanovaP <= 0 || settings.ordinationPermanovaP > 1)) errors.push("PERMANOVA P value must lie in (0, 1].");
+      if (settings.ordinationPermanovaPermutations !== null && (!Number.isInteger(settings.ordinationPermanovaPermutations) || settings.ordinationPermanovaPermutations < 1)) errors.push("PERMANOVA permutations must be a positive integer.");
+      warnings.push("PERMANOVA values are displayed as supplied; Visualization Studio does not recompute them from ordination coordinates. Confirm that the mapped display group matches the tested model factor.");
+    }
+    if (definition.id === "nmds" && settings.ordinationStress !== null) {
+      if (settings.ordinationStress < 0) errors.push("NMDS stress must be non-negative.");
+      if (settings.ordinationMethodNote.trim().length < 12) errors.push("Supplied NMDS stress requires a method note identifying the stress definition, dissimilarity, dimensionality, and convergence information.");
+    }
+    if (settings.ordinationMethodNote.trim().length > 72) warnings.push("The upstream method note is truncated to 72 characters in the compact figure; preserve the full method in the caption or analysis record.");
+    if (dataset.rows.length > 5_000) warnings.push(`${ordinationName} contains ${dataset.rows.length.toLocaleString()} observations; consider rasterization or stratified downsampling for a legible compact export.`);
+  }
 
   if (["volcano", "ma", "enrichment", "enrichment-bar"].includes(definition.id) && mapping.pValue) {
     const pColumn = mapping.pValue;
@@ -3193,10 +3584,10 @@ export function axisLimitWarning(
   });
   let xValues: number[] = [];
   let yValues: number[] = [];
-  if (["scatter", "correlation", "pca", "pcoa", "umap", "quadrant"].includes(definition.id)) {
+  if (["scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "quadrant"].includes(definition.id)) {
     xValues = valuesAt("x");
     yValues = valuesAt("y");
-    if (["scatter", "correlation"].includes(definition.id) && settings.swapAxes) [xValues, yValues] = [yValues, xValues];
+    if (["scatter", "correlation", "pca"].includes(definition.id) && settings.swapAxes) [xValues, yValues] = [yValues, xValues];
     if (definition.id === "quadrant") {
       xValues.push(settings.xThreshold);
       yValues.push(settings.yThreshold);

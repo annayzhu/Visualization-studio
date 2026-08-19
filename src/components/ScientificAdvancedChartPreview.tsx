@@ -20,6 +20,7 @@ import {
   categoricalColorForIndex,
   boxStatistics,
   confidenceInterval95,
+  compactLegendLabel,
   covarianceEllipsePoints,
   deterministicBeeswarmLayout,
   deterministicHistogram,
@@ -36,12 +37,18 @@ import {
   loessSmooth,
   meanErrorStatistics,
   numericExtent,
+  ordinationAnnotationLayout,
+  ordinationFrameMetrics,
+  ordinationLegendLayout,
+  ordinationLoadingLayout,
+  ordinationScoreDomains,
   parseNumericValue,
   parseRatioValue,
   polynomialRegression,
   resolveAxisDomain,
   scaleLinear,
   type JournalThemeId,
+  type OrdinationType,
   type ParsedDataset,
   type PlotType,
   type VisualizationSettings,
@@ -78,7 +85,7 @@ function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
 }
 
 function palette(groups: string[], colors: string[]) {
-  return new Map(groups.map((group, index) => [group, colors[index % Math.max(1, colors.length)]]));
+  return new Map(groups.map((group, index) => [group, categoricalColorForIndex(index, colors)]));
 }
 
 function tickValues(domain: [number, number], count = 5) {
@@ -111,9 +118,10 @@ function Legend({ entries, frame, settings }: { entries: LegendEntry[]; frame: F
     const visible = entries.slice(0, 12);
     const perRow = Math.max(2, Math.min(4, Math.floor(frame.plotWidth / 90)));
     const cellWidth = frame.plotWidth / perRow;
-    return <g transform={`translate(${frame.left} ${frame.height - 72})`}>{visible.map((entry, index) => <g key={entry.label} transform={`translate(${(index % perRow) * cellWidth} ${Math.floor(index / perRow) * (settings.legendSize + 7)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 15)}</text></g>)}</g>;
+    return <g data-plot-element="plot-legend" transform={`translate(${frame.left} ${frame.height - 72})`}>{visible.map((entry, index) => <g key={entry.label} transform={`translate(${(index % perRow) * cellWidth} ${Math.floor(index / perRow) * (settings.legendSize + 7)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text data-full-label={entry.label} x={13} y={0} fill={TEXT} fontSize={settings.legendSize}><title>{entry.label}</title>{compactLegendLabel(entry.label, settings.legendSize, cellWidth - 17, 15)}</text></g>)}</g>;
   }
-  return <g transform={`translate(${frame.left + frame.plotWidth + 18} ${frame.top + 5})`}>{entries.slice(0, 12).map((entry, index) => <g key={entry.label} transform={`translate(0 ${index * (settings.legendSize + 10)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 24)}</text></g>)}</g>;
+  const availableLabelWidth = frame.width - (frame.left + frame.plotWidth + 18) - 13 - 4;
+  return <g data-plot-element="plot-legend" transform={`translate(${frame.left + frame.plotWidth + 18} ${frame.top + 5})`}>{entries.slice(0, 12).map((entry, index) => <g key={entry.label} transform={`translate(0 ${index * (settings.legendSize + 10)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text data-full-label={entry.label} x={13} y={0} fill={TEXT} fontSize={settings.legendSize}><title>{entry.label}</title>{compactLegendLabel(entry.label, settings.legendSize, availableLabelWidth, 24)}</text></g>)}</g>;
 }
 
 type AssociationPoint = { x: number; y: number; z: number | null; group: string; label: string; index: number };
@@ -237,6 +245,116 @@ function ScatterFamily({ type, frame, dataset, mapping, settings, colors, gridCo
     {type === "correlation" ? <text x={frame.left + 10} y={frame.top + 18} fill={TEXT} fontSize={settings.legendSize} fontWeight={700}>{settings.correlationMethod === "pearson" ? "Pearson r" : "Spearman ρ"} = {coefficient.toFixed(3)} · n = {points.length}</text> : null}
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
+}
+
+function OrdinationMark({ x, y, radius, shapeIndex, color, opacity }: { x: number; y: number; radius: number; shapeIndex: number; color: string; opacity: number }) {
+  const shape = shapeIndex % 4;
+  if (shape === 1) return <rect data-plot-element="ordination-point" data-shape="square" x={x - radius * 0.86} y={y - radius * 0.86} width={radius * 1.72} height={radius * 1.72} rx={0.8} fill={color} fillOpacity={opacity} stroke="#FFFFFF" strokeWidth={0.7} />;
+  if (shape === 2) return <polygon data-plot-element="ordination-point" data-shape="triangle" points={`${x},${y - radius} ${x + radius * 0.92},${y + radius * 0.8} ${x - radius * 0.92},${y + radius * 0.8}`} fill={color} fillOpacity={opacity} stroke="#FFFFFF" strokeWidth={0.7} />;
+  if (shape === 3) return <polygon data-plot-element="ordination-point" data-shape="diamond" points={`${x},${y - radius} ${x + radius},${y} ${x},${y + radius} ${x - radius},${y}`} fill={color} fillOpacity={opacity} stroke="#FFFFFF" strokeWidth={0.7} />;
+  return <circle data-plot-element="ordination-point" data-shape="circle" cx={x} cy={y} r={radius} fill={color} fillOpacity={opacity} stroke="#FFFFFF" strokeWidth={0.7} />;
+}
+
+function OrdinationShapeLegend({ shapes, shapeMap, settings, layout }: { shapes: string[]; shapeMap: Map<string, number>; settings: VisualizationSettings; layout: ReturnType<typeof ordinationLegendLayout> }) {
+  if (!settings.ordinationUseShapes || shapes.length < 2 || settings.legendPosition === "none") return null;
+  const fontSize = Math.max(8, settings.legendSize - 1);
+  const availableLabelWidth = settings.legendPosition === "right" ? settings.width - layout.shapeX - 12 - 4 : 62;
+  return <g data-plot-element="ordination-shape-legend" transform={`translate(${layout.shapeX} ${layout.shapeY})`}><text x={0} y={0} fill={TEXT} fontSize={fontSize} fontWeight={700}>Shape</text>{shapes.slice(0, 4).map((shape, index) => <g key={shape} transform={`translate(${settings.legendPosition === "right" ? 0 : index * 74} ${settings.legendPosition === "right" ? 9 + index * (settings.legendSize + 6) : 9})`}><OrdinationMark x={4} y={4} radius={4} shapeIndex={shapeMap.get(shape) ?? 0} color={TEXT} opacity={0.85} /><text data-full-label={shape} x={12} y={8} fill={TEXT} fontSize={fontSize}><title>{shape}</title>{compactLegendLabel(shape, fontSize, availableLabelWidth, 10)}</text></g>)}</g>;
+}
+
+function OrdinationLabel({ x, y, radius, label, frame, fontSize }: { x: number; y: number; radius: number; label: string; frame: Frame; fontSize: number }) {
+  const fullText = label.slice(0, 12);
+  const rightSpace = frame.left + frame.plotWidth - x - radius - 3;
+  const leftSpace = x - frame.left - radius - 3;
+  const fullWidth = fullText.length * fontSize;
+  const side = rightSpace >= fullWidth ? "right" : leftSpace >= fullWidth ? "left" : "center";
+  const centeredCapacity = Math.max(1, Math.floor((frame.plotWidth - 6) / fontSize));
+  const capacity = side === "center" ? centeredCapacity : Math.max(1, Math.floor((side === "right" ? rightSpace : leftSpace) / fontSize));
+  const text = fullText.length <= capacity ? fullText : capacity > 1 ? `${fullText.slice(0, capacity - 1)}…` : "…";
+  const estimatedWidth = text.length * fontSize;
+  const labelX = side === "right" ? x + radius + 2 : side === "left" ? x - radius - 2 : Math.max(frame.left + estimatedWidth / 2 + 2, Math.min(frame.left + frame.plotWidth - estimatedWidth / 2 - 2, x));
+  const textAnchor = side === "right" ? "start" : side === "left" ? "end" : "middle";
+  const placeAbove = y - fontSize - 3 >= frame.top;
+  const labelY = placeAbove ? y - 3 : Math.min(frame.top + frame.plotHeight - 2, y + fontSize + 2);
+  return <text data-plot-label data-full-label={label} x={labelX} y={labelY} textAnchor={textAnchor} fill={TEXT} fontSize={fontSize}><title>{label}</title>{text}</text>;
+}
+
+function OrdinationPlot({ type, frame, dataset, mapping, settings, colors, gridColor }: { type: OrdinationType; frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
+  const explainedVariance = dataset.analysis?.pca?.explainedVariance ?? [];
+  if (type === "pca" && settings.ordinationView === "scree") {
+    const values = explainedVariance.slice(0, 10);
+    const yDomain = numericExtent([0, ...values.map((value) => value * 100)], true);
+    const band = frame.plotWidth / Math.max(1, values.length);
+    const positions = values.map((_, index) => frame.left + (index + 0.5) * band);
+    const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
+    return <><Axes frame={frame} settings={settings} xDomain={[0, values.length]} yDomain={yDomain} xLabel={settings.xLabel || "Principal component"} yLabel={settings.yLabel || "Explained variance (%)"} gridColor={gridColor} hideXTicks categoryXPositions={positions} /><g data-plot-data data-plot-family="ordination-scree">{values.map((value, index) => { const x = frame.left + index * band + band * 0.16; const y = yAt(value * 100); return <g key={index}><rect data-plot-element="scree-bar" x={x} y={y} width={band * 0.68} height={frame.top + frame.plotHeight - y} rx={1.5} fill={colors[index % colors.length]} fillOpacity={settings.opacity} /><circle data-plot-element="scree-point" cx={x + band * 0.34} cy={y} r={Math.max(2.2, settings.pointSize * 0.58)} fill={TEXT} /><text x={x + band * 0.34} y={frame.top + frame.plotHeight + 17} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>PC{index + 1}</text><text x={x + band * 0.34} y={Math.max(frame.top + settings.tickSize, y - 5)} textAnchor="middle" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>{(value * 100).toFixed(1)}%</text></g>; })}{values.length > 1 ? <polyline data-plot-element="scree-line" points={values.map((value, index) => `${frame.left + (index + 0.5) * band},${yAt(value * 100)}`).join(" ")} fill="none" stroke={TEXT} strokeWidth={settings.dataLineWidth} /> : null}</g></>;
+  }
+
+  const annotation = ordinationAnnotationLayout(type, settings);
+  const annotationLines = annotation.lines;
+  const annotationFontSize = annotation.fontSize;
+  const annotationLineHeight = annotation.lineHeight;
+  const sharedFrame = ordinationFrameMetrics(type, settings);
+  const chartFrame: Frame = sharedFrame;
+  const scoreDomains = ordinationScoreDomains(type, dataset, mapping, settings);
+  const displayedXColumn = scoreDomains.displayedXColumn;
+  const displayedYColumn = scoreDomains.displayedYColumn;
+  const rawPoints = dataset.rows.map((row, index) => ({
+    x: parseNumericValue(row[displayedXColumn]) ?? 0,
+    y: parseNumericValue(row[displayedYColumn]) ?? 0,
+    z: mapping.z ? parseNumericValue(row[mapping.z]) ?? 0 : 0,
+    group: mapping.group ? row[mapping.group] || "All" : "All",
+    shape: settings.ordinationUseShapes && mapping.shape ? row[mapping.shape] || "All" : "All",
+    label: mapping.label ? row[mapping.label] || "" : "",
+    index,
+  }));
+  const groups = [...new Set(rawPoints.map((point) => point.group))];
+  const shapes = [...new Set(rawPoints.map((point) => point.shape))];
+  const ordinationLegend = ordinationLegendLayout(type, settings, groups.length, shapes.length);
+  const colorMap = palette(groups, colors);
+  const shapeMap = new Map(shapes.map((shape, index) => [shape, index]));
+  const componentIndex = (header: string) => Math.max(0, Number(header.match(/\d+/)?.[0] ?? 1) - 1);
+  const defaultAxis = (axis: 1 | 2 | 3) => type === "pca" ? `PC${axis}` : type === "pcoa" ? `PCoA ${axis}` : type === "umap" ? `UMAP ${axis}` : type === "tsne" ? `t-SNE ${axis}` : `NMDS ${axis}`;
+  const axisLabel = (axis: 1 | 2 | 3) => {
+    const custom = axis === 1 ? settings.xLabel : axis === 2 ? settings.yLabel : "";
+    if (custom) return custom;
+    if (type === "pca") {
+      const componentColumn = axis === 1 ? displayedXColumn : axis === 2 ? displayedYColumn : mapping.z;
+      const component = componentIndex(componentColumn);
+      const explained = explainedVariance[component];
+      return `${componentColumn || defaultAxis(axis)}${Number.isFinite(explained) ? ` (${(explained * 100).toFixed(1)}%)` : ""}`;
+    }
+    const coordinateColumn = axis === 1 ? mapping.x : axis === 2 ? mapping.y : mapping.z;
+    const numberMatch = coordinateColumn?.match(/(?:^|[_ .-])(?:dim|axis|component|pc|pcoa|umap|tsne|nmds)[_ .-]?(\d+)$/i);
+    const coordinateNumber = numberMatch ? Math.max(1, Number(numberMatch[1])) : axis;
+    const mappedLabel = numberMatch
+      ? type === "pcoa" ? `PCoA ${coordinateNumber}` : type === "umap" ? `UMAP ${coordinateNumber}` : type === "tsne" ? `t-SNE ${coordinateNumber}` : `NMDS ${coordinateNumber}`
+      : coordinateColumn || defaultAxis(axis);
+    const suppliedVariance = [settings.ordinationXVariance, settings.ordinationYVariance, settings.ordinationZVariance][coordinateNumber - 1] ?? null;
+    return `${mappedLabel}${type === "pcoa" && suppliedVariance !== null ? ` (${suppliedVariance.toFixed(1)}%)` : ""}`;
+  };
+
+  if (settings.ordinationView === "3d") {
+    const xExtent = numericExtent(rawPoints.map((point) => point.x)); const yExtent = numericExtent(rawPoints.map((point) => point.y)); const zExtent = numericExtent(rawPoints.map((point) => point.z));
+    const project = (point: { x: number; y: number; z: number }) => { const nx = scaleLinear(point.x, xExtent, [-1, 1]); const ny = scaleLinear(point.y, yExtent, [-1, 1]); const nz = scaleLinear(point.z, zExtent, [-1, 1]); return { x: chartFrame.left + chartFrame.plotWidth * (0.5 + nx * 0.34 + nz * 0.13), y: chartFrame.top + chartFrame.plotHeight * (0.5 - ny * 0.34 + nz * 0.1) }; };
+    const projected = rawPoints.map((point) => ({ ...point, ...project(point) }));
+    const centroids = groups.map((group) => { const members = rawPoints.filter((point) => point.group === group); const centroid = { x: members.reduce((sum, point) => sum + point.x, 0) / members.length, y: members.reduce((sum, point) => sum + point.y, 0) / members.length, z: members.reduce((sum, point) => sum + point.z, 0) / members.length }; return { group, ...project(centroid) }; });
+    return <>{annotationLines.map((line, index) => <text key={`${index}-${line}`} x={14} y={sharedFrame.annotationTop + (index + 1) * annotationLineHeight - 4} fill={TEXT} fontSize={annotationFontSize}>{line}</text>)}<g data-plot-data data-plot-family="ordination-3d"><rect x={chartFrame.left} y={chartFrame.top} width={chartFrame.plotWidth} height={chartFrame.plotHeight} fill="none" stroke={gridColor} /><path d={`M ${chartFrame.left + 20} ${chartFrame.top + chartFrame.plotHeight - 20} l 42 0 m -42 0 l 0 -42 m 0 42 l 24 18`} fill="none" stroke={TEXT} strokeWidth={settings.axisLineWidth} /><text x={chartFrame.left + 66} y={chartFrame.top + chartFrame.plotHeight - 16} fill={TEXT} fontSize={settings.tickSize}>{axisLabel(1)}</text><text x={chartFrame.left + 4} y={chartFrame.top + chartFrame.plotHeight - 67} fill={TEXT} fontSize={settings.tickSize}>{axisLabel(2)}</text><text x={chartFrame.left + 47} y={chartFrame.top + chartFrame.plotHeight + 2} fill={TEXT} fontSize={settings.tickSize}>{axisLabel(3)}</text>{projected.map((point) => <g key={point.index}><OrdinationMark x={point.x} y={point.y} radius={settings.pointSize} shapeIndex={shapeMap.get(point.shape) ?? 0} color={colorMap.get(point.group) ?? colors[0]} opacity={settings.opacity} />{settings.showLabels && point.label ? <OrdinationLabel x={point.x} y={point.y} radius={settings.pointSize} label={point.label} frame={chartFrame} fontSize={settings.tickSize} /> : null}</g>)}{settings.ordinationShowCentroids ? centroids.map((centroid) => <g key={centroid.group} data-plot-element="ordination-centroid"><line x1={centroid.x - 5} x2={centroid.x + 5} y1={centroid.y} y2={centroid.y} stroke={colorMap.get(centroid.group)} strokeWidth={2} /><line x1={centroid.x} x2={centroid.x} y1={centroid.y - 5} y2={centroid.y + 5} stroke={colorMap.get(centroid.group)} strokeWidth={2} /></g>) : null}</g><Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={chartFrame} settings={settings} /><OrdinationShapeLegend shapes={shapes} shapeMap={shapeMap} settings={settings} layout={ordinationLegend} /></>;
+  }
+
+  const buckets = groups.map((group) => ({ group, points: rawPoints.filter((point) => point.group === group), color: colorMap.get(group) ?? colors[0] }));
+  const ellipses = settings.ordinationShowEllipse ? buckets.map((bucket) => ({ ...bucket, ellipse: covarianceEllipsePoints(bucket.points) })) : [];
+  const hulls = settings.ordinationShowHull ? buckets.map((bucket) => ({ ...bucket, hull: convexHull(bucket.points) })) : [];
+  const { xDomain, yDomain } = scoreDomains;
+  const xAt = (value: number) => scaleLinear(value, xDomain, [chartFrame.left, chartFrame.left + chartFrame.plotWidth]); const yAt = (value: number) => scaleLinear(value, yDomain, [chartFrame.top + chartFrame.plotHeight, chartFrame.top]);
+  const centroids = buckets.map((bucket) => ({ group: bucket.group, color: bucket.color, x: bucket.points.reduce((sum, point) => sum + point.x, 0) / bucket.points.length, y: bucket.points.reduce((sum, point) => sum + point.y, 0) / bucket.points.length }));
+  const loadingLayout = settings.ordinationShowLoadings && type === "pca" ? ordinationLoadingLayout(dataset, mapping, settings) : null;
+  const originX = loadingLayout?.originX ?? xAt(0);
+  const originY = loadingLayout?.originY ?? yAt(0);
+  const loadingFontSize = loadingLayout?.fontSize ?? Math.max(8, settings.tickSize - 1);
+  const loadingSafetyScale = loadingLayout?.safetyScale ?? 1;
+  const loadingGeometries = loadingLayout?.geometries ?? [];
+  return <>{annotationLines.map((line, index) => <text key={`${index}-${line}`} x={14} y={sharedFrame.annotationTop + (index + 1) * annotationLineHeight - 4} fill={TEXT} fontSize={annotationFontSize}>{line}</text>)}<Axes frame={chartFrame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={axisLabel(1)} yLabel={axisLabel(2)} gridColor={gridColor} /><g data-plot-data data-plot-family="ordination-scores"><defs><marker id={`ordination-arrow-${type}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill={TEXT} /></marker></defs>{hulls.map((entry) => entry.hull.length >= 3 ? <polygon key={entry.group} data-plot-element="ordination-hull" points={entry.hull.map((point) => `${xAt(point.x)},${yAt(point.y)}`).join(" ")} fill={entry.color} fillOpacity={0.08} stroke={entry.color} strokeWidth={settings.dataLineWidth} /> : null)}{ellipses.map((entry) => entry.ellipse.length ? <polyline key={entry.group} data-plot-element="ordination-ellipse" points={entry.ellipse.map((point) => `${xAt(point.x)},${yAt(point.y)}`).join(" ")} fill={entry.color} fillOpacity={0.07} stroke={entry.color} strokeWidth={settings.dataLineWidth} /> : null)}{rawPoints.map((point) => { const x = xAt(point.x); const y = yAt(point.y); return <g key={point.index}><OrdinationMark x={x} y={y} radius={settings.pointSize} shapeIndex={shapeMap.get(point.shape) ?? 0} color={colorMap.get(point.group) ?? colors[0]} opacity={settings.opacity} />{settings.showLabels && point.label ? <OrdinationLabel x={x} y={y} radius={settings.pointSize} label={point.label} frame={chartFrame} fontSize={settings.tickSize} /> : null}</g>; })}{settings.ordinationShowCentroids ? centroids.map((centroid) => <g key={centroid.group} data-plot-element="ordination-centroid"><line x1={xAt(centroid.x) - 5} x2={xAt(centroid.x) + 5} y1={yAt(centroid.y)} y2={yAt(centroid.y)} stroke={centroid.color} strokeWidth={2} /><line x1={xAt(centroid.x)} x2={xAt(centroid.x)} y1={yAt(centroid.y) - 5} y2={yAt(centroid.y) + 5} stroke={centroid.color} strokeWidth={2} /><text x={xAt(centroid.x) + 7} y={yAt(centroid.y) - 5} fill={centroid.color} fontSize={Math.max(8, settings.tickSize - 1)}>{centroid.group.slice(0, 10)}</text></g>) : null}{loadingGeometries.map((loading) => { const placeBelow = loading.endY - loadingFontSize < chartFrame.top + 2; return <g key={loading.feature} data-plot-element="ordination-loading" data-loading-scale={loadingSafetyScale.toFixed(4)}><line x1={originX} y1={originY} x2={loading.endX} y2={loading.endY} stroke={TEXT} strokeWidth={Math.max(0.8, settings.dataLineWidth * 0.7)} markerEnd={`url(#ordination-arrow-${type})`} /><text x={loading.endX + (loading.endX >= originX ? 3 : -3)} y={loading.endY + (placeBelow ? loadingFontSize + 2 : -3)} textAnchor={loading.endX >= originX ? "start" : "end"} fill={TEXT} fontSize={loadingFontSize}><title>{loading.feature}</title>{loading.displayFeature}</text></g>; })}</g><Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={chartFrame} settings={settings} /><OrdinationShapeLegend shapes={shapes} shapeMap={shapeMap} settings={settings} layout={ordinationLegend} /></>;
 }
 
 function MaPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
@@ -969,7 +1087,8 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   let content: ReactNode = null;
   if (type === "line") content = <LineAssociationPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "scatter" || type === "correlation") content = <AssociationPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
-  else if (["quadrant", "pcoa", "umap"].includes(type)) content = <ScatterFamily type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (type === "quadrant") content = <ScatterFamily type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(type)) content = <OrdinationPlot type={type as OrdinationType} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "ma") content = <MaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "errorbar") content = <ErrorBarPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "area") content = <AreaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;

@@ -4,6 +4,7 @@ import type { ReactNode, RefObject } from "react";
 import {
   buildSetMemberships,
   correlation,
+  correlationPValue,
   correlationMatrix,
   hierarchicalClusterOrder,
   kaplanMeier,
@@ -15,6 +16,7 @@ import {
 import {
   boxStatistics,
   confidenceInterval95,
+  covarianceEllipsePoints,
   deterministicBeeswarmLayout,
   deterministicHistogram,
   divergingColor,
@@ -25,10 +27,13 @@ import {
   journalThemes,
   kernelDensityEstimate,
   linearRegression,
+  linearConfidenceBand95,
+  loessSmooth,
   meanErrorStatistics,
   numericExtent,
   parseNumericValue,
   parseRatioValue,
+  polynomialRegression,
   resolveAxisDomain,
   scaleLinear,
   type JournalThemeId,
@@ -100,6 +105,99 @@ function Legend({ entries, frame, settings }: { entries: LegendEntry[]; frame: F
     return <g transform={`translate(${frame.left} ${frame.height - 72})`}>{visible.map((entry, index) => <g key={entry.label} transform={`translate(${(index % perRow) * cellWidth} ${Math.floor(index / perRow) * (settings.legendSize + 7)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 15)}</text></g>)}</g>;
   }
   return <g transform={`translate(${frame.left + frame.plotWidth + 18} ${frame.top + 5})`}>{entries.slice(0, 12).map((entry, index) => <g key={entry.label} transform={`translate(0 ${index * (settings.legendSize + 10)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 24)}</text></g>)}</g>;
+}
+
+type AssociationPoint = { x: number; y: number; z: number | null; group: string; label: string; index: number };
+
+function convexHull(points: AssociationPoint[]) {
+  const sorted = [...points].sort((left, right) => left.x - right.x || left.y - right.y || left.index - right.index);
+  if (sorted.length <= 2) return sorted;
+  const cross = (origin: AssociationPoint, left: AssociationPoint, right: AssociationPoint) => (left.x - origin.x) * (right.y - origin.y) - (left.y - origin.y) * (right.x - origin.x);
+  const half = (source: AssociationPoint[]) => {
+    const result: AssociationPoint[] = [];
+    source.forEach((point) => { while (result.length >= 2 && cross(result[result.length - 2], result[result.length - 1], point) <= 0) result.pop(); result.push(point); });
+    return result;
+  };
+  const lower = half(sorted);
+  const upper = half([...sorted].reverse());
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
+function LineAssociationPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
+  const rows = dataset.rows.map((row, index) => {
+    const rawX = parseNumericValue(row[mapping.x]) ?? 0;
+    const rawY = parseNumericValue(row[mapping.value]) ?? 0;
+    return { x: settings.swapAxes ? rawY : rawX, y: settings.swapAxes ? rawX : rawY, error: settings.lineErrorType !== "none" && mapping.error ? Math.max(0, parseNumericValue(row[mapping.error]) ?? 0) : 0, group: mapping.series ? row[mapping.series] || "All" : "All", index };
+  });
+  const groups = [...new Set(rows.map((row) => row.group))];
+  const colorMap = palette(groups, colors);
+  const valueExtent = rows.flatMap((row) => settings.swapAxes ? [row.x - row.error, row.x + row.error] : [row.y - row.error, row.y + row.error]);
+  const xDomain = resolveAxisDomain(numericExtent(settings.swapAxes ? valueExtent : rows.map((row) => row.x)), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent(settings.swapAxes ? rows.map((row) => row.y) : valueExtent), settings.yMin, settings.yMax);
+  const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
+  const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
+  return <>
+    <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || (settings.swapAxes ? "Value" : "X")} yLabel={settings.yLabel || (settings.swapAxes ? "X" : "Value")} gridColor={gridColor} />
+    <g data-plot-data data-plot-family="line-association">
+      {groups.map((group) => { const groupRows = rows.filter((row) => row.group === group).sort((left, right) => (settings.swapAxes ? left.y - right.y : left.x - right.x) || left.index - right.index); const color = colorMap.get(group) ?? colors[0]; const upper = groupRows.map((row) => settings.swapAxes ? `${xAt(row.x + row.error)},${yAt(row.y)}` : `${xAt(row.x)},${yAt(row.y + row.error)}`); const lower = [...groupRows].reverse().map((row) => settings.swapAxes ? `${xAt(row.x - row.error)},${yAt(row.y)}` : `${xAt(row.x)},${yAt(row.y - row.error)}`); return <g key={group}>
+        {settings.lineErrorType !== "none" && settings.lineUncertaintyStyle === "band" ? <polygon data-plot-element="line-uncertainty-band" points={[...upper, ...lower].join(" ")} fill={color} fillOpacity={settings.lineBandOpacity} stroke="none" /> : null}
+        <polyline data-plot-element="line-series" points={groupRows.map((row) => `${xAt(row.x)},${yAt(row.y)}`).join(" ")} fill="none" stroke={color} strokeWidth={settings.dataLineWidth} strokeLinejoin="round" strokeLinecap="round" />
+        {settings.lineErrorType !== "none" && settings.lineUncertaintyStyle === "bars" ? groupRows.map((row) => settings.swapAxes ? <g key={row.index} data-plot-element="line-uncertainty-bar" stroke={color} strokeWidth={settings.errorBarLineWidth}><line x1={xAt(row.x - row.error)} x2={xAt(row.x + row.error)} y1={yAt(row.y)} y2={yAt(row.y)} /><line x1={xAt(row.x - row.error)} x2={xAt(row.x - row.error)} y1={yAt(row.y) - settings.errorBarCapSize / 2} y2={yAt(row.y) + settings.errorBarCapSize / 2} /><line x1={xAt(row.x + row.error)} x2={xAt(row.x + row.error)} y1={yAt(row.y) - settings.errorBarCapSize / 2} y2={yAt(row.y) + settings.errorBarCapSize / 2} /></g> : <g key={row.index} data-plot-element="line-uncertainty-bar" stroke={color} strokeWidth={settings.errorBarLineWidth}><line x1={xAt(row.x)} x2={xAt(row.x)} y1={yAt(row.y - row.error)} y2={yAt(row.y + row.error)} /><line x1={xAt(row.x) - settings.errorBarCapSize / 2} x2={xAt(row.x) + settings.errorBarCapSize / 2} y1={yAt(row.y - row.error)} y2={yAt(row.y - row.error)} /><line x1={xAt(row.x) - settings.errorBarCapSize / 2} x2={xAt(row.x) + settings.errorBarCapSize / 2} y1={yAt(row.y + row.error)} y2={yAt(row.y + row.error)} /></g>) : null}
+        {settings.showPoints ? groupRows.map((row) => <circle key={row.index} data-plot-element="line-point" cx={xAt(row.x)} cy={yAt(row.y)} r={settings.pointSize} fill={color} stroke="#FFFFFF" strokeWidth={0.7} />) : null}
+      </g>; })}
+    </g>
+    <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
+  </>;
+}
+
+function AssociationPlot({ type, frame, dataset, mapping, settings, colors, gridColor }: { type: "scatter" | "correlation"; frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
+  const points: AssociationPoint[] = dataset.rows.map((row, index) => { const rawX = parseNumericValue(row[mapping.x]) ?? 0; const rawY = parseNumericValue(row[mapping.y]) ?? 0; return { x: settings.swapAxes ? rawY : rawX, y: settings.swapAxes ? rawX : rawY, z: mapping.z ? parseNumericValue(row[mapping.z]) : null, group: mapping.group ? row[mapping.group] || "All" : "All", label: mapping.label ? row[mapping.label] || "" : "", index }; });
+  const groups = [...new Set(points.map((point) => point.group))];
+  const colorMap = palette(groups, colors);
+  const buckets = settings.associationGroupMode === "by-group" ? groups.map((group) => ({ group, points: points.filter((point) => point.group === group), color: colorMap.get(group) ?? colors[0] })) : [{ group: "Combined", points, color: colors[0] }];
+  if (settings.associationVariant === "ternary") {
+    const top: [number, number] = [frame.left + frame.plotWidth / 2, frame.top + 8]; const left: [number, number] = [frame.left + 12, frame.top + frame.plotHeight - 6]; const right: [number, number] = [frame.left + frame.plotWidth - 12, frame.top + frame.plotHeight - 6];
+    return <><g data-plot-data data-plot-family="ternary"><polygon points={`${top.join(",")} ${left.join(",")} ${right.join(",")}`} fill="#FAF9F7" stroke={TEXT} strokeWidth={settings.axisLineWidth} />{[0.25, 0.5, 0.75].map((fraction) => <g key={fraction} stroke={gridColor} strokeWidth={settings.gridLineWidth}><line x1={left[0] + (top[0] - left[0]) * fraction} y1={left[1] + (top[1] - left[1]) * fraction} x2={right[0] + (top[0] - right[0]) * fraction} y2={right[1] + (top[1] - right[1]) * fraction} /><line x1={top[0] + (right[0] - top[0]) * fraction} y1={top[1] + (right[1] - top[1]) * fraction} x2={left[0] + (right[0] - left[0]) * fraction} y2={left[1] + (right[1] - left[1]) * fraction} /><line x1={right[0] + (left[0] - right[0]) * fraction} y1={right[1]} x2={top[0] + (left[0] - top[0]) * fraction} y2={top[1] + (left[1] - top[1]) * fraction} /></g>)}{points.map((point) => { const total = Math.max(point.x + point.y + (point.z ?? 0), Number.EPSILON); const x = (point.x * left[0] + point.y * right[0] + (point.z ?? 0) * top[0]) / total; const y = (point.x * left[1] + point.y * right[1] + (point.z ?? 0) * top[1]) / total; return <circle key={point.index} data-plot-element="ternary-point" cx={x} cy={y} r={settings.pointSize} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.7} />; })}<text x={left[0]} y={left[1] + 18} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{mapping.x}</text><text x={right[0]} y={right[1] + 18} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{mapping.y}</text><text x={top[0]} y={top[1] - 7} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{mapping.z}</text></g><Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+  }
+  if (settings.associationVariant === "3d") {
+    const xExtent = numericExtent(points.map((point) => point.x)); const yExtent = numericExtent(points.map((point) => point.y)); const zExtent = numericExtent(points.map((point) => point.z ?? 0));
+    const normalize = (value: number, extent: [number, number]) => (value - extent[0]) / Math.max(Number.EPSILON, extent[1] - extent[0]);
+    const projected = points.map((point) => { const nx = normalize(point.x, xExtent) - 0.5; const ny = normalize(point.y, yExtent) - 0.5; const nz = normalize(point.z ?? 0, zExtent) - 0.5; return { ...point, px: frame.left + frame.plotWidth * (0.5 + nx * 0.68 + nz * 0.25), py: frame.top + frame.plotHeight * (0.52 - ny * 0.72 + nz * 0.2), depth: nz }; }).sort((leftPoint, rightPoint) => leftPoint.depth - rightPoint.depth || leftPoint.index - rightPoint.index);
+    const origin = [frame.left + frame.plotWidth * 0.22, frame.top + frame.plotHeight * 0.78];
+    return <><g data-plot-data data-plot-family="scatter-3d"><g stroke={TEXT} strokeWidth={settings.axisLineWidth}><line x1={origin[0]} y1={origin[1]} x2={frame.left + frame.plotWidth * 0.82} y2={origin[1]} /><line x1={origin[0]} y1={origin[1]} x2={origin[0]} y2={frame.top + frame.plotHeight * 0.18} /><line x1={origin[0]} y1={origin[1]} x2={frame.left + frame.plotWidth * 0.42} y2={frame.top + frame.plotHeight * 0.9} /></g>{projected.map((point) => <circle key={point.index} data-plot-element="scatter-3d-point" cx={point.px} cy={point.py} r={settings.pointSize} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.7} />)}<text x={frame.left + frame.plotWidth * 0.84} y={origin[1] + 4} fill={TEXT} fontSize={settings.tickSize}>{mapping.x}</text><text x={origin[0]} y={frame.top + frame.plotHeight * 0.14} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{mapping.y}</text><text x={frame.left + frame.plotWidth * 0.44} y={frame.top + frame.plotHeight * 0.94} fill={TEXT} fontSize={settings.tickSize}>{mapping.z}</text><text x={frame.left + frame.plotWidth - 2} y={frame.top + 12} textAnchor="end" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>Per-axis normalized · orthographic</text></g><Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+  }
+  if (settings.associationVariant === "pair-matrix") {
+    const variables = [{ key: mapping.x, values: points.map((point) => point.x) }, { key: mapping.y, values: points.map((point) => point.y) }, { key: mapping.z, values: points.map((point) => point.z ?? 0) }]; const cellWidth = frame.plotWidth / 3; const cellHeight = frame.plotHeight / 3;
+    return <><g data-plot-data data-plot-family="pair-matrix">{variables.flatMap((vertical, row) => variables.map((horizontal, column) => { const x = frame.left + column * cellWidth; const y = frame.top + row * cellHeight; const xDomain = numericExtent(horizontal.values); const yDomain = numericExtent(vertical.values); if (row === column) { const bins = deterministicHistogram(horizontal.values, 6, xDomain); const max = Math.max(...bins.map((bin) => bin.count), 1); return <g key={`${row}-${column}`} data-plot-element="pair-diagonal"><rect x={x} y={y} width={cellWidth} height={cellHeight} fill="#FAF9F7" stroke={gridColor} />{bins.map((bin) => <rect key={bin.index} x={scaleLinear(bin.lower, xDomain, [x + 3, x + cellWidth - 3])} y={y + cellHeight - 4 - bin.count / max * (cellHeight - 18)} width={Math.max(1, cellWidth / bins.length - 1)} height={bin.count / max * (cellHeight - 18)} fill={colors[0]} fillOpacity={0.5} />)}<text x={x + 5} y={y + 12} fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>{horizontal.key}</text></g>; } return <g key={`${row}-${column}`} data-plot-element="pair-cell"><rect x={x} y={y} width={cellWidth} height={cellHeight} fill="#FFFFFF" stroke={gridColor} />{points.map((point, index) => <circle key={point.index} cx={scaleLinear(horizontal.values[index], xDomain, [x + 4, x + cellWidth - 4])} cy={scaleLinear(vertical.values[index], yDomain, [y + cellHeight - 4, y + 4])} r={Math.max(1.4, settings.pointSize * 0.45)} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} />)}</g>; }))}</g><Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+  }
+  const marginal = settings.associationVariant === "marginal";
+  const denseVariant = ["density", "hexbin"].includes(settings.associationVariant);
+  const showAssociationStatistics = type === "correlation" || settings.associationShowPValue;
+  const showFitStatistics = settings.associationFit !== "none";
+  const summaryInSidebar = settings.legendPosition === "right" && !denseVariant;
+  const annotationRows = !summaryInSidebar && (showAssociationStatistics || showFitStatistics) ? Math.min(4, buckets.length) + 1 : 0;
+  const annotationLineHeight = Math.max(10, settings.legendSize + 1);
+  const annotationHeight = annotationRows * annotationLineHeight;
+  const annotatedFrame = annotationHeight > 0 ? { ...frame, top: frame.top + annotationHeight, plotHeight: Math.max(80, frame.plotHeight - annotationHeight) } : frame;
+  const chartFrame = marginal ? { ...annotatedFrame, top: annotatedFrame.top + 28, right: annotatedFrame.right + 28, plotWidth: annotatedFrame.plotWidth - 28, plotHeight: Math.max(70, annotatedFrame.plotHeight - 28) } : annotatedFrame;
+  const ellipseGeometries = settings.associationVariant === "ellipse" ? buckets.map((bucket) => ({ group: bucket.group, color: bucket.color, points: covarianceEllipsePoints(bucket.points) })) : [];
+  const xDomain = resolveAxisDomain(numericExtent([...points.map((point) => point.x), ...ellipseGeometries.flatMap((ellipse) => ellipse.points.map((point) => point.x))]), settings.xMin, settings.xMax);
+  const fitCurves = buckets.map((bucket) => { const samples = Array.from({ length: 64 }, (_, index) => xDomain[0] + (xDomain[1] - xDomain[0]) * index / 63); if (settings.associationFit === "linear") { const fit = linearRegression(bucket.points); return { ...bucket, curve: fit ? samples.map((x) => ({ x, y: fit.intercept + fit.slope * x })) : [], statistic: fit ? `linear R²=${fit.rSquared.toFixed(3)}` : "linear undefined", band: settings.associationShowConfidenceBand ? linearConfidenceBand95(bucket.points, samples) : [] }; } if (settings.associationFit === "polynomial") { const fit = polynomialRegression(bucket.points, settings.associationPolynomialDegree); return { ...bucket, curve: fit ? samples.map((x) => ({ x, y: fit.predict(x) })) : [], statistic: fit ? `degree-${settings.associationPolynomialDegree} R²=${fit.rSquared.toFixed(3)}` : "polynomial undefined", band: [] }; } if (settings.associationFit === "loess") return { ...bucket, curve: loessSmooth(bucket.points, settings.associationLoessSpan), statistic: `LOESS span=${settings.associationLoessSpan.toFixed(2)}`, band: [] }; return { ...bucket, curve: [], statistic: "", band: [] }; });
+  const fittedYValues = fitCurves.flatMap((fit) => [...fit.curve.map((point) => point.y), ...fit.band.flatMap((point) => [point.lower, point.upper])]);
+  const yDomain = resolveAxisDomain(numericExtent([...points.map((point) => point.y), ...fittedYValues, ...ellipseGeometries.flatMap((ellipse) => ellipse.points.map((point) => point.y))]), settings.yMin, settings.yMax);
+  const xAt = (value: number) => scaleLinear(value, xDomain, [chartFrame.left, chartFrame.left + chartFrame.plotWidth]); const yAt = (value: number) => scaleLinear(value, yDomain, [chartFrame.top + chartFrame.plotHeight, chartFrame.top]);
+  const statistics = buckets.map((bucket) => { const coefficient = correlation(bucket.points.map((point) => point.x), bucket.points.map((point) => point.y), settings.correlationMethod); const p = correlationPValue(coefficient, bucket.points.length); return { ...bucket, coefficient, p }; });
+  const summaryHeaders = [showAssociationStatistics ? settings.correlationMethod === "pearson" ? "Pearson r" : "Spearman ρ" : "", settings.associationShowPValue ? settings.correlationMethod === "pearson" ? "two-sided t p" : "two-sided t-approx p" : "", showFitStatistics ? settings.associationFit === "linear" ? "linear R²" : settings.associationFit === "polynomial" ? `degree-${settings.associationPolynomialDegree} R²` : `LOESS span ${settings.associationLoessSpan.toFixed(2)}` : ""].filter(Boolean);
+  const densityMarks = settings.associationVariant === "density" ? buckets.flatMap((bucket) => { const xSpan = Math.max(xDomain[1] - xDomain[0], Number.EPSILON); const ySpan = Math.max(yDomain[1] - yDomain[0], Number.EPSILON); const bandwidth = settings.associationDensityBandwidth; const cells = Array.from({ length: 14 * 12 }, (_, index) => { const column = index % 14; const row = Math.floor(index / 14); const x = xDomain[0] + (column + 0.5) / 14 * xSpan; const y = yDomain[0] + (row + 0.5) / 12 * ySpan; const density = bucket.points.reduce((sum, point) => sum + Math.exp(-0.5 * (((point.x - x) / (xSpan / 7 * bandwidth)) ** 2 + ((point.y - y) / (ySpan / 6 * bandwidth)) ** 2)), 0); return { column, row, density }; }); const maximum = Math.max(...cells.map((cell) => cell.density), Number.EPSILON); return cells.filter((cell) => cell.density / maximum > 0.05).map((cell) => <rect key={`${bucket.group}-${cell.column}-${cell.row}`} data-plot-element="density-cell" x={chartFrame.left + cell.column / 14 * chartFrame.plotWidth} y={chartFrame.top + (11 - cell.row) / 12 * chartFrame.plotHeight} width={chartFrame.plotWidth / 14 + 0.4} height={chartFrame.plotHeight / 12 + 0.4} fill={bucket.color} fillOpacity={cell.density / maximum * 0.32} />); }) : [];
+  const hexMarks = settings.associationVariant === "hexbin" ? buckets.flatMap((bucket) => { const size = settings.associationHexbinSize; const bins = new Map<string, { x: number; y: number; count: number }>(); bucket.points.forEach((point) => { const px = xAt(point.x); const py = yAt(point.y); const row = Math.round(py / (size * 0.86)); const column = Math.round((px - (row % 2) * size * 0.5) / size); const key = `${column}\u0000${row}`; const bin = bins.get(key) ?? { x: column * size + (row % 2) * size * 0.5, y: row * size * 0.86, count: 0 }; bin.count += 1; bins.set(key, bin); }); const maximum = Math.max(...[...bins.values()].map((bin) => bin.count), 1); return [...bins.values()].map((bin, index) => { const radius = size * 0.46; const vertices = Array.from({ length: 6 }, (_, vertex) => `${bin.x + Math.cos(Math.PI / 3 * vertex) * radius},${bin.y + Math.sin(Math.PI / 3 * vertex) * radius}`).join(" "); return <polygon key={`${bucket.group}-${index}`} data-plot-element="hexbin" data-bin-count={bin.count} points={vertices} fill={bucket.color} fillOpacity={0.18 + bin.count / maximum * 0.62} stroke="#FFFFFF" strokeWidth={0.5} />; }); }) : [];
+  const associationLegendEntries = denseVariant ? [{ label: "Combined", color: colors[0] }] : groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }));
+  return <><Axes frame={chartFrame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "X"} yLabel={settings.yLabel || "Y"} gridColor={gridColor} /><g data-plot-data data-plot-family={`association-${settings.associationVariant}`}>{densityMarks}{hexMarks}
+    {settings.associationVariant === "hull" ? buckets.map((bucket) => { const hull = convexHull(bucket.points); return hull.length >= 3 ? <polygon key={bucket.group} data-plot-element="convex-hull" points={hull.map((point) => `${xAt(point.x)},${yAt(point.y)}`).join(" ")} fill={bucket.color} fillOpacity={0.1} stroke={bucket.color} strokeWidth={settings.dataLineWidth} /> : null; }) : null}
+    {settings.associationVariant === "ellipse" ? ellipseGeometries.map((ellipse) => ellipse.points.length ? <polyline key={ellipse.group} data-plot-element="covariance-ellipse" points={ellipse.points.map((point) => `${xAt(point.x)},${yAt(point.y)}`).join(" ")} fill={ellipse.color} fillOpacity={0.08} stroke={ellipse.color} strokeWidth={settings.dataLineWidth} /> : null) : null}
+    {fitCurves.map((fit) => <g key={fit.group}>{fit.band.length ? <polygon data-plot-element="fit-confidence-band" points={[...fit.band.map((point) => `${xAt(point.x)},${yAt(point.upper)}`), ...[...fit.band].reverse().map((point) => `${xAt(point.x)},${yAt(point.lower)}`)].join(" ")} fill={fit.color} fillOpacity={settings.lineBandOpacity} /> : null}{fit.curve.length ? <polyline data-plot-element="association-fit" points={fit.curve.map((point) => `${xAt(point.x)},${yAt(point.y)}`).join(" ")} fill="none" stroke={fit.color} strokeWidth={settings.dataLineWidth} strokeDasharray={settings.associationFit === "loess" ? undefined : "5 4"} /> : null}</g>)}
+    {settings.associationVariant !== "density" && settings.associationVariant !== "hexbin" ? points.map((point) => { const x = xAt(point.x); const y = yAt(point.y); return <g key={point.index}><circle data-plot-element="association-point" cx={x} cy={y} r={settings.pointSize} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.7} />{settings.showLabels && point.label ? <text data-plot-label x={x + settings.pointSize + 2} y={y - 3} fill={TEXT} fontSize={settings.tickSize}>{point.label.slice(0, 12)}</text> : null}</g>; }) : null}
+    {marginal ? <g data-plot-element="marginals">{deterministicHistogram(points.map((point) => point.x), 10, xDomain).map((bin) => <rect key={`x-${bin.index}`} x={xAt(bin.lower)} y={frame.top + 25 - bin.count / Math.max(1, points.length) * 65} width={Math.max(1, xAt(bin.upper) - xAt(bin.lower) - 0.5)} height={bin.count / Math.max(1, points.length) * 65} fill={colors[0]} fillOpacity={0.45} />)}{deterministicHistogram(points.map((point) => point.y), 10, yDomain).map((bin) => <rect key={`y-${bin.index}`} x={chartFrame.left + chartFrame.plotWidth + 3} y={yAt(bin.upper)} width={bin.count / Math.max(1, points.length) * 65} height={Math.max(1, yAt(bin.lower) - yAt(bin.upper) - 0.5)} fill={colors[0]} fillOpacity={0.45} />)}</g> : null}
+  </g>{showAssociationStatistics || showFitStatistics ? <g data-plot-element="association-summary">{summaryInSidebar ? summaryHeaders.map((header, index) => <text key={header} x={frame.left + frame.plotWidth + 10} y={frame.top + associationLegendEntries.length * (settings.legendSize + 8) + 12 + index * annotationLineHeight} fill={TEXT} fontSize={Math.max(8, settings.legendSize - 2)} fontWeight={700}>{header}</text>) : <text x={frame.left + 2} y={frame.top + annotationLineHeight - 2} fill={TEXT} fontSize={Math.max(8, settings.legendSize - 2)} fontWeight={700}>{summaryHeaders.join(" · ")}</text>}{statistics.slice(0, 4).map((statistic, index) => { const fit = fitCurves[index]; const pLabel = Number.isFinite(statistic.p) ? (statistic.p < 0.001 ? "<0.001" : statistic.p.toFixed(3)) : "NA"; const coefficient = Number.isFinite(statistic.coefficient) ? statistic.coefficient.toFixed(3) : "NA"; const fitValue = fit?.statistic.match(/R²=([\d.]+)/)?.[1]; const x = summaryInSidebar ? frame.left + frame.plotWidth + 10 : frame.left + 2; const y = summaryInSidebar ? frame.top + associationLegendEntries.length * (settings.legendSize + 8) + 12 + (summaryHeaders.length + index) * annotationLineHeight : frame.top + (index + 2) * annotationLineHeight - 2; return <text key={statistic.group} data-plot-element="association-statistic" x={x} y={y} fill={statistic.color} fontSize={Math.max(8, settings.legendSize - 2)}>{settings.associationGroupMode === "by-group" ? `${statistic.group.slice(0, 10)} · ` : ""}{showAssociationStatistics ? `${coefficient} · n=${statistic.points.length}${settings.associationShowPValue ? ` · ${pLabel}` : ""}` : ""}{showAssociationStatistics && showFitStatistics ? " · " : ""}{showFitStatistics ? settings.associationFit === "loess" ? settings.associationLoessSpan.toFixed(2) : fitValue ?? "NA" : ""}</text>; })}</g> : null}<Legend entries={associationLegendEntries} frame={frame} settings={settings} /></>;
 }
 
 function ScatterFamily({ type, frame, dataset, mapping, settings, colors, gridColor }: Omit<Props, "svgRef" | "themeId"> & { frame: Frame; colors: string[]; gridColor: string }) {
@@ -645,12 +743,15 @@ function PopulationPyramidPlot({ frame, dataset, mapping, settings, colors }: { 
 export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping, settings, themeId }: Props) {
   const theme = journalThemes[themeId];
   const definition = getPlotDefinition(type);
-  const frame = frameFor(type, settings);
+  const hidesDenseLegend = (type === "scatter" || type === "correlation") && ["density", "hexbin"].includes(settings.associationVariant);
+  const frame = frameFor(type, hidesDenseLegend ? { ...settings, legendPosition: "none" } : settings);
   const colors = settings.categoricalColors.length > 0 ? settings.categoricalColors : theme.categorical;
   const sequential: [string, string] = [settings.continuousLow, settings.continuousHigh];
   const diverging: [string, string, string] = [settings.divergingLow, settings.divergingMid, settings.divergingHigh];
   let content: ReactNode = null;
-  if (["correlation", "quadrant", "pcoa", "umap"].includes(type)) content = <ScatterFamily type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  if (type === "line") content = <LineAssociationPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (type === "scatter" || type === "correlation") content = <AssociationPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (["quadrant", "pcoa", "umap"].includes(type)) content = <ScatterFamily type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "ma") content = <MaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "errorbar") content = <ErrorBarPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "area") content = <AreaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;

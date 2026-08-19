@@ -1,5 +1,7 @@
 import {
-  createLegacyPlotModuleRegistry,
+  createPlotModuleRegistry,
+  type PlotDataShape,
+  type PlotModuleSeed,
 } from "./plot-module-registry";
 
 export type PlotType =
@@ -749,7 +751,7 @@ chr5\t60000000\t65000000\tchr12\t22000000\t26000000\t7
 chr8\t18000000\t23000000\tchr1\t90000000\t96000000\t4`,
 };
 
-export const plotDefinitions: PlotDefinition[] = [
+const plotDefinitionSeeds: PlotDefinition[] = [
   {
     id: "bar",
     name: "Bar",
@@ -1175,7 +1177,7 @@ export const plotReferences = {
   circos: { citation: "Krzywinski et al., 2009. Circos: An information aesthetic for comparative genomics. Genome Res.", href: "https://doi.org/10.1101/gr.092759.109" },
 } satisfies Record<string, PlotReference>;
 
-export const plotGuidance: Record<PlotType, PlotGuidance> = {
+const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
   bar: {
     definition: "用从共同基线出发的柱长编码离散类别的数值；每根柱表示一个汇总量，而不是完整的原始分布。",
     suitableData: "离散类别对应的汇总值、计数、比例或均值；可同时提供 SD/SEM。",
@@ -1389,11 +1391,71 @@ export const plotGuidance: Record<PlotType, PlotGuidance> = {
   },
 };
 
-export const plotModuleRegistry = createLegacyPlotModuleRegistry<PlotType, keyof VisualizationSettings>(
-  plotDefinitions,
-  plotGuidance,
-  Object.keys(defaultVisualizationSettings) as Array<keyof VisualizationSettings>,
-);
+const advancedRendererIds = new Set<PlotType>([
+  "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
+  "upset", "sankey", "chord", "circos",
+]);
+const commonSettingKeys: Array<keyof VisualizationSettings> = [
+  "title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize",
+  "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
+  "categoricalColors",
+];
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"]);
+const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
+  bar: ["swapAxes", "barErrorType", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
+  line: ["swapAxes", "showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
+  scatter: ["swapAxes", "showTrend", "showLabels"], correlation: ["showTrend", "showLabels", "correlationMethod"], pca: ["swapAxes", "showLabels"],
+  pcoa: ["showLabels"], umap: ["showLabels"],
+  box: ["showBox", "showPoints", "showSampleSize", "boxErrorType", "errorBarLineWidth", "errorBarCapSize"],
+  violin: ["showPoints", "showSampleSize", "violinBandwidth", "violinWidth"], beeswarm: ["showPoints", "showSampleSize"],
+  raincloud: ["showPoints", "showSampleSize", "violinBandwidth"],
+  volcano: ["showLabels", "foldChangeThreshold", "pValueThreshold", "labelLimit"],
+  ma: ["showLabels", "foldChangeThreshold", "pValueThreshold", "labelLimit"], quadrant: ["showLabels", "xThreshold", "yThreshold"],
+  errorbar: ["errorBarLineWidth", "errorBarCapSize"],
+  heatmap: ["heatmapScale", "divergingLow", "divergingMid", "divergingHigh"],
+  "clustered-heatmap": ["heatmapScale", "clusterRows", "clusterColumns", "divergingLow", "divergingMid", "divergingHigh"],
+  "correlation-heatmap": ["correlationMethod", "clusterRows", "clusterColumns", "divergingLow", "divergingMid", "divergingHigh"],
+  enrichment: ["continuousLow", "continuousHigh"], "enrichment-bar": ["continuousLow", "continuousHigh"],
+  km: ["showRiskTable"], "survival-forest": ["forestReferenceValue"],
+};
+
+function dataShapeFor(type: PlotType): PlotDataShape {
+  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "pca"].includes(type)) return "matrix";
+  if (["pcoa", "umap"].includes(type)) return "coordinates";
+  if (["venn", "upset"].includes(type)) return "sets";
+  if (["sankey", "chord"].includes(type)) return "network";
+  if (type === "circos") return "genomic-links";
+  return "long";
+}
+
+const plotModuleSeeds: Array<PlotModuleSeed<PlotType, keyof VisualizationSettings>> = plotDefinitionSeeds.map((definition) => ({
+  definition,
+  guidance: plotGuidanceSeeds[definition.id],
+  renderer: advancedRendererIds.has(definition.id) ? "advanced" : "standard",
+  capabilities: {
+    dataShape: dataShapeFor(definition.id),
+    settingKeys: [
+      ...commonSettingKeys,
+      ...(hiddenLegendIds.has(definition.id) ? [] : ["legendPosition" as const]),
+      ...(specializedSettingKeys[definition.id] ?? []),
+    ],
+    grouping: definition.roles.some((role) => role.key === "group" || role.key === "series"),
+    multipleExamples: (definition.examples?.length ?? 0) > 1,
+  },
+}));
+
+export const plotModuleRegistry = createPlotModuleRegistry(plotModuleSeeds, {
+  allowedSettingKeys: Object.keys(defaultVisualizationSettings) as Array<keyof VisualizationSettings>,
+});
+
+/** @deprecated Read plot definitions through plotModuleRegistry. */
+export const plotDefinitions = plotModuleRegistry.list().map((plotModule) => plotModule.definition);
+
+/** @deprecated Read guidance through plotModuleRegistry. */
+export const plotGuidance = Object.fromEntries(
+  plotModuleRegistry.list().map((plotModule) => [plotModule.definition.id, plotModule.guidance]),
+) as Record<PlotType, PlotGuidance>;
 
 export function getPlotModule(type: PlotType) {
   return plotModuleRegistry.get(type);
@@ -1489,6 +1551,59 @@ export function parseRatioValue(value: string | undefined) {
     if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator !== 0) return numerator / denominator;
   }
   return parseNumericValue(value);
+}
+
+const mappingAliases: Record<string, string[]> = {
+  category: ["category", "condition", "sample", "name", "term"],
+  value: ["value", "mean", "expression", "score", "abundance", "count"],
+  group: ["group", "class", "condition", "cluster", "ontology"],
+  series: ["series", "group", "condition", "class"],
+  x: ["x", "time", "dose", "pc1", "dim1", "dimension1", "umap1"],
+  y: ["y", "response", "pc2", "dim2", "dimension2", "umap2"],
+  error: ["error", "sd", "sem", "se", "stderr", "standarddeviation", "standarderror"],
+  label: ["label", "gene", "feature", "id", "name"],
+  effect: ["log2fc", "logfc", "effect", "estimate"],
+  pValue: ["padj", "fdr", "adjustedpvalue", "pvalue", "p"],
+  term: ["term", "pathway", "description", "name"],
+  ratio: ["generatio", "ratio", "richfactor", "foldenrichment"],
+  count: ["count", "genes", "hits", "size"],
+  mean: ["mean", "basemean", "meanexpression", "averagelogexpression"],
+  rank: ["rank", "position", "index"],
+  hit: ["hit", "member", "membership", "ingeneset"],
+  time: ["time", "followuptime", "survivaltime", "os", "pfs"],
+  event: ["event", "status", "death", "outcome"],
+  estimate: ["estimate", "hr", "hazardratio", "or", "oddsratio"],
+  lower: ["lower", "lowerci", "cilower", "lcl"],
+  upper: ["upper", "upperci", "ciupper", "ucl"],
+  truth: ["truth", "class", "outcome", "label", "event"],
+  score: ["score", "prediction", "probability", "risk", "runninges", "enrichmentscore", "es"],
+  item: ["item", "gene", "feature", "id"],
+  set: ["set", "geneset", "list", "collection"],
+  source: ["source", "from", "sender"],
+  target: ["target", "to", "receiver"],
+  sourceChr: ["sourcechr", "chr1", "chromosome1"],
+  sourceStart: ["sourcestart", "start1"],
+  sourceEnd: ["sourceend", "end1"],
+  targetChr: ["targetchr", "chr2", "chromosome2"],
+  targetStart: ["targetstart", "start2"],
+  targetEnd: ["targetend", "end2"],
+};
+
+function normalizeMappingName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export function inferPlotMapping(definition: PlotDefinition, headers: string[]) {
+  const normalized = new Map<string, string>();
+  headers.forEach((header) => {
+    const key = normalizeMappingName(header);
+    if (!normalized.has(key)) normalized.set(key, header);
+  });
+  return Object.fromEntries(definition.roles.map((role) => {
+    const exact = normalized.get(normalizeMappingName(role.key));
+    const fallback = mappingAliases[role.key]?.map((alias) => normalized.get(alias)).find(Boolean);
+    return [role.key, exact ?? fallback ?? ""];
+  }));
 }
 
 export function validatePlotDataset(

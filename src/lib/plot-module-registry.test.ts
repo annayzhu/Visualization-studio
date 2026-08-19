@@ -5,6 +5,7 @@ import {
 } from "./plot-module-registry";
 import {
   getPlotModule,
+  inferPlotMapping,
   plotModuleRegistry,
   type PlotDefinition,
   type PlotGuidance,
@@ -92,5 +93,21 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("pca").capabilities.settingKeys).toContain("swapAxes");
     expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");
+  });
+
+  it("infers exact and normalized aliases deterministically", () => {
+    const enrichment = getPlotModule("enrichment").definition;
+    expect(inferPlotMapping(enrichment, ["term", "Gene Ratio", "adjusted_p_value", "group"])).toMatchObject({
+      term: "term",
+      ratio: "Gene Ratio",
+      pValue: "adjusted_p_value",
+      group: "group",
+    });
+
+    const duplicateNormalized = inferPlotMapping(enrichment, ["term", "Gene Ratio", "gene_ratio", "adjusted_p_value"]);
+    expect(duplicateNormalized.ratio).toBe("Gene Ratio");
+
+    const scatter = getPlotModule("scatter").definition;
+    expect(inferPlotMapping(scatter, ["group"])).toMatchObject({ x: "", y: "", group: "group", label: "" });
   });
 });

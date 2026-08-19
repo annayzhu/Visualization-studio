@@ -16,6 +16,7 @@ import {
   figureFontPresets,
   getPlotDefinition,
   getPlotModule,
+  inferPlotMapping,
   journalThemes,
   paletteSeries,
   parseDelimitedData,
@@ -25,7 +26,6 @@ import {
   type PaletteSeriesId,
   type FieldRole,
   type FigureFontId,
-  type PlotDefinition,
   type PlotType,
   type VisualizationSettings,
 } from "@/lib/visualization-studio";
@@ -235,50 +235,6 @@ function serializeSvg(svg: SVGSVGElement, fontFamily: string) {
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("font-family", fontFamily);
   return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
-}
-
-function inferMapping(definition: PlotDefinition, headers: string[]) {
-  const normalized = new Map(headers.map((header) => [header.toLowerCase().replace(/[^a-z0-9]/g, ""), header]));
-  const aliases: Record<string, string[]> = {
-    category: ["category", "condition", "sample", "name", "term"],
-    value: ["value", "expression", "score", "abundance", "count"],
-    group: ["group", "class", "condition", "cluster", "ontology"],
-    series: ["series", "group", "condition", "class"],
-    x: ["x", "time", "dose", "pc1", "dimension1"],
-    y: ["y", "response", "pc2", "dimension2"],
-    error: ["error", "sd", "sem", "se", "stderr", "standarddeviation", "standarderror"],
-    label: ["label", "gene", "feature", "id", "name"],
-    effect: ["log2fc", "logfc", "effect", "estimate"],
-    pValue: ["padj", "fdr", "adjustedpvalue", "pvalue", "p"],
-    term: ["term", "pathway", "description", "name"],
-    ratio: ["generatio", "ratio", "richfactor", "foldenrichment"],
-    count: ["count", "genes", "hits", "size"],
-    mean: ["mean", "basemean", "meanexpression", "averagelogexpression"],
-    rank: ["rank", "position", "index"],
-    hit: ["hit", "member", "membership", "ingeneset"],
-    time: ["time", "followuptime", "survivaltime", "os", "pfs"],
-    event: ["event", "status", "death", "outcome"],
-    estimate: ["estimate", "hr", "hazardratio", "or", "oddsratio"],
-    lower: ["lower", "lowerci", "cilower", "lcl"],
-    upper: ["upper", "upperci", "ciupper", "ucl"],
-    truth: ["truth", "class", "outcome", "label", "event"],
-    score: ["score", "prediction", "probability", "risk", "runninges", "enrichmentscore", "es"],
-    item: ["item", "gene", "feature", "id"],
-    set: ["set", "geneset", "list", "collection"],
-    source: ["source", "from", "sender"],
-    target: ["target", "to", "receiver"],
-    sourceChr: ["sourcechr", "chr1", "chromosome1"],
-    sourceStart: ["sourcestart", "start1"],
-    sourceEnd: ["sourceend", "end1"],
-    targetChr: ["targetchr", "chr2", "chromosome2"],
-    targetStart: ["targetstart", "start2"],
-    targetEnd: ["targetend", "end2"],
-  };
-  return Object.fromEntries(definition.roles.map((role) => {
-    const exact = normalized.get(role.key.toLowerCase().replace(/[^a-z0-9]/g, ""));
-    const fallback = aliases[role.key]?.map((alias) => normalized.get(alias)).find(Boolean);
-    return [role.key, exact ?? fallback ?? ""];
-  }));
 }
 
 function ControlGroup({ title, children }: { title: string; children: ReactNode }) {
@@ -618,7 +574,7 @@ export function VisualizationStudio() {
       setSelectedExampleIndex(-1);
       setLoadedFileName(file.name);
       if (plotType === "pca") setMapping(definition.defaultMapping);
-      else setMapping(inferMapping(definition, parseDelimitedData(text).headers));
+      else setMapping(inferPlotMapping(definition, parseDelimitedData(text).headers));
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "The selected file could not be read.");
     }
@@ -830,7 +786,7 @@ export function VisualizationStudio() {
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-graphite">{plotType === "pca" ? "PCA input" : "Column mapping"}</p>
-                    {plotType !== "pca" && definition.roles.length > 0 ? <Button size="sm" variant="ghost" onClick={() => setMapping(inferMapping(definition, dataset.headers))}>Auto-map</Button> : null}
+                    {plotType !== "pca" && definition.roles.length > 0 ? <Button size="sm" variant="ghost" onClick={() => setMapping(inferPlotMapping(definition, dataset.headers))}>Auto-map</Button> : null}
                   </div>
                   <p className="mt-1 text-[11px] leading-4 text-muted">{definition.inputHint}</p>
                 </div>

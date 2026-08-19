@@ -15,12 +15,11 @@ import {
   defaultVisualizationThemeId,
   figureFontPresets,
   getPlotDefinition,
-  getPlotExamples,
+  getPlotModule,
   journalThemes,
   paletteSeries,
   parseDelimitedData,
-  plotGuidance,
-  plotDefinitions,
+  plotModuleRegistry,
   validatePlotDataset,
   type JournalThemeId,
   type PaletteSeriesId,
@@ -442,12 +441,16 @@ export function VisualizationStudio() {
     };
   }, []);
 
-  const definition = getPlotDefinition(plotType);
-  const dataExamples = useMemo(() => getPlotExamples(definition), [definition]);
-  const guidance = plotGuidance[plotType];
+  const plotModule = getPlotModule(plotType);
+  const definition = plotModule.definition;
+  const dataExamples = plotModule.examples;
+  const guidance = plotModule.guidance;
   const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions) : null, [plotType, rawData, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
-  const validation = useMemo(() => validatePlotDataset(definition, dataset, mapping, settings), [definition, dataset, mapping, settings]);
+  const validation = useMemo(
+    () => validatePlotDataset(getPlotDefinition(plotType), dataset, mapping, settings),
+    [plotType, dataset, mapping, settings],
+  );
   const categoryLabels = useMemo(() => categoricalColorLabels(plotType, dataset.rows, mapping), [plotType, dataset.rows, mapping]);
   const isValid = validation.errors.length === 0;
   const mainGridStyle = {
@@ -499,8 +502,9 @@ export function VisualizationStudio() {
   };
 
   const selectPlot = (nextType: PlotType) => {
-    const next = getPlotDefinition(nextType);
-    const nextExample = getPlotExamples(next)[0];
+    const nextModule = getPlotModule(nextType);
+    const next = nextModule.definition;
+    const nextExample = nextModule.examples[0];
     setPlotType(nextType);
     setSelectedExampleIndex(0);
     setRawData(nextExample.data);
@@ -737,7 +741,7 @@ export function VisualizationStudio() {
           <CardBody className="p-2">
             <div className="relative">
               <select aria-label="Plot type" value={plotType} onChange={(event) => selectPlot(event.target.value as PlotType)} className="focus-ring h-10 w-full appearance-none rounded-[8px] border border-hairline bg-white px-3 pr-9 text-sm font-medium text-ink">
-                {plotDefinitions.map((plot) => <option key={plot.id} value={plot.id}>{plot.name}</option>)}
+                {plotModuleRegistry.list().map(({ definition: plot }) => <option key={plot.id} value={plot.id}>{plot.name}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
             </div>
@@ -749,7 +753,7 @@ export function VisualizationStudio() {
         <Card className="hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none md:block xl:sticky xl:top-[var(--visualization-panel-top)] xl:flex xl:h-[var(--visualization-panel-height)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
           <CardHeader title="Plot types" className="h-12 shrink-0" />
           <CardBody className="space-y-1 p-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
-            {plotDefinitions.map((plot) => (
+            {plotModuleRegistry.list().map(({ definition: plot }) => (
               <button key={plot.id} type="button" onClick={() => selectPlot(plot.id)} className={cn("focus-ring relative w-full rounded-[6px] border border-transparent px-2.5 py-2 text-left transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent", plotType === plot.id ? "bg-[var(--ln-vis-active-bg)] before:bg-moss" : "hover:bg-warm") }>
                 <span className="block text-[13px] font-medium text-ink">{plot.name}</span>
                 <span className="mt-0.5 block text-[10px] uppercase tracking-[0.07em] text-muted">{plot.family}</span>

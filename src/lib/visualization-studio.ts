@@ -1,3 +1,7 @@
+import {
+  createLegacyPlotModuleRegistry,
+} from "./plot-module-registry";
+
 export type PlotType =
   | "bar"
   | "line"
@@ -1385,14 +1389,22 @@ export const plotGuidance: Record<PlotType, PlotGuidance> = {
   },
 };
 
+export const plotModuleRegistry = createLegacyPlotModuleRegistry<PlotType, keyof VisualizationSettings>(
+  plotDefinitions,
+  plotGuidance,
+  Object.keys(defaultVisualizationSettings) as Array<keyof VisualizationSettings>,
+);
+
+export function getPlotModule(type: PlotType) {
+  return plotModuleRegistry.get(type);
+}
+
 export function getPlotDefinition(type: PlotType) {
-  return plotDefinitions.find((definition) => definition.id === type) ?? plotDefinitions[0];
+  return getPlotModule(type).definition;
 }
 
 export function getPlotExamples(definition: PlotDefinition): PlotDataExample[] {
-  return definition.examples?.length
-    ? definition.examples
-    : [{ label: "Example 1", description: "Default input template for this plot type.", data: definition.sampleData, mapping: definition.defaultMapping }];
+  return [...getPlotModule(definition.id).examples];
 }
 
 function detectDelimiter(line: string) {

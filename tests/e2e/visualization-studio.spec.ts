@@ -107,8 +107,12 @@ test.describe("Visualization Studio browser acceptance", () => {
 7\t4.6\tMolecular low-risk subgroup\tS7
 8\t5.5\tIndependent validation cohort\tS8`);
     await page.getByRole("button", { name: "Auto-map" }).click();
-    const legendPreview = page.getByRole("heading", { name: "Scatter preview" }).locator("xpath=ancestor::section");
-    await expectStablePreviewScreenshot(page, legendPreview, "scatter-long-legend-desktop.png");
+    const legendSvg = page.locator("svg[aria-label='Scatter scientific figure preview']");
+    const clippedLegendText = await legendSvg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("text")].filter((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1; }).map((label) => label.textContent);
+    });
+    expect(clippedLegendText).toEqual([]);
 
     await page.getByRole("textbox", { name: "X minimum", exact: true }).fill("10");
     await page.getByRole("textbox", { name: "X minimum", exact: true }).press("Enter");
@@ -307,6 +311,61 @@ test.describe("Visualization Studio browser acceptance", () => {
       const svgBox = await page.locator("svg[aria-label='Ridge scientific figure preview']").boundingBox();
       expect(svgBox).not.toBeNull();
       expect(svgBox!.width).toBeLessThanOrEqual(340);
+    }
+  });
+
+  test("configures line uncertainty and advanced association views", async ({ page }, testInfo) => {
+    await page.goto("/");
+    if (testInfo.project.name === "desktop-chromium") {
+      await page.getByRole("button", { name: /^Line/ }).click();
+      await page.getByRole("combobox", { name: "Error representation" }).selectOption("ci95");
+      await page.getByRole("combobox", { name: "Display style" }).selectOption("band");
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      await expect(page.locator("svg[aria-label='Line scientific figure preview'] [data-plot-element='line-uncertainty-band']")).toHaveCount(2);
+
+      await page.getByRole("button", { name: /^Scatter/ }).click();
+      await page.getByRole("button", { name: "Example 2" }).click();
+      await page.getByRole("checkbox", { name: "Swap axes" }).check({ force: true });
+      await page.getByRole("combobox", { name: "Variant" }).selectOption("ternary");
+      await expect(page.getByRole("checkbox", { name: "Swap axes" })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Correlation method" })).toHaveCount(0);
+      await expect(page.getByText(/Ternary rows are normalized to proportions/)).toBeVisible();
+      await expect(page.locator("svg[aria-label='Scatter scientific figure preview'] [data-plot-element='ternary-point']")).toHaveCount(9);
+      const configDownload = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Config" }).click();
+      const configPath = await (await configDownload).path();
+      expect(configPath).not.toBeNull();
+      const exportedConfig = JSON.parse(await readFile(configPath!, "utf8")) as { settings: { swapAxes: boolean } };
+      expect(exportedConfig.settings.swapAxes).toBe(false);
+
+      await page.getByRole("combobox", { name: "Variant" }).selectOption("points");
+      await page.getByRole("combobox", { name: "Fit" }).selectOption("linear");
+      await page.getByRole("checkbox", { name: "Mean 95% confidence band" }).check({ force: true });
+      await page.getByRole("checkbox", { name: "Show correlation P value" }).check({ force: true });
+      await page.getByRole("combobox", { name: "Group behavior" }).selectOption("combined");
+      const scatterSvg = page.locator("svg[aria-label='Scatter scientific figure preview']");
+      await expect(scatterSvg.locator("[data-plot-element='association-fit']")).toHaveCount(1);
+      await expect(scatterSvg.locator("[data-plot-element='fit-confidence-band']")).toHaveCount(1);
+      await expect(scatterSvg.locator("[data-plot-element='association-summary']")).toContainText("Pearson r");
+      await expect(scatterSvg.locator("[data-plot-element='association-summary']")).toContainText("two-sided t p");
+      await expect(scatterSvg.locator("[data-plot-element='association-statistic']")).toContainText("n=9");
+      const clippedAssociationText = await scatterSvg.evaluate((element) => {
+        const canvas = element.getBoundingClientRect();
+        return [...element.querySelectorAll("[data-plot-element='association-summary'] text")].filter((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1; }).map((label) => label.textContent);
+      });
+      expect(clippedAssociationText).toEqual([]);
+      await page.getByRole("combobox", { name: "Variant" }).selectOption("density");
+      await expect(page.getByRole("combobox", { name: "Legend" })).toHaveCount(0);
+    } else {
+      await page.getByRole("combobox", { name: "Plot type" }).selectOption("scatter");
+      await page.getByRole("button", { name: "Example 2" }).click();
+      await page.getByRole("combobox", { name: "Variant" }).selectOption("3d");
+      const svg = page.locator("svg[aria-label='Scatter scientific figure preview']");
+      await expect(svg.locator("[data-plot-element='scatter-3d-point']")).toHaveCount(9);
+      const box = await svg.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeLessThanOrEqual(340);
+      expect(await svg.innerHTML()).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
     }
   });
 });

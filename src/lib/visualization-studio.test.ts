@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   boxStatistics,
   confidenceInterval95,
+  covarianceEllipsePoints,
   defaultVisualizationPaletteSeriesId,
   defaultVisualizationSettings,
   defaultVisualizationThemeId,
@@ -16,10 +17,13 @@ import {
   paletteSeries,
   kernelDensityEstimate,
   linearRegression,
+  linearConfidenceBand95,
+  loessSmooth,
   meanErrorStatistics,
   numericExtent,
   parseDelimitedData,
   parseRatioValue,
+  polynomialRegression,
   resolveAxisDomain,
   studentTCritical95,
   plotDefinitions,
@@ -223,6 +227,9 @@ describe("Visualization Studio data contracts", () => {
     const rows = Array.from({ length: 251 }, (_, index) => `G${index}\t${index}\t${index + 1}`).join("\n");
     const heatmap = validatePlotDataset(getPlotDefinition("clustered-heatmap"), parseDelimitedData(`gene\tS1\tS2\n${rows}`), {});
     expect(heatmap.errors.join(" ")).toMatch(/limited to 250 rows/);
+
+    const constantCorrelation = validatePlotDataset(getPlotDefinition("correlation-heatmap"), parseDelimitedData("sample\tA\tB\nS1\t1\t2\nS2\t1\t3\nS3\t1\t4"), {});
+    expect(constantCorrelation.errors).toContain("Correlation is undefined for constant columns: A.");
   });
 
   it("requires a mapped non-negative error column when bar SD or SEM is enabled", () => {
@@ -264,6 +271,57 @@ describe("Visualization Studio data contracts", () => {
 
     const negative = validatePlotDataset(definition, dataset, { x: "time", value: "value", error: "error", series: "series" }, { ...defaultVisualizationSettings, lineErrorType: "sem" });
     expect(negative.errors.join(" ")).toMatch(/SD and SEM must be non-negative/);
+  });
+
+  it("validates 3D, ternary, fit, confidence-band, and geometric association contracts", () => {
+    const definition = getPlotDefinition("scatter");
+    const twoAxis = parseDelimitedData("x\ty\tgroup\n1\t2\tA\n2\t3\tA\n3\t5\tA\n4\t7\tA\n5\t9\tA");
+    const mapping = { x: "x", y: "y", z: "", group: "group", label: "" };
+    expect(validatePlotDataset(definition, twoAxis, mapping, { ...defaultVisualizationSettings, associationVariant: "3d" }).errors.join(" ")).toMatch(/requires a mapped Z/);
+    expect(validatePlotDataset(definition, twoAxis, mapping, { ...defaultVisualizationSettings, associationFit: "polynomial", associationPolynomialDegree: 3 }).errors).toEqual([]);
+    expect(validatePlotDataset(definition, twoAxis, mapping, { ...defaultVisualizationSettings, associationFit: "loess", associationShowConfidenceBand: true }).errors).toContain("Mean 95% confidence bands are currently supported only for linear regression fits.");
+
+    const ternary = parseDelimitedData("a\tb\tc\n1\t2\t3\n2\t1\t3\n-1\t2\t2");
+    const ternaryResult = validatePlotDataset(definition, ternary, { x: "a", y: "b", z: "c", group: "", label: "" }, { ...defaultVisualizationSettings, associationVariant: "ternary" });
+    expect(ternaryResult.errors.join(" ")).toMatch(/non-negative components/);
+    expect(ternaryResult.warnings.join(" ")).toMatch(/normalized to proportions/);
+
+    const collinear = parseDelimitedData("x\ty\n1\t2\n2\t4\n3\t6");
+    expect(validatePlotDataset(definition, collinear, { x: "x", y: "y", z: "", group: "", label: "" }, { ...defaultVisualizationSettings, associationVariant: "ellipse" }).errors.join(" ")).toMatch(/non-collinear/);
+    expect(validatePlotDataset(getPlotDefinition("correlation"), parseDelimitedData("x\ty\n1\t2\n1\t3\n1\t4"), { x: "x", y: "y", z: "", group: "", label: "" }, defaultVisualizationSettings).errors.join(" ")).toMatch(/Correlation is undefined/);
+    expect(validatePlotDataset(definition, twoAxis, mapping, { ...defaultVisualizationSettings, associationVariant: "density", associationGroupMode: "by-group" }).errors.join(" ")).toMatch(/require Combined group behavior/);
+    const fiveGroups = parseDelimitedData("x\ty\tgroup\n1\t1\tA\n2\t2\tA\n3\t3\tA\n1\t2\tB\n2\t3\tB\n3\t4\tB\n1\t3\tC\n2\t4\tC\n3\t5\tC\n1\t4\tD\n2\t5\tD\n3\t6\tD\n1\t5\tE\n2\t6\tE\n3\t7\tE");
+    expect(validatePlotDataset(definition, fiveGroups, mapping, { ...defaultVisualizationSettings, associationFit: "linear", associationGroupMode: "by-group" }).errors.join(" ")).toMatch(/at most four groups/);
+
+    const clippedFit = validatePlotDataset(definition, twoAxis, mapping, { ...defaultVisualizationSettings, associationFit: "linear", associationShowConfidenceBand: true, associationGroupMode: "combined", yMin: 2, yMax: 9 });
+    expect(clippedFit.warnings.join(" ")).toMatch(/clip part of the fitted curve or confidence band/);
+
+    const ellipseData = parseDelimitedData("x\ty\n1\t1\n2\t1.8\n3\t3.2\n4\t3.7\n5\t5.3");
+    const ellipseValidation = validatePlotDataset(definition, ellipseData, { x: "x", y: "y", z: "", group: "", label: "" }, { ...defaultVisualizationSettings, associationVariant: "ellipse", associationGroupMode: "combined", xMin: 0, xMax: 5 });
+    expect(ellipseValidation.warnings.join(" ")).toMatch(/ellipse boundary/);
+    expect(covarianceEllipsePoints([{ x: 1, y: 1 }, { x: 2, y: 1.8 }, { x: 3, y: 3.2 }, { x: 4, y: 3.7 }, { x: 5, y: 5.3 }]).length).toBe(65);
+  });
+
+  it("fits deterministic polynomial, LOESS, and linear mean-confidence curves", () => {
+    const quadratic = [{ x: -2, y: 5 }, { x: -1, y: 2 }, { x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 5 }];
+    const polynomial = polynomialRegression(quadratic, 2);
+    expect(polynomial?.coefficients[0]).toBeCloseTo(1, 8);
+    expect(polynomial?.coefficients[2]).toBeCloseTo(1, 8);
+    expect(polynomial?.rSquared).toBeCloseTo(1, 8);
+    const offsetQuadratic = quadratic.map((point) => ({ x: point.x + 1_000_000_000, y: point.y }));
+    const stablePolynomial = polynomialRegression(offsetQuadratic, 2);
+    expect(stablePolynomial).not.toBeNull();
+    expect(stablePolynomial?.rSquared).toBeCloseTo(1, 8);
+    expect(stablePolynomial?.predict(1_000_000_001)).toBeCloseTo(2, 8);
+    const loess = loessSmooth(quadratic, 0.65, 8);
+    expect(loess).toHaveLength(16);
+    expect(loess[0].x).toBe(-2);
+    expect(loess.at(-1)?.x).toBe(2);
+    expect(loess).toEqual(loessSmooth(quadratic, 0.65, 8));
+    const band = linearConfidenceBand95([{ x: 1, y: 1.1 }, { x: 2, y: 2 }, { x: 3, y: 2.9 }, { x: 4, y: 4.2 }], [2.5]);
+    expect(band).toHaveLength(1);
+    expect(band[0].lower).toBeLessThan(band[0].estimate);
+    expect(band[0].upper).toBeGreaterThan(band[0].estimate);
   });
 
   it("computes Tukey box statistics and outliers reproducibly", () => {

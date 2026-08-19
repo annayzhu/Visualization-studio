@@ -22,17 +22,74 @@ export function rankValues(values: number[]) {
 
 export function pearsonCorrelation(x: number[], y: number[]) {
   const pairs = x.map((value, index) => [value, y[index]] as const).filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
-  if (pairs.length < 2) return 0;
+  if (pairs.length < 2) return Number.NaN;
   const meanX = mean(pairs.map(([a]) => a));
   const meanY = mean(pairs.map(([, b]) => b));
   const numerator = pairs.reduce((sum, [a, b]) => sum + (a - meanX) * (b - meanY), 0);
   const denominatorX = Math.sqrt(pairs.reduce((sum, [a]) => sum + (a - meanX) ** 2, 0));
   const denominatorY = Math.sqrt(pairs.reduce((sum, [, b]) => sum + (b - meanY) ** 2, 0));
-  return denominatorX > 0 && denominatorY > 0 ? numerator / (denominatorX * denominatorY) : 0;
+  return denominatorX > 0 && denominatorY > 0 ? numerator / (denominatorX * denominatorY) : Number.NaN;
 }
 
 export function correlation(x: number[], y: number[], method: CorrelationMethod) {
   return method === "spearman" ? pearsonCorrelation(rankValues(x), rankValues(y)) : pearsonCorrelation(x, y);
+}
+
+function logGamma(value: number): number {
+  const coefficients = [676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406, 12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7];
+  if (value < 0.5) return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - logGamma(1 - value);
+  const shifted = value - 1;
+  let series = 0.9999999999998099;
+  coefficients.forEach((coefficient, index) => { series += coefficient / (shifted + index + 1); });
+  const t = shifted + coefficients.length - 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (shifted + 0.5) * Math.log(t) - t + Math.log(series);
+}
+
+function betaContinuedFraction(a: number, b: number, x: number) {
+  const maximumIterations = 200;
+  const epsilon = 3e-14;
+  const floor = 1e-300;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - qab * x / qap;
+  if (Math.abs(d) < floor) d = floor;
+  d = 1 / d;
+  let result = d;
+  for (let iteration = 1; iteration <= maximumIterations; iteration += 1) {
+    const doubled = iteration * 2;
+    let numerator = iteration * (b - iteration) * x / ((qam + doubled) * (a + doubled));
+    d = 1 + numerator * d; if (Math.abs(d) < floor) d = floor;
+    c = 1 + numerator / c; if (Math.abs(c) < floor) c = floor;
+    d = 1 / d; result *= d * c;
+    numerator = -(a + iteration) * (qab + iteration) * x / ((a + doubled) * (qap + doubled));
+    d = 1 + numerator * d; if (Math.abs(d) < floor) d = floor;
+    c = 1 + numerator / c; if (Math.abs(c) < floor) c = floor;
+    d = 1 / d;
+    const delta = d * c;
+    result *= delta;
+    if (Math.abs(delta - 1) < epsilon) break;
+  }
+  return result;
+}
+
+export function regularizedIncompleteBeta(x: number, a: number, b: number) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2)
+    ? front * betaContinuedFraction(a, b, x) / a
+    : 1 - front * betaContinuedFraction(b, a, 1 - x) / b;
+}
+
+export function correlationPValue(coefficient: number, sampleSize: number) {
+  if (sampleSize < 3 || !Number.isFinite(coefficient)) return Number.NaN;
+  const bounded = Math.max(-1, Math.min(1, coefficient));
+  if (Math.abs(bounded) >= 1) return 0;
+  const degreesOfFreedom = sampleSize - 2;
+  const tSquared = bounded ** 2 * degreesOfFreedom / Math.max(Number.EPSILON, 1 - bounded ** 2);
+  return Math.max(0, Math.min(1, regularizedIncompleteBeta(degreesOfFreedom / (degreesOfFreedom + tSquared), degreesOfFreedom / 2, 0.5)));
 }
 
 export function matrixFromRows(rows: DelimitedRow[], columns: string[]) {

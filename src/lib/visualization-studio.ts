@@ -220,7 +220,18 @@ export type VisualizationSettings = {
   axisBreakStart: number;
   axisBreakEnd: number;
   barGap: number;
-  lineErrorType: "none" | "sd" | "sem";
+  lineErrorType: "none" | "sd" | "sem" | "ci95";
+  lineUncertaintyStyle: "bars" | "band";
+  lineBandOpacity: number;
+  associationVariant: "points" | "marginal" | "density" | "hexbin" | "ellipse" | "hull" | "pair-matrix" | "3d" | "ternary";
+  associationFit: "none" | "linear" | "polynomial" | "loess";
+  associationPolynomialDegree: 2 | 3;
+  associationLoessSpan: number;
+  associationShowConfidenceBand: boolean;
+  associationShowPValue: boolean;
+  associationGroupMode: "combined" | "by-group";
+  associationHexbinSize: number;
+  associationDensityBandwidth: number;
   barBorderWidth: number;
   barBorderColor: string;
   errorBarLineWidth: number;
@@ -300,6 +311,17 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   axisBreakEnd: 6.5,
   barGap: 0.18,
   lineErrorType: "none",
+  lineUncertaintyStyle: "bars",
+  lineBandOpacity: 0.16,
+  associationVariant: "points",
+  associationFit: "none",
+  associationPolynomialDegree: 2,
+  associationLoessSpan: 0.65,
+  associationShowConfidenceBand: false,
+  associationShowPValue: false,
+  associationGroupMode: "by-group",
+  associationHexbinSize: 14,
+  associationDensityBandwidth: 1,
   barBorderWidth: 0,
   barBorderColor: "#1D4C50",
   errorBarLineWidth: 1.5,
@@ -703,6 +725,16 @@ Day 7\t9.0\t0.72\tTreatment C\t8.6\t9.4\t0.0007\tLate`,
 3.2\t3.7\tTreatment\tS5
 3.8\t4.6\tTreatment\tS6
 4.4\t5.0\tTreatment\tS7`,
+  scatterThreeAxis: `x\ty\tz\tgroup\tlabel
+0.62\t0.24\t0.14\tControl\tS1
+0.55\t0.31\t0.14\tControl\tS2
+0.48\t0.36\t0.16\tControl\tS3
+0.41\t0.42\t0.17\tControl\tS4
+0.30\t0.50\t0.20\tTreatment\tS5
+0.24\t0.55\t0.21\tTreatment\tS6
+0.20\t0.49\t0.31\tTreatment\tS7
+0.16\t0.44\t0.40\tTreatment\tS8
+0.12\t0.38\t0.50\tTreatment\tS9`,
   pca: `feature_id\tControl_1_count\tControl_2_count\tControl_3_count\tTreatment_1_count\tTreatment_2_count\tTreatment_3_count
 Feature_A\t120\t132\t118\t420\t398\t445
 Feature_B\t560\t585\t542\t190\t205\t178
@@ -944,11 +976,11 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     name: "Line",
     family: "Trend",
     summary: "Time-course or ordered trend with multiple series and visible markers.",
-    inputHint: "One row per observation. Map an optional non-negative SD or SEM column to draw a symmetric error bar at every Y value.",
+    inputHint: "One row per ordered estimate. Map an optional non-negative SD, SEM, or 95% CI half-width column and display it as bars or a ribbon.",
     roles: [
       { key: "x", label: "X", kind: "number", required: true },
       { key: "value", label: "Value", kind: "number", required: true },
-      { key: "error", label: "Error magnitude (SD / SEM)", kind: "number", required: false },
+      { key: "error", label: "Uncertainty half-width (SD / SEM / 95% CI)", kind: "number", required: false },
       { key: "series", label: "Series", kind: "category", required: false },
     ],
     defaultMapping: { x: "time", value: "value", error: "sd", series: "series" },
@@ -962,16 +994,21 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id: "scatter",
     name: "Scatter",
     family: "Association",
-    summary: "Grouped scatter plot with an optional linear fit and point labels.",
-    inputHint: "One row per observation; x and y must be numeric.",
+    summary: "Compact association views from points and marginals to fitted, dense, three-axis, and compositional encodings.",
+    inputHint: "One row per observation. X and Y are required; Z is additionally required for pair-matrix, 3D, and ternary views.",
     roles: [
       { key: "x", label: "X", kind: "number", required: true },
       { key: "y", label: "Y", kind: "number", required: true },
+      { key: "z", label: "Z / third component", kind: "number", required: false },
       { key: "group", label: "Group", kind: "category", required: false },
       { key: "label", label: "Label", kind: "label", required: false },
     ],
-    defaultMapping: { x: "x", y: "y", group: "group", label: "label" },
+    defaultMapping: { x: "x", y: "y", z: "", group: "group", label: "label" },
     sampleData: samples.scatter,
+    examples: [
+      { label: "Example 1", description: "Two-axis grouped observations for point, fit, marginal, density, hexbin, ellipse, and hull views.", data: samples.scatter, mapping: { x: "x", y: "y", z: "", group: "group", label: "label" } },
+      { label: "Example 2", description: "Three non-negative components for pair-matrix, orthographic 3D, and normalized ternary views.", data: samples.scatterThreeAxis, mapping: { x: "x", y: "y", z: "z", group: "group", label: "label" } },
+    ],
   },
   {
     id: "pca",
@@ -1080,16 +1117,21 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id: "correlation",
     name: "Correlation",
     family: "Association",
-    summary: "Scatter, fitted line, and a directly calculated Pearson or Spearman coefficient.",
-    inputHint: "One row per paired observation. The coefficient is calculated in the browser; no P value is fabricated.",
+    summary: "Association views with explicit Pearson or Spearman statistics, optional P values, fitted curves, and confidence bands.",
+    inputHint: "One row per paired observation. X and Y are required; Z is additionally required for pair-matrix, 3D, and ternary views.",
     roles: [
       { key: "x", label: "X", kind: "number", required: true },
       { key: "y", label: "Y", kind: "number", required: true },
+      { key: "z", label: "Z / third component", kind: "number", required: false },
       { key: "group", label: "Group", kind: "category", required: false },
       { key: "label", label: "Label", kind: "label", required: false },
     ],
-    defaultMapping: { x: "x", y: "y", group: "group", label: "label" },
+    defaultMapping: { x: "x", y: "y", z: "", group: "group", label: "label" },
     sampleData: samples.scatter,
+    examples: [
+      { label: "Example 1", description: "Two-axis grouped observations for association statistics and fitted views.", data: samples.scatter, mapping: { x: "x", y: "y", z: "", group: "group", label: "label" } },
+      { label: "Example 2", description: "Three non-negative components for pair-matrix, orthographic 3D, and normalized ternary views.", data: samples.scatterThreeAxis, mapping: { x: "x", y: "y", z: "z", group: "group", label: "label" } },
+    ],
   },
   {
     id: "ma",
@@ -1459,6 +1501,10 @@ export const plotReferences = {
   sunburst: { citation: "Stasko & Zhang, 2000. Focus+context display and navigation techniques for enhancing radial, space-filling hierarchy visualizations. IEEE InfoVis.", href: "https://doi.org/10.1109/INFVIS.2000.885107" },
   radar: { citation: "Kolence & Kiviat, 1973. Software Unit Profiles & Kiviat Figures. ACM SIGMETRICS Performance Evaluation Review.", href: "https://doi.org/10.1145/1041613.1041614" },
   populationPyramid: { citation: "Wilson, 2016. Visualising the demographic factors which shape population age structure. Demographic Research.", href: "https://doi.org/10.4054/DemRes.2016.35.29" },
+  loess: { citation: "Cleveland, 1979. Robust Locally Weighted Regression and Smoothing Scatterplots. Journal of the American Statistical Association.", href: "https://doi.org/10.1080/01621459.1979.10481038" },
+  hexbin: { citation: "Carr et al., 1987. Scatterplot Matrix Techniques for Large N. Journal of the American Statistical Association.", href: "https://doi.org/10.1080/01621459.1987.10478510" },
+  composition: { citation: "Aitchison, 1986. The Statistical Analysis of Compositional Data. Chapman and Hall.", href: "https://doi.org/10.1007/978-94-009-4109-0" },
+  correlationTest: { citation: "Student, 1908. The Probable Error of a Correlation Coefficient. Biometrika.", href: "https://doi.org/10.2307/2331554" },
 } satisfies Record<string, PlotReference>;
 
 const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
@@ -1470,23 +1516,23 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     references: [plotReferences.visualizationHistory, plotReferences.graphicalPerception, plotReferences.errorBars],
   },
   line: {
-    definition: "按 X 的自然顺序连接相邻数据点，以位置和线段方向编码连续变化；连线本身暗示顺序或连续性。",
-    suitableData: "具有自然顺序的连续或离散 X 数据，如时间、剂量、阶段及多条重复序列。",
-    answers: "指标随顺序如何变化，不同序列的方向、速度或响应模式是否不同。",
+    definition: "按 X 的自然顺序连接相邻估计值，以位置和线段方向编码连续变化；可将预先计算的 SD、SEM 或 95% CI 半宽显示为逐点误差棒或连续不确定性带。",
+    suitableData: "具有自然顺序的时间、剂量或阶段数据；每行应是一个估计值，若显示不确定性还需对应的非负半宽。带状区域不会自动把 SD 或 SEM 变成置信区间。",
+    answers: "指标随顺序如何变化，不同序列的方向、速度或响应模式是否不同，以及已给定的不确定性范围有多大。",
     origin: "Playfair 同样在 1786 年用时间序列折线展示贸易变化，使“随时间阅读趋势”成为统计图形的核心用途。",
     references: [plotReferences.visualizationHistory, plotReferences.graphicalPerception, plotReferences.errorBars],
   },
   scatter: {
-    definition: "把每个观察对象映射成二维坐标中的一个点，用点的位置同时表示两个连续变量。",
-    suitableData: "每个观察对象具有两个连续数值，可附带分组和标签。",
-    answers: "两变量的联合分布、可能关系、聚类结构和离群观察是什么。",
-    references: [plotReferences.anscombe],
+    definition: "把观察对象映射到二维位置；可叠加边际分布、二维密度、六边形计数、协方差椭圆、凸包、三变量散点矩阵、正交 3D 投影或三元组成坐标。每种变体回答的问题不同，并非装饰性切换。",
+    suitableData: "标准视图需要两个连续变量；pair-matrix 与 3D 需要第三个连续变量；ternary 需要三个非负且每行总和大于零的组成分量。分组可决定颜色以及拟合/统计是合并还是组内计算。",
+    answers: "变量的联合分布、局部密度、非线性趋势、组内包络、三变量关系或三部分组成权衡是什么。3D 投影会损失深度判断，ternary 只表示相对组成。",
+    references: [plotReferences.anscombe, plotReferences.loess, plotReferences.hexbin, plotReferences.composition],
   },
   correlation: {
-    definition: "在成对数值的散点分布基础上，用 Pearson 或 Spearman 系数量化关系方向与强度的关联图。",
-    suitableData: "成对连续或有序数值；Pearson 适合线性关系，Spearman 适合单调关系或秩数据。",
-    answers: "两变量关系的方向和强度如何；相关本身不说明因果。",
-    references: [plotReferences.anscombe],
+    definition: "在成对数值的可视分布基础上，用 Pearson r 或 Spearman ρ 量化方向与强度；可选 P 值明确标注为 Pearson t 检验或 Spearman 的渐近 t 近似。",
+    suitableData: "成对连续或有序数值；Pearson 适合近似线性且无强影响点的关系，Spearman 适合单调关系或秩数据。组内模式要求每组有足够样本。",
+    answers: "两变量关系的方向、强度与在指定检验假设下的兼容性如何；P 值不等于效应大小，相关也不说明因果。",
+    references: [plotReferences.anscombe, plotReferences.correlationTest, plotReferences.loess],
   },
   pca: {
     definition: "一种线性无监督降维方法，把高维数据旋转到相互正交、按解释方差由高到低排列的主成分轴。",
@@ -1754,7 +1800,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 };
 
 const advancedRendererIds = new Set<PlotType>([
-  "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "line", "scatter", "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -1767,8 +1813,9 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
 const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
-  line: ["swapAxes", "showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
-  scatter: ["swapAxes", "showTrend", "showLabels"], correlation: ["showTrend", "showLabels", "correlationMethod"], pca: ["swapAxes", "showLabels"],
+  line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
+  scatter: ["swapAxes", "showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"],
+  correlation: ["showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"], pca: ["swapAxes", "showLabels"],
   pcoa: ["showLabels"], umap: ["showLabels"],
   box: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
   violin: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
@@ -1822,12 +1869,13 @@ function numericAxesFor(type: PlotType): Array<"x" | "y"> {
   return ["x", "y"];
 }
 
-export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation">): Array<"x" | "y"> {
+export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation" | "associationVariant">): Array<"x" | "y"> {
   if (type === "bar") {
     if (settings.barVariant === "polar") return [];
     return settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant) ? ["x"] : ["y"];
   }
   if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return settings.distributionOrientation === "horizontal" ? ["x"] : ["y"];
+  if (["scatter", "correlation"].includes(type) && ["pair-matrix", "3d", "ternary"].includes(settings.associationVariant)) return [];
   return numericAxesFor(type);
 }
 
@@ -2054,6 +2102,10 @@ export function validatePlotDataset(
     const numericHeaders = dataset.headers.slice(1);
     const invalid = dataset.rows.filter((row) => numericHeaders.some((header) => parseNumericValue(row[header]) === null));
     if (invalid.length > 0) errors.push(`${invalid.length} heatmap row${invalid.length === 1 ? "" : "s"} contain non-numeric or blank values.`);
+    if (definition.id === "correlation-heatmap" && invalid.length === 0) {
+      const constantHeaders = numericHeaders.filter((header) => new Set(dataset.rows.map((row) => parseNumericValue(row[header]))).size < 2);
+      if (constantHeaders.length > 0) errors.push(`Correlation is undefined for constant columns: ${constantHeaders.join(", ")}.`);
+    }
     if (definition.id !== "correlation-heatmap" && dataset.rows.length > 250) errors.push("Heatmap previews are limited to 250 rows; select biologically justified features before plotting.");
     if (numericHeaders.length > 100) errors.push("Heatmap previews are limited to 100 numeric columns to preserve legibility and browser performance.");
     return { errors, warnings };
@@ -2218,8 +2270,92 @@ export function validatePlotDataset(
         const value = parseNumericValue(row[mapping.error]);
         return value !== null && value < 0;
       }).length;
-      if (negativeErrors > 0) errors.push(`Error magnitude contains ${negativeErrors} negative value${negativeErrors === 1 ? "" : "s"}; SD and SEM must be non-negative.`);
+      if (negativeErrors > 0) errors.push(`Error magnitude contains ${negativeErrors} negative value${negativeErrors === 1 ? "" : "s"}; SD and SEM must be non-negative, as must all uncertainty half-widths.`);
     }
+  }
+
+  if ((definition.id === "scatter" || definition.id === "correlation") && settings) {
+    const needsZ = ["pair-matrix", "3d", "ternary"].includes(settings.associationVariant);
+    if (needsZ && !mapping.z) errors.push(`${settings.associationVariant === "pair-matrix" ? "Pair-matrix" : settings.associationVariant === "3d" ? "3D scatter" : "Ternary scatter"} requires a mapped Z / third component column.`);
+    const points = dataset.rows.flatMap((row) => {
+      const x = parseNumericValue(row[mapping.x]);
+      const y = parseNumericValue(row[mapping.y]);
+      const z = mapping.z ? parseNumericValue(row[mapping.z]) : null;
+      return x === null || y === null ? [] : [{ x, y, z, group: mapping.group ? row[mapping.group] || "All" : "All" }];
+    });
+    if (settings.associationVariant === "ternary" && mapping.z) {
+      const negative = points.filter((point) => point.x < 0 || point.y < 0 || (point.z ?? -1) < 0).length;
+      const zeroTotal = points.filter((point) => point.x + point.y + (point.z ?? 0) <= 0).length;
+      if (negative > 0) errors.push(`Ternary scatter requires non-negative components; detected ${negative} invalid row${negative === 1 ? "" : "s"}.`);
+      if (zeroTotal > 0) errors.push(`Ternary scatter requires a positive row total; detected ${zeroTotal} zero-total row${zeroTotal === 1 ? "" : "s"}.`);
+      if (points.length > 0 && points.some((point) => Math.abs(point.x + point.y + (point.z ?? 0) - 1) > 1e-6)) warnings.push("Ternary rows are normalized to proportions because one or more component totals differ from 1.");
+    }
+    if (settings.associationVariant === "3d" && mapping.z && new Set(points.map((point) => point.z)).size < 2) warnings.push("The mapped Z values are constant, so the orthographic 3D projection contains no depth variation.");
+    const buckets = settings.associationGroupMode === "by-group"
+      ? [...new Set(points.map((point) => point.group))].map((group) => ({ group, points: points.filter((point) => point.group === group) }))
+      : [{ group: "Combined", points }];
+    const supportsPlanarAnalysis = !["pair-matrix", "3d", "ternary"].includes(settings.associationVariant);
+    const reportsByGroup = settings.associationGroupMode === "by-group" && (definition.id === "correlation" || settings.associationShowPValue || settings.associationFit !== "none");
+    if (supportsPlanarAnalysis && reportsByGroup && buckets.length > 4) errors.push(`Compact by-group association summaries support at most four groups; found ${buckets.length}. Choose Combined group behavior or filter the displayed groups.`);
+    if (supportsPlanarAnalysis && settings.associationFit !== "none") {
+      const minimum = settings.associationFit === "polynomial" ? settings.associationPolynomialDegree + 2 : settings.associationFit === "loess" ? 4 : 3;
+      const undersized = buckets.filter((bucket) => bucket.points.length < minimum).map((bucket) => `${bucket.group} (n=${bucket.points.length})`);
+      if (undersized.length > 0) errors.push(`${settings.associationFit === "linear" ? "Linear regression" : settings.associationFit === "polynomial" ? `Degree-${settings.associationPolynomialDegree} polynomial regression` : "LOESS"} requires at least ${minimum} observations per fitted set; insufficient: ${undersized.join(", ")}.`);
+      const requiredDistinctX = settings.associationFit === "polynomial" ? settings.associationPolynomialDegree + 1 : 2;
+      const degenerate = buckets.filter((bucket) => new Set(bucket.points.map((point) => point.x)).size < requiredDistinctX).map((bucket) => bucket.group);
+      if (degenerate.length > 0) errors.push(`${settings.associationFit === "polynomial" ? `Degree-${settings.associationPolynomialDegree} polynomial regression` : settings.associationFit === "linear" ? "Linear regression" : "LOESS"} requires at least ${requiredDistinctX} distinct X values per fitted set; affected: ${degenerate.join(", ")}.`);
+      if (settings.yMin !== null || settings.yMax !== null) {
+        const displayedBuckets = buckets.map((bucket) => ({ ...bucket, points: bucket.points.map((point) => settings.swapAxes ? { x: point.y, y: point.x } : point) }));
+        const displayedX = displayedBuckets.flatMap((bucket) => bucket.points.map((point) => point.x));
+        const xDomain = resolveAxisDomain(numericExtent(displayedX), settings.xMin, settings.xMax);
+        const samples = Array.from({ length: 64 }, (_, index) => xDomain[0] + (xDomain[1] - xDomain[0]) * index / 63);
+        const fittedValues = displayedBuckets.flatMap((bucket) => {
+          if (settings.associationFit === "linear") {
+            const fit = linearRegression(bucket.points);
+            if (!fit) return [];
+            const curve = samples.map((x) => fit.intercept + fit.slope * x);
+            const band = settings.associationShowConfidenceBand ? linearConfidenceBand95(bucket.points, samples).flatMap((point) => [point.lower, point.upper]) : [];
+            return [...curve, ...band];
+          }
+          if (settings.associationFit === "polynomial") {
+            const fit = polynomialRegression(bucket.points, settings.associationPolynomialDegree);
+            return fit ? samples.map((x) => fit.predict(x)) : [];
+          }
+          return loessSmooth(bucket.points, settings.associationLoessSpan).map((point) => point.y);
+        });
+        const clippedFit = fittedValues.some((value) => (settings.yMin !== null && value < settings.yMin) || (settings.yMax !== null && value > settings.yMax));
+        if (clippedFit) warnings.push("Manual Y-axis limits clip part of the fitted curve or confidence band.");
+      }
+    }
+    if (supportsPlanarAnalysis && settings.associationShowConfidenceBand && settings.associationFit !== "linear") errors.push("Mean 95% confidence bands are currently supported only for linear regression fits.");
+    if (supportsPlanarAnalysis && (definition.id === "correlation" || settings.associationShowPValue)) {
+      const undersized = buckets.filter((bucket) => bucket.points.length < 3).map((bucket) => `${bucket.group} (n=${bucket.points.length})`);
+      if (undersized.length > 0) errors.push(`Correlation P values require at least three observations per reported set; insufficient: ${undersized.join(", ")}.`);
+      const constant = buckets.filter((bucket) => new Set(bucket.points.map((point) => point.x)).size < 2 || new Set(bucket.points.map((point) => point.y)).size < 2).map((bucket) => bucket.group);
+      if (constant.length > 0) errors.push(`Correlation is undefined for constant X or Y values; affected: ${constant.join(", ")}.`);
+    }
+    if (["density", "hexbin"].includes(settings.associationVariant) && settings.associationGroupMode !== "combined") errors.push("Density and hexbin aggregation require Combined group behavior so every bin uses one shared count or intensity scale.");
+    if (["ellipse", "hull"].includes(settings.associationVariant)) {
+      const minimum = settings.associationVariant === "ellipse" ? 3 : 3;
+      const undersized = buckets.filter((bucket) => bucket.points.length < minimum).map((bucket) => `${bucket.group} (n=${bucket.points.length})`);
+      if (undersized.length > 0) errors.push(`${settings.associationVariant === "ellipse" ? "Covariance ellipses" : "Convex hulls"} require at least three observations per displayed set; insufficient: ${undersized.join(", ")}.`);
+      const degenerate = buckets.filter((bucket) => {
+        const meanX = bucket.points.reduce((sum, point) => sum + point.x, 0) / Math.max(1, bucket.points.length);
+        const meanY = bucket.points.reduce((sum, point) => sum + point.y, 0) / Math.max(1, bucket.points.length);
+        const xx = bucket.points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+        const yy = bucket.points.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0);
+        const xy = bucket.points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0);
+        return xx * yy - xy * xy <= 1e-12;
+      }).map((bucket) => bucket.group);
+      if (degenerate.length > 0) errors.push(`${settings.associationVariant === "ellipse" ? "Covariance ellipses" : "Convex hulls"} require non-collinear X/Y observations; affected: ${degenerate.join(", ")}.`);
+      if (settings.associationVariant === "ellipse" && [settings.xMin, settings.xMax, settings.yMin, settings.yMax].some((limit) => limit !== null)) {
+        const boundary = buckets.flatMap((bucket) => covarianceEllipsePoints(bucket.points.map((point) => settings.swapAxes ? { x: point.y, y: point.x } : point)));
+        const clipped = boundary.some((point) => (settings.xMin !== null && point.x < settings.xMin) || (settings.xMax !== null && point.x > settings.xMax) || (settings.yMin !== null && point.y < settings.yMin) || (settings.yMax !== null && point.y > settings.yMax));
+        if (clipped) warnings.push("Manual axis limits clip part of at least one 95% covariance ellipse boundary.");
+      }
+    }
+    if (settings.associationVariant === "density" && points.length < 5) warnings.push("Two-dimensional density estimates are unstable with fewer than five observations.");
+    if (settings.associationVariant === "hexbin" && points.length < 10) warnings.push("Hexbin aggregation is usually unnecessary with fewer than ten observations; a point view may be clearer.");
   }
 
   if (definition.id === "bar" && settings) {
@@ -2612,6 +2748,108 @@ export function linearRegression(points: Array<{ x: number; y: number }>) {
   return { slope, intercept, rSquared: total === 0 ? 1 : Math.max(0, 1 - residual / total) };
 }
 
+function solveLinearSystem(matrix: number[][], vector: number[]) {
+  const augmented = matrix.map((row, index) => [...row, vector[index]]);
+  for (let pivot = 0; pivot < augmented.length; pivot += 1) {
+    let best = pivot;
+    for (let row = pivot + 1; row < augmented.length; row += 1) if (Math.abs(augmented[row][pivot]) > Math.abs(augmented[best][pivot])) best = row;
+    [augmented[pivot], augmented[best]] = [augmented[best], augmented[pivot]];
+    const divisor = augmented[pivot][pivot];
+    if (Math.abs(divisor) < 1e-12) return null;
+    for (let column = pivot; column <= augmented.length; column += 1) augmented[pivot][column] /= divisor;
+    for (let row = 0; row < augmented.length; row += 1) {
+      if (row === pivot) continue;
+      const factor = augmented[row][pivot];
+      for (let column = pivot; column <= augmented.length; column += 1) augmented[row][column] -= factor * augmented[pivot][column];
+    }
+  }
+  return augmented.map((row) => row[augmented.length]);
+}
+
+export function polynomialRegression(points: Array<{ x: number; y: number }>, degree: 2 | 3) {
+  if (points.length < degree + 1) return null;
+  const center = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+  const scale = Math.max(...points.map((point) => Math.abs(point.x - center)), Number.EPSILON);
+  const normalized = points.map((point) => ({ x: (point.x - center) / scale, y: point.y }));
+  const size = degree + 1;
+  const matrix = Array.from({ length: size }, (_, row) => Array.from({ length: size }, (_, column) => normalized.reduce((sum, point) => sum + point.x ** (row + column), 0)));
+  const vector = Array.from({ length: size }, (_, power) => normalized.reduce((sum, point) => sum + point.y * point.x ** power, 0));
+  const normalizedCoefficients = solveLinearSystem(matrix, vector);
+  if (!normalizedCoefficients) return null;
+  const choose = (n: number, k: number) => {
+    let result = 1;
+    for (let index = 1; index <= k; index += 1) result = result * (n - index + 1) / index;
+    return result;
+  };
+  const coefficients = Array(size).fill(0) as number[];
+  normalizedCoefficients.forEach((coefficient, power) => {
+    for (let expandedPower = 0; expandedPower <= power; expandedPower += 1) coefficients[expandedPower] += coefficient * choose(power, expandedPower) * (-center) ** (power - expandedPower) / scale ** power;
+  });
+  const predict = (x: number) => normalizedCoefficients.reduce((sum, coefficient, power) => sum + coefficient * ((x - center) / scale) ** power, 0);
+  const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+  const total = points.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0);
+  const residual = points.reduce((sum, point) => sum + (point.y - predict(point.x)) ** 2, 0);
+  return { coefficients, degree, center, scale, rSquared: total === 0 ? 1 : Math.max(0, 1 - residual / total), predict };
+}
+
+export function loessSmooth(points: Array<{ x: number; y: number }>, span = 0.65, sampleCount = 64) {
+  if (points.length < 3) return [] as Array<{ x: number; y: number }>;
+  const sorted = [...points].sort((left, right) => left.x - right.x);
+  const minimum = sorted[0].x;
+  const maximum = sorted[sorted.length - 1].x;
+  const neighborhood = Math.max(3, Math.min(sorted.length, Math.ceil(sorted.length * Math.max(0.25, Math.min(1, span)))));
+  const count = Math.max(16, sampleCount);
+  return Array.from({ length: count }, (_, index) => {
+    const x = minimum + (maximum - minimum) * index / Math.max(1, count - 1);
+    const nearest = [...sorted].sort((left, right) => Math.abs(left.x - x) - Math.abs(right.x - x)).slice(0, neighborhood);
+    const distance = Math.max(...nearest.map((point) => Math.abs(point.x - x)), Number.EPSILON);
+    const weighted = nearest.map((point) => ({ ...point, weight: (1 - Math.min(1, Math.abs(point.x - x) / distance) ** 3) ** 3 }));
+    const weightSum = weighted.reduce((sum, point) => sum + point.weight, 0) || 1;
+    const meanX = weighted.reduce((sum, point) => sum + point.x * point.weight, 0) / weightSum;
+    const meanY = weighted.reduce((sum, point) => sum + point.y * point.weight, 0) / weightSum;
+    const denominator = weighted.reduce((sum, point) => sum + point.weight * (point.x - meanX) ** 2, 0);
+    const slope = denominator > 1e-12 ? weighted.reduce((sum, point) => sum + point.weight * (point.x - meanX) * (point.y - meanY), 0) / denominator : 0;
+    return { x, y: meanY + slope * (x - meanX) };
+  });
+}
+
+export function linearConfidenceBand95(points: Array<{ x: number; y: number }>, xValues: number[]) {
+  const fit = linearRegression(points);
+  if (!fit || points.length < 3) return [] as Array<{ x: number; estimate: number; lower: number; upper: number }>;
+  const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+  const sumSquaresX = points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+  if (sumSquaresX <= 0) return [];
+  const residualSumSquares = points.reduce((sum, point) => sum + (point.y - (fit.intercept + fit.slope * point.x)) ** 2, 0);
+  const residualStandardError = Math.sqrt(residualSumSquares / (points.length - 2));
+  const critical = studentTCritical95(points.length - 2);
+  return xValues.map((x) => {
+    const estimate = fit.intercept + fit.slope * x;
+    const margin = critical * residualStandardError * Math.sqrt(1 / points.length + (x - meanX) ** 2 / sumSquaresX);
+    return { x, estimate, lower: estimate - margin, upper: estimate + margin };
+  });
+}
+
+export function covarianceEllipsePoints(points: Array<{ x: number; y: number }>, probabilityRadius = Math.sqrt(5.991)) {
+  if (points.length < 3) return [] as Array<{ x: number; y: number }>;
+  const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+  const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+  const varianceX = points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0) / (points.length - 1);
+  const varianceY = points.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0) / (points.length - 1);
+  const covariance = points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / (points.length - 1);
+  const trace = varianceX + varianceY;
+  const difference = Math.sqrt(Math.max(0, (varianceX - varianceY) ** 2 + 4 * covariance ** 2));
+  const firstEigenvalue = Math.max(0, (trace + difference) / 2);
+  const secondEigenvalue = Math.max(0, (trace - difference) / 2);
+  if (firstEigenvalue <= 1e-12 || secondEigenvalue <= 1e-12) return [];
+  const angle = 0.5 * Math.atan2(2 * covariance, varianceX - varianceY);
+  return Array.from({ length: 65 }, (_, index) => {
+    const theta = index / 64 * Math.PI * 2;
+    const major = probabilityRadius * Math.sqrt(firstEigenvalue) * Math.cos(theta);
+    const minor = probabilityRadius * Math.sqrt(secondEigenvalue) * Math.sin(theta);
+    return { x: meanX + major * Math.cos(angle) - minor * Math.sin(angle), y: meanY + major * Math.sin(angle) + minor * Math.cos(angle) };
+  });
+}
+
 export function numericExtent(values: number[], includeZero = false): [number, number] {
   const finite = values.filter(Number.isFinite);
   if (finite.length === 0) return [0, 1];
@@ -2666,6 +2904,7 @@ export function axisLimitWarning(
   if (["scatter", "correlation", "pca", "pcoa", "umap", "quadrant"].includes(definition.id)) {
     xValues = valuesAt("x");
     yValues = valuesAt("y");
+    if (["scatter", "correlation"].includes(definition.id) && settings.swapAxes) [xValues, yValues] = [yValues, xValues];
     if (definition.id === "quadrant") {
       xValues.push(settings.xThreshold);
       yValues.push(settings.yThreshold);

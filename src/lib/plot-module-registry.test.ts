@@ -89,7 +89,11 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("bar").renderer).toBe("standard");
     expect(getPlotModule("bar").capabilities.settingKeys).toContain("barBorderWidth");
     expect(getPlotModule("line").capabilities.settingKeys).toContain("swapAxes");
+    expect(getPlotModule("line").capabilities.settingKeys).toEqual(expect.arrayContaining(["lineErrorType", "lineUncertaintyStyle", "lineBandOpacity"]));
     expect(getPlotModule("scatter").capabilities.settingKeys).toContain("swapAxes");
+    expect(getPlotModule("scatter").renderer).toBe("advanced");
+    expect(getPlotModule("scatter").capabilities.settingKeys).toEqual(expect.arrayContaining(["associationVariant", "associationFit", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode"]));
+    expect(getPlotModule("correlation").capabilities.settingKeys).toEqual(expect.arrayContaining(["correlationMethod", "associationVariant", "associationFit"]));
     expect(getPlotModule("pca").capabilities.settingKeys).toContain("swapAxes");
     expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");

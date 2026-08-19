@@ -13,7 +13,7 @@ import {
 } from "./visualization-studio";
 
 const expectedAdvancedRenderers = new Set([
-  "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "line", "scatter", "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -68,6 +68,45 @@ describe("registered plot-module examples", () => {
       expect(markup, barVariant).toContain("data-plot-element=\"bar\"");
       expect(markup, barVariant).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
     }
+  });
+
+  it("renders line uncertainty and every association variant with finite geometry", () => {
+    const lineModule = plotModuleRegistry.get("line");
+    const lineExample = lineModule.examples[0];
+    const lineData = parseDelimitedData(lineExample.data);
+    for (const lineUncertaintyStyle of ["bars", "band"] as const) {
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="line" dataset={lineData} mapping={lineExample.mapping ?? lineModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, lineErrorType: "ci95", lineUncertaintyStyle }} themeId={defaultVisualizationThemeId} />);
+      expect(markup).toContain(`data-plot-element="line-uncertainty-${lineUncertaintyStyle === "band" ? "band" : "bar"}"`);
+      expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    }
+
+    const scatterModule = plotModuleRegistry.get("scatter");
+    const scatterExample = scatterModule.examples[1];
+    const scatterData = parseDelimitedData(scatterExample.data);
+    const mapping = scatterExample.mapping ?? scatterModule.definition.defaultMapping;
+    for (const associationVariant of ["points", "marginal", "density", "hexbin", "ellipse", "hull", "pair-matrix", "3d", "ternary"] as const) {
+      const settings = { ...defaultVisualizationSettings, associationVariant, associationFit: associationVariant === "points" ? "linear" as const : "none" as const, associationShowConfidenceBand: associationVariant === "points", associationShowPValue: associationVariant === "points", associationGroupMode: "combined" as const };
+      const validation = validatePlotDataset(scatterModule.definition, scatterData, mapping, settings);
+      expect(validation.errors, associationVariant).toEqual([]);
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="scatter" dataset={scatterData} mapping={mapping} settings={settings} themeId={defaultVisualizationThemeId} />);
+      expect(markup, associationVariant).toContain("data-plot-data");
+      if (associationVariant === "density" || associationVariant === "hexbin") {
+        expect(markup, associationVariant).not.toContain(">Control</text>");
+        expect(markup, associationVariant).not.toContain(">Treatment</text>");
+      }
+      expect(markup, associationVariant).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    }
+  });
+
+  it("keeps dense correlation summaries inside the reclaimed compact canvas", () => {
+    const correlationModule = plotModuleRegistry.get("correlation");
+    const example = correlationModule.examples[1];
+    const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="correlation" dataset={parseDelimitedData(example.data)} mapping={example.mapping ?? correlationModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, associationVariant: "density", associationGroupMode: "combined", associationShowPValue: true }} themeId={defaultVisualizationThemeId} />);
+    const summaryX = Number(markup.match(/data-plot-element="association-summary"><text x="([^"]+)"/)?.[1]);
+    expect(summaryX).toBeGreaterThanOrEqual(0);
+    expect(summaryX).toBeLessThan(300);
+    expect(markup).toContain("two-sided t p");
+    expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
   });
 
   it("calculates long-form bar summaries without requiring a precomputed error column", () => {

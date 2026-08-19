@@ -26,6 +26,7 @@ type PlotGuidanceLike = {
 export type PlotModuleCapabilities<SettingKey extends string = string> = {
   dataShape: PlotDataShape;
   settingKeys: readonly SettingKey[];
+  numericAxes?: readonly ("x" | "y")[];
   grouping?: boolean;
   multipleExamples?: boolean;
 };
@@ -105,6 +106,8 @@ function assertSeed<PlotId extends string, SettingKey extends string>(seed: Plot
   if (!dataShapes.has(seed.capabilities?.dataShape)) throw new Error(`Plot module ${id} has an invalid data shape: ${String(seed.capabilities?.dataShape)}.`);
   if (!Array.isArray(seed.capabilities?.settingKeys)) throw new Error(`Plot module ${id} is missing adjustable setting keys.`);
   if (new Set(seed.capabilities.settingKeys).size !== seed.capabilities.settingKeys.length) throw new Error(`Plot module ${id} has duplicate adjustable setting keys.`);
+  if (seed.capabilities.numericAxes?.some((axis) => axis !== "x" && axis !== "y")) throw new Error(`Plot module ${id} has an invalid numeric axis capability.`);
+  if (seed.capabilities.numericAxes && new Set(seed.capabilities.numericAxes).size !== seed.capabilities.numericAxes.length) throw new Error(`Plot module ${id} has duplicate numeric axis capabilities.`);
 }
 
 export function createPlotModuleRegistry<PlotId extends string, SettingKey extends string = string>(
@@ -124,7 +127,11 @@ export function createPlotModuleRegistry<PlotId extends string, SettingKey exten
       examples: normalizedExamples(seed.definition),
       guidance: Object.freeze({ ...seed.guidance }),
       renderer: seed.renderer,
-      capabilities: Object.freeze({ ...seed.capabilities, settingKeys: Object.freeze([...seed.capabilities.settingKeys]) }),
+      capabilities: Object.freeze({
+        ...seed.capabilities,
+        settingKeys: Object.freeze([...seed.capabilities.settingKeys]),
+        numericAxes: seed.capabilities.numericAxes ? Object.freeze([...seed.capabilities.numericAxes]) : undefined,
+      }),
     }) satisfies PlotModule<PlotId, SettingKey>;
     byId.set(id, plotModule);
     return plotModule;

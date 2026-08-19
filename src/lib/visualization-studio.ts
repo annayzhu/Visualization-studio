@@ -167,6 +167,10 @@ export type VisualizationSettings = {
   fontFamily: FigureFontId;
   xLabel: string;
   yLabel: string;
+  xMin: number | null;
+  xMax: number | null;
+  yMin: number | null;
+  yMax: number | null;
   width: number;
   height: number;
   titleSize: number;
@@ -219,6 +223,10 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   fontFamily: "arial",
   xLabel: "",
   yLabel: "",
+  xMin: null,
+  xMax: null,
+  yMin: null,
+  yMax: null,
   width: 340,
   height: 340,
   titleSize: 17,
@@ -1429,14 +1437,30 @@ function dataShapeFor(type: PlotType): PlotDataShape {
   return "long";
 }
 
+function numericAxesFor(type: PlotType): Array<"x" | "y"> {
+  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"].includes(type)) return [];
+  if (["enrichment", "enrichment-bar", "survival-forest"].includes(type)) return ["x"];
+  if (["box", "violin", "beeswarm", "raincloud", "errorbar", "lollipop"].includes(type)) return ["y"];
+  if (type === "bar") return ["x", "y"];
+  return ["x", "y"];
+}
+
+export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes">): Array<"x" | "y"> {
+  if (type === "bar") return settings.swapAxes ? ["x"] : ["y"];
+  return numericAxesFor(type);
+}
+
 const plotModuleSeeds: Array<PlotModuleSeed<PlotType, keyof VisualizationSettings>> = plotDefinitionSeeds.map((definition) => ({
   definition,
   guidance: plotGuidanceSeeds[definition.id],
   renderer: advancedRendererIds.has(definition.id) ? "advanced" : "standard",
   capabilities: {
     dataShape: dataShapeFor(definition.id),
+    numericAxes: numericAxesFor(definition.id),
     settingKeys: [
       ...commonSettingKeys,
+      ...(numericAxesFor(definition.id).includes("x") ? ["xMin" as const, "xMax" as const] : []),
+      ...(numericAxesFor(definition.id).includes("y") ? ["yMin" as const, "yMax" as const] : []),
       ...(hiddenLegendIds.has(definition.id) ? [] : ["legendPosition" as const]),
       ...(specializedSettingKeys[definition.id] ?? []),
     ],
@@ -1615,6 +1639,17 @@ export function validatePlotDataset(
   const errors = [...dataset.errors];
   const warnings = [...dataset.warnings];
   if (errors.length > 0) return { errors, warnings };
+  if (settings) {
+    const activeAxes = activeNumericAxes(definition.id, settings);
+    const invalidXLimits = activeAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
+    const invalidYLimits = activeAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
+    if (invalidXLimits) errors.push("X-axis minimum must be smaller than the maximum.");
+    if (invalidYLimits) errors.push("Y-axis minimum must be smaller than the maximum.");
+    if (!invalidXLimits && !invalidYLimits) {
+      const clippingWarning = axisLimitWarning(definition, dataset, mapping, settings);
+      if (clippingWarning) warnings.push(clippingWarning);
+    }
+  }
 
   if (["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(definition.id)) {
     if (dataset.headers.length < 3) errors.push("Heatmap data needs one row-label column and at least two numeric sample columns.");
@@ -1851,6 +1886,107 @@ export function numericExtent(values: number[], includeZero = false): [number, n
   }
   const padding = (maximum - minimum) * 0.08;
   return [minimum - padding, maximum + padding];
+}
+
+export function resolveAxisDomain(
+  automatic: [number, number],
+  minimum: number | null,
+  maximum: number | null,
+): [number, number] {
+  if (minimum !== null && maximum !== null) return minimum < maximum ? [minimum, maximum] : automatic;
+  const automaticSpan = Math.max(automatic[1] - automatic[0], Math.abs(automatic[0]) * 0.12, Math.abs(automatic[1]) * 0.12, 1);
+  if (minimum !== null) return [minimum, Math.max(automatic[1], minimum + automaticSpan)];
+  if (maximum !== null) return [Math.min(automatic[0], maximum - automaticSpan), maximum];
+  return automatic;
+}
+
+export function axisLimitWarning(
+  definition: PlotDefinition,
+  dataset: ParsedDataset,
+  mapping: Record<string, string>,
+  settings: VisualizationSettings,
+) {
+  const activeAxes = activeNumericAxes(definition.id, settings);
+  const numberAt = (row: DelimitedRow, role: string) => {
+    const column = mapping[role];
+    return column ? parseNumericValue(row[column]) : null;
+  };
+  const valuesAt = (role: string) => dataset.rows.flatMap((row) => {
+    const value = numberAt(row, role);
+    return value === null ? [] : [value];
+  });
+  let xValues: number[] = [];
+  let yValues: number[] = [];
+  if (["scatter", "correlation", "pca", "pcoa", "umap", "quadrant"].includes(definition.id)) {
+    xValues = valuesAt("x");
+    yValues = valuesAt("y");
+    if (definition.id === "quadrant") {
+      xValues.push(settings.xThreshold);
+      yValues.push(settings.yThreshold);
+    }
+  } else if (definition.id === "line") {
+    const ordered = valuesAt("x");
+    const valueExtent = dataset.rows.flatMap((row) => {
+      const value = numberAt(row, "value");
+      if (value === null) return [];
+      const error = settings.lineErrorType !== "none" ? Math.max(0, numberAt(row, "error") ?? 0) : 0;
+      return [value - error, value + error];
+    });
+    [xValues, yValues] = settings.swapAxes ? [valueExtent, ordered] : [ordered, valueExtent];
+  } else if (definition.id === "bar") {
+    const valueExtent = dataset.rows.flatMap((row) => {
+      const value = numberAt(row, "value");
+      if (value === null) return [];
+      const error = settings.barErrorType !== "none" ? Math.max(0, numberAt(row, "error") ?? 0) : 0;
+      return [value - error, value + error];
+    });
+    if (settings.swapAxes) xValues = valueExtent;
+    else yValues = valueExtent;
+  } else if (definition.id === "errorbar") {
+    yValues = dataset.rows.flatMap((row) => {
+      const value = numberAt(row, "value");
+      if (value === null) return [];
+      const error = Math.max(0, numberAt(row, "error") ?? 0);
+      return [value - error, value + error];
+    });
+  } else if (["box", "violin", "beeswarm", "raincloud"].includes(definition.id)) {
+    yValues = valuesAt("value");
+    if (definition.id === "box" && settings.boxErrorType !== "none" && mapping.group) {
+      for (const values of groupNumericValues(dataset.rows, mapping.group, mapping.value).values()) {
+        const summary = meanErrorStatistics(values);
+        const error = settings.boxErrorType === "sd" ? summary.sd : summary.sem;
+        yValues.push(summary.mean - error, summary.mean + error);
+      }
+    }
+  } else if (definition.id === "ma") {
+    xValues = valuesAt("mean").map((value) => Math.log10(Math.max(value, Number.MIN_VALUE)));
+    yValues = [...valuesAt("effect"), -settings.foldChangeThreshold, settings.foldChangeThreshold];
+  } else if (definition.id === "volcano") {
+    xValues = [...valuesAt("effect"), -settings.foldChangeThreshold, settings.foldChangeThreshold];
+    yValues = valuesAt("pValue").map((value) => -Math.log10(Math.max(value, Number.MIN_VALUE)));
+    yValues.push(-Math.log10(settings.pValueThreshold));
+  } else if (definition.id === "survival-forest") {
+    xValues = [...valuesAt("lower"), ...valuesAt("upper"), ...valuesAt("estimate"), settings.forestReferenceValue];
+  } else if (definition.id === "km") {
+    xValues = valuesAt("time");
+    yValues = [0, 1];
+  } else if (definition.id === "roc") {
+    xValues = [0, 1];
+    yValues = [0, 1];
+  } else if (["enrichment", "enrichment-bar"].includes(definition.id)) {
+    xValues = dataset.rows.flatMap((row) => {
+      const column = mapping.ratio;
+      const value = column ? parseRatioValue(row[column]) : null;
+      return value === null ? [] : [value];
+    });
+  } else {
+    xValues = valuesAt("x").concat(valuesAt("rank"));
+    yValues = valuesAt("y").concat(valuesAt("value"), valuesAt("score"));
+  }
+  const clippedX = activeAxes.includes("x") ? xValues.filter((value) => (settings.xMin !== null && value < settings.xMin) || (settings.xMax !== null && value > settings.xMax)).length : 0;
+  const clippedY = activeAxes.includes("y") ? yValues.filter((value) => (settings.yMin !== null && value < settings.yMin) || (settings.yMax !== null && value > settings.yMax)).length : 0;
+  if (clippedX + clippedY === 0) return null;
+  return `Manual axis limits clip ${clippedX + clippedY} mapped value${clippedX + clippedY === 1 ? "" : "s"} (${clippedX} on X, ${clippedY} on Y).`;
 }
 
 export function scaleLinear(value: number, domain: [number, number], range: [number, number]) {

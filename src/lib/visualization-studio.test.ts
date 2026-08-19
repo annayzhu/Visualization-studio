@@ -15,6 +15,7 @@ import {
   numericExtent,
   parseDelimitedData,
   parseRatioValue,
+  resolveAxisDomain,
   plotDefinitions,
   plotGuidance,
   plotReferences,
@@ -40,6 +41,53 @@ describe("Visualization Studio data contracts", () => {
     expect(defaultVisualizationSettings.axisLabelSize).toBe(14);
     expect(defaultVisualizationSettings.tickSize).toBe(11);
     expect(defaultVisualizationSettings.legendSize).toBe(11);
+  });
+
+  it("uses automatic domains by default and warns when manual limits clip mapped values", () => {
+    expect(resolveAxisDomain([-2, 8], null, null)).toEqual([-2, 8]);
+    expect(resolveAxisDomain([-2, 8], 0, 5)).toEqual([0, 5]);
+    expect(resolveAxisDomain([-2, 8], 5, 0)).toEqual([-2, 8]);
+    expect(resolveAxisDomain([-2, 8], 100, null)).toEqual([100, 110]);
+    expect(resolveAxisDomain([-2, 8], null, -100)).toEqual([-110, -100]);
+
+    const definition = getPlotDefinition("scatter");
+    const dataset = parseDelimitedData("x\ty\n-2\t1\n4\t9");
+    const settings = { ...defaultVisualizationSettings, xMin: 0, yMax: 5 };
+    const validation = validatePlotDataset(definition, dataset, { x: "x", y: "y", group: "", label: "" }, settings);
+    expect(validation.warnings).toContain("Manual axis limits clip 2 mapped values (1 on X, 1 on Y).");
+
+    const bar = validatePlotDataset(
+      getPlotDefinition("bar"),
+      parseDelimitedData("category\tvalue\terror\nA\t5\t2"),
+      { category: "category", value: "value", error: "error", group: "" },
+      { ...defaultVisualizationSettings, barErrorType: "sd", yMax: 6 },
+    );
+    expect(bar.warnings).toContain("Manual axis limits clip 1 mapped value (0 on X, 1 on Y).");
+
+    const invalid = validatePlotDataset(
+      definition,
+      dataset,
+      { x: "x", y: "y", group: "", label: "" },
+      { ...defaultVisualizationSettings, xMin: 5, xMax: 0 },
+    );
+    expect(invalid.errors).toContain("X-axis minimum must be smaller than the maximum.");
+
+    const oneSided = validatePlotDataset(
+      definition,
+      dataset,
+      { x: "x", y: "y", group: "", label: "" },
+      { ...defaultVisualizationSettings, yMin: 100 },
+    );
+    expect(oneSided.errors).toEqual([]);
+    expect(oneSided.warnings).toContain("Manual axis limits clip 2 mapped values (0 on X, 2 on Y).");
+
+    const inactiveAxis = validatePlotDataset(
+      getPlotDefinition("box"),
+      parseDelimitedData("group\tvalue\nA\t1\nA\t2\nA\t3"),
+      { group: "group", value: "value" },
+      { ...defaultVisualizationSettings, xMin: 5, xMax: 0 },
+    );
+    expect(inactiveAxis.errors).toEqual([]);
   });
 
   it("ships every requested first-batch plot type with a sample data contract", () => {

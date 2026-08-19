@@ -26,6 +26,7 @@ import {
   numericExtent,
   parseNumericValue,
   parseRatioValue,
+  resolveAxisDomain,
   scaleLinear,
   type JournalThemeId,
   type ParsedDataset,
@@ -49,7 +50,8 @@ const TEXT = "#23242A";
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   const noAxes = ["venn", "sankey", "chord", "circos"].includes(type);
   const labelHeavy = ["enrichment-bar", "survival-forest", "upset"].includes(type);
-  const legend = !noAxes && settings.legendPosition === "right" ? 145 : 0;
+  const hasLegend = !["beeswarm", "raincloud", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"].includes(type);
+  const legend = hasLegend && settings.legendPosition === "right" ? 145 : 0;
   const left = noAxes ? 22 : labelHeavy ? Math.min(178, settings.width * 0.32) : 66;
   const top = settings.title ? 48 : 24;
   const bottom = settings.legendPosition === "bottom" ? 80 : 58;
@@ -99,8 +101,8 @@ function ScatterFamily({ type, frame, dataset, mapping, settings, colors, gridCo
     label: mapping.label ? row[mapping.label] || "" : "",
     index,
   }));
-  const xDomain = numericExtent([...points.map((point) => point.x), ...(type === "quadrant" ? [settings.xThreshold] : [])]);
-  const yDomain = numericExtent([...points.map((point) => point.y), ...(type === "quadrant" ? [settings.yThreshold] : [])]);
+  const xDomain = resolveAxisDomain(numericExtent([...points.map((point) => point.x), ...(type === "quadrant" ? [settings.xThreshold] : [])]), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent([...points.map((point) => point.y), ...(type === "quadrant" ? [settings.yThreshold] : [])]), settings.yMin, settings.yMax);
   const groups = [...new Set(points.map((point) => point.group))];
   const colorMap = palette(groups, colors);
   const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
@@ -111,9 +113,11 @@ function ScatterFamily({ type, frame, dataset, mapping, settings, colors, gridCo
   const yLabel = settings.yLabel || (type === "pcoa" ? "PCoA 2" : type === "umap" ? "UMAP 2" : "Y");
   return <>
     <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={xLabel} yLabel={yLabel} gridColor={gridColor} />
+    <g data-plot-data>
     {type === "quadrant" ? <><line x1={xAt(settings.xThreshold)} x2={xAt(settings.xThreshold)} y1={frame.top} y2={frame.top + frame.plotHeight} stroke={TEXT} strokeDasharray="5 4" opacity={0.65} /><line x1={frame.left} x2={frame.left + frame.plotWidth} y1={yAt(settings.yThreshold)} y2={yAt(settings.yThreshold)} stroke={TEXT} strokeDasharray="5 4" opacity={0.65} /></> : null}
     {type === "correlation" && settings.showTrend && fit ? <line x1={xAt(xDomain[0])} y1={yAt(fit.intercept + fit.slope * xDomain[0])} x2={xAt(xDomain[1])} y2={yAt(fit.intercept + fit.slope * xDomain[1])} stroke={colors[0]} strokeWidth={settings.dataLineWidth} /> : null}
-    {points.map((point) => <g key={point.index}><circle cx={xAt(point.x)} cy={yAt(point.y)} r={settings.pointSize} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.7} />{settings.showLabels && point.label ? <text x={xAt(point.x) + settings.pointSize + 2} y={yAt(point.y) - 3} fill={TEXT} fontSize={settings.tickSize}>{point.label}</text> : null}</g>)}
+    {points.map((point) => { const x = xAt(point.x); const y = yAt(point.y); const rightHalf = point.x > (xDomain[0] + xDomain[1]) / 2; const upperHalf = point.y > (yDomain[0] + yDomain[1]) / 2; return <g key={point.index}><circle cx={x} cy={y} r={settings.pointSize} fill={colorMap.get(point.group)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.7} />{settings.showLabels && point.label ? <text data-plot-label x={rightHalf ? x - settings.pointSize - 2 : x + settings.pointSize + 2} y={upperHalf ? y + settings.tickSize + 2 + (point.index % 2) * 3 : y - 3 - (point.index % 2) * 3} textAnchor={rightHalf ? "end" : "start"} fill={TEXT} fontSize={settings.tickSize}>{point.label}</text> : null}</g>; })}
+    </g>
     {type === "correlation" ? <text x={frame.left + 10} y={frame.top + 18} fill={TEXT} fontSize={settings.legendSize} fontWeight={700}>{settings.correlationMethod === "pearson" ? "Pearson r" : "Spearman ρ"} = {coefficient.toFixed(3)} · n = {points.length}</text> : null}
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
@@ -121,22 +125,24 @@ function ScatterFamily({ type, frame, dataset, mapping, settings, colors, gridCo
 
 function MaPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const rows = dataset.rows.map((row, index) => ({ index, label: row[mapping.label], x: Math.log10(Math.max(parseNumericValue(row[mapping.mean]) ?? 1, Number.MIN_VALUE)), effect: parseNumericValue(row[mapping.effect]) ?? 0, p: parseNumericValue(row[mapping.pValue]) ?? 1 }));
-  const xDomain = numericExtent(rows.map((row) => row.x));
-  const yDomain = numericExtent(rows.map((row) => row.effect));
+  const xDomain = resolveAxisDomain(numericExtent(rows.map((row) => row.x)), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent([...rows.map((row) => row.effect), -settings.foldChangeThreshold, settings.foldChangeThreshold]), settings.yMin, settings.yMax);
   const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
   const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
   const labels = new Set(rows.filter((row) => row.p <= settings.pValueThreshold && Math.abs(row.effect) >= settings.foldChangeThreshold).sort((a, b) => a.p - b.p).slice(0, settings.labelLimit).map((row) => row.index));
   return <>
     <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "log₁₀ mean expression"} yLabel={settings.yLabel || "log₂ fold change"} gridColor={gridColor} />
+    <g data-plot-data>
     <line x1={frame.left} x2={frame.left + frame.plotWidth} y1={yAt(0)} y2={yAt(0)} stroke={TEXT} strokeDasharray="4 4" />
-    {rows.map((row) => { const up = row.p <= settings.pValueThreshold && row.effect >= settings.foldChangeThreshold; const down = row.p <= settings.pValueThreshold && row.effect <= -settings.foldChangeThreshold; const color = up ? colors[1] ?? colors[0] : down ? colors[0] : "#B7B8BC"; return <g key={row.index}><circle cx={xAt(row.x)} cy={yAt(row.effect)} r={settings.pointSize * 0.75} fill={color} fillOpacity={settings.opacity} />{labels.has(row.index) ? <text x={xAt(row.x) + 4} y={yAt(row.effect) - 4} fill={TEXT} fontSize={settings.tickSize}>{row.label}</text> : null}</g>; })}
+    {rows.map((row) => { const up = row.p <= settings.pValueThreshold && row.effect >= settings.foldChangeThreshold; const down = row.p <= settings.pValueThreshold && row.effect <= -settings.foldChangeThreshold; const color = up ? colors[1] ?? colors[0] : down ? colors[0] : "#B7B8BC"; const x = xAt(row.x); const y = yAt(row.effect); const rightHalf = row.x > (xDomain[0] + xDomain[1]) / 2; const upperHalf = row.effect > (yDomain[0] + yDomain[1]) / 2; return <g key={row.index}><circle cx={x} cy={y} r={settings.pointSize * 0.75} fill={color} fillOpacity={settings.opacity} />{labels.has(row.index) ? <text data-plot-label x={rightHalf ? x - 4 : x + 4} y={upperHalf ? y + settings.tickSize + 2 + (row.index % 2) * 3 : y - 4 - (row.index % 2) * 3} textAnchor={rightHalf ? "end" : "start"} fill={TEXT} fontSize={settings.tickSize}>{row.label}</text> : null}</g>; })}
+    </g>
     <Legend entries={[{ label: "Down", color: colors[0] }, { label: "Up", color: colors[1] ?? colors[0] }, { label: "Not significant", color: "#B7B8BC" }]} frame={frame} settings={settings} />
   </>;
 }
 
 function ErrorBarPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const rows = dataset.rows.map((row) => ({ category: row[mapping.category], value: parseNumericValue(row[mapping.value]) ?? 0, error: Math.max(0, parseNumericValue(row[mapping.error]) ?? 0), group: mapping.group ? row[mapping.group] || "All" : "All" }));
-  const yDomain = numericExtent(rows.flatMap((row) => [row.value - row.error, row.value + row.error]), true);
+  const yDomain = resolveAxisDomain(numericExtent(rows.flatMap((row) => [row.value - row.error, row.value + row.error]), true), settings.yMin, settings.yMax);
   const band = frame.plotWidth / Math.max(1, rows.length);
   const groups = [...new Set(rows.map((row) => row.group))];
   const colorMap = palette(groups, colors);
@@ -144,29 +150,33 @@ function ErrorBarPlot({ frame, dataset, mapping, settings, colors, gridColor }: 
   const categoryPositions = rows.map((_, index) => frame.left + band * (index + 0.5));
   return <>
     <Axes frame={frame} settings={settings} xDomain={[0, rows.length]} yDomain={yDomain} xLabel={settings.xLabel} yLabel={settings.yLabel || "Mean ± error"} gridColor={gridColor} hideXTicks categoryXPositions={categoryPositions} />
+    <g data-plot-data>
     {rows.map((row, index) => { const x = frame.left + band * (index + 0.5); const low = yAt(row.value - row.error); const high = yAt(row.value + row.error); const color = colorMap.get(row.group) ?? colors[0]; return <g key={`${row.category}-${index}`}><line x1={x} x2={x} y1={low} y2={high} stroke={color} strokeWidth={settings.errorBarLineWidth} /><line x1={x - settings.errorBarCapSize / 2} x2={x + settings.errorBarCapSize / 2} y1={low} y2={low} stroke={color} strokeWidth={settings.errorBarLineWidth} /><line x1={x - settings.errorBarCapSize / 2} x2={x + settings.errorBarCapSize / 2} y1={high} y2={high} stroke={color} strokeWidth={settings.errorBarLineWidth} /><circle cx={x} cy={yAt(row.value)} r={settings.pointSize} fill="#FFFFFF" stroke={color} strokeWidth={settings.dataLineWidth} /><text x={x} y={frame.top + frame.plotHeight + 19} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize} transform={`rotate(-28 ${x} ${frame.top + frame.plotHeight + 19})`}>{row.category.slice(0, 16)}</text></g>; })}
+    </g>
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
 }
 
 function AreaPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const rows = dataset.rows.map((row) => ({ x: parseNumericValue(row[mapping.x]) ?? 0, y: parseNumericValue(row[mapping.value]) ?? 0, group: mapping.series ? row[mapping.series] || "All" : "All" }));
-  const xDomain = numericExtent(rows.map((row) => row.x));
-  const yDomain = numericExtent([...rows.map((row) => row.y), 0], true);
+  const xDomain = resolveAxisDomain(numericExtent(rows.map((row) => row.x)), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent([...rows.map((row) => row.y), 0], true), settings.yMin, settings.yMax);
   const groups = [...new Set(rows.map((row) => row.group))];
   const colorMap = palette(groups, colors);
   const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
   const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
   return <>
     <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "X"} yLabel={settings.yLabel || "Value"} gridColor={gridColor} />
+    <g data-plot-data>
     {groups.map((group) => { const points = rows.filter((row) => row.group === group).sort((a, b) => a.x - b.x); const line = points.map((point) => `${xAt(point.x)},${yAt(point.y)}`).join(" "); const area = `${xAt(points[0]?.x ?? 0)},${yAt(0)} ${line} ${xAt(points.at(-1)?.x ?? 0)},${yAt(0)}`; const color = colorMap.get(group) ?? colors[0]; return <g key={group}><polygon points={area} fill={color} fillOpacity={settings.opacity * 0.28} /><polyline points={line} fill="none" stroke={color} strokeWidth={settings.dataLineWidth} strokeLinejoin="round" />{points.map((point, index) => <circle key={index} cx={xAt(point.x)} cy={yAt(point.y)} r={settings.pointSize * 0.65} fill={color} />)}</g>; })}
+    </g>
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
 }
 
 function LollipopPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const rows = dataset.rows.map((row) => ({ category: row[mapping.category], value: parseNumericValue(row[mapping.value]) ?? 0, group: mapping.group ? row[mapping.group] || "All" : "All" }));
-  const yDomain = numericExtent([...rows.map((row) => row.value), 0], true);
+  const yDomain = resolveAxisDomain(numericExtent([...rows.map((row) => row.value), 0], true), settings.yMin, settings.yMax);
   const groups = [...new Set(rows.map((row) => row.group))];
   const colorMap = palette(groups, colors);
   const band = frame.plotWidth / Math.max(1, rows.length);
@@ -174,7 +184,9 @@ function LollipopPlot({ frame, dataset, mapping, settings, colors, gridColor }: 
   const categoryPositions = rows.map((_, index) => frame.left + band * (index + 0.5));
   return <>
     <Axes frame={frame} settings={settings} xDomain={[0, rows.length]} yDomain={yDomain} xLabel={settings.xLabel} yLabel={settings.yLabel || "Value"} gridColor={gridColor} hideXTicks categoryXPositions={categoryPositions} />
+    <g data-plot-data>
     {rows.map((row, index) => { const x = frame.left + band * (index + 0.5); const color = colorMap.get(row.group) ?? colors[0]; return <g key={`${row.category}-${index}`}><line x1={x} x2={x} y1={yAt(0)} y2={yAt(row.value)} stroke={color} strokeWidth={settings.dataLineWidth} /><circle cx={x} cy={yAt(row.value)} r={settings.pointSize + 1} fill={color} fillOpacity={settings.opacity} /><text x={x} y={frame.top + frame.plotHeight + 19} textAnchor="end" fill={TEXT} fontSize={settings.tickSize} transform={`rotate(-35 ${x} ${frame.top + frame.plotHeight + 19})`}>{row.category.slice(0, 18)}</text></g>; })}
+    </g>
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
 }
@@ -186,19 +198,22 @@ function DistributionPlot({ type, frame, dataset, mapping, settings, colors, gri
   const densityBoundaryDomain: [number, number] = [rawDomain[0] - rawSpan, rawDomain[1] + rawSpan];
   const densityCurves = new Map(entries.map(([group, values]) => [group, kernelDensityEstimate(values, densityBoundaryDomain, settings.violinBandwidth).points]));
   const densitySupport = [...densityCurves.values()].flatMap((curve) => curve.map((point) => point.position));
-  const yDomain = type === "raincloud" && densitySupport.length > 0 ? numericExtent(densitySupport) : rawDomain;
+  const automaticYDomain = type === "raincloud" && densitySupport.length > 0 ? numericExtent(densitySupport) : rawDomain;
+  const yDomain = resolveAxisDomain(automaticYDomain, settings.yMin, settings.yMax);
   const band = frame.plotWidth / Math.max(1, entries.length);
   const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
   const colorMap = palette(entries.map(([group]) => group), colors);
   const categoryPositions = entries.map((_, index) => frame.left + band * (index + 0.5));
   return <>
     <Axes frame={frame} settings={settings} xDomain={[0, entries.length]} yDomain={yDomain} xLabel={settings.xLabel} yLabel={settings.yLabel || "Value"} gridColor={gridColor} hideXTicks categoryXPositions={categoryPositions} />
+    <g data-plot-data>
     {entries.map(([group, values], groupIndex) => { const center = frame.left + band * (groupIndex + 0.5); const color = colorMap.get(group) ?? colors[0]; const stats = boxStatistics(values); const curve = densityCurves.get(group) ?? []; const maxDensity = Math.max(...curve.map((point) => point.density), 1e-9); return <g key={group}>
       {type === "raincloud" ? <><polygon points={`${center + 3},${yAt(curve[0]?.position ?? 0)} ${curve.map((point) => `${center + 3 + point.density / maxDensity * band * 0.35},${yAt(point.position)}`).join(" ")} ${center + 3},${yAt(curve.at(-1)?.position ?? 0)}`} fill={color} fillOpacity={settings.opacity * 0.38} stroke={color} strokeWidth={settings.dataLineWidth * 0.7} /><line x1={center - band * 0.18} x2={center - band * 0.18} y1={yAt(stats.q1)} y2={yAt(stats.q3)} stroke={color} strokeWidth={5} /><line x1={center - band * 0.26} x2={center - band * 0.1} y1={yAt(stats.median)} y2={yAt(stats.median)} stroke={TEXT} strokeWidth={1.6} /></> : null}
       {settings.showPoints ? values.map((value, index) => { const signed = ((index * 37) % 17 - 8) / 8; const spread = type === "raincloud" ? band * 0.13 : band * 0.3; return <circle key={index} cx={center + signed * spread - (type === "raincloud" ? band * 0.18 : 0)} cy={yAt(value)} r={settings.pointSize * 0.7} fill={color} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={0.5} />; }) : null}
       <text x={center} y={frame.top + frame.plotHeight + 20} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{group.slice(0, 15)}</text>
       {settings.showSampleSize ? <text x={center} y={frame.top + frame.plotHeight + 36} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize - 1}>n={values.length}</text> : null}
     </g>; })}
+    </g>
   </>;
 }
 
@@ -244,28 +259,32 @@ function MatrixPlot({ type, frame, dataset, settings, diverging }: { type: "clus
 
 function EnrichmentBar({ frame, dataset, mapping, settings, sequential, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; sequential: [string, string]; gridColor: string }) {
   const rows = dataset.rows.map((row) => ({ term: row[mapping.term], ratio: parseRatioValue(row[mapping.ratio]) ?? 0, p: Math.max(parseNumericValue(row[mapping.pValue]) ?? 1, Number.MIN_VALUE) })).sort((a, b) => a.ratio - b.ratio);
-  const domain = numericExtent(rows.map((row) => row.ratio), true);
+  const domain = resolveAxisDomain(numericExtent(rows.map((row) => row.ratio), true), settings.xMin, settings.xMax);
   const significance = rows.map((row) => -Math.log10(row.p));
   const sigDomain = numericExtent(significance, true);
   const band = frame.plotHeight / Math.max(1, rows.length);
   const categoryPositions = rows.map((_, index) => frame.top + frame.plotHeight - band * (index + 0.5));
   return <>
     <Axes frame={frame} settings={settings} xDomain={domain} yDomain={[0, rows.length]} xLabel={settings.xLabel || "Gene ratio"} yLabel="" gridColor={gridColor} hideYTicks categoryYPositions={categoryPositions} />
+    <g data-plot-data>
     {rows.map((row, index) => { const y = frame.top + frame.plotHeight - band * (index + 0.84); const width = scaleLinear(row.ratio, domain, [0, frame.plotWidth]); const color = interpolateColor(sequential[0], sequential[1], scaleLinear(-Math.log10(row.p), sigDomain, [0, 1])); return <g key={`${row.term}-${index}`}><rect x={frame.left} y={y} width={Math.max(0, width)} height={band * 0.68} rx={2} fill={color} fillOpacity={settings.opacity} /><text x={frame.left - 8} y={y + band * 0.47} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{row.term.slice(0, 22)}</text></g>; })}
+    </g>
   </>;
 }
 
 function GseaPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const rows = dataset.rows.map((row) => ({ rank: parseNumericValue(row[mapping.rank]) ?? 0, score: parseNumericValue(row[mapping.score]) ?? 0, hit: parseNumericValue(row[mapping.hit]) === 1 }));
-  const xDomain = numericExtent(rows.map((row) => row.rank));
-  const yDomain = numericExtent([...rows.map((row) => row.score), 0]);
+  const xDomain = resolveAxisDomain(numericExtent(rows.map((row) => row.rank)), settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain(numericExtent([...rows.map((row) => row.score), 0]), settings.yMin, settings.yMax);
   const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
   const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
   return <>
     <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "Rank in ordered dataset"} yLabel={settings.yLabel || "Running enrichment score"} gridColor={gridColor} />
+    <g data-plot-data>
     <line x1={frame.left} x2={frame.left + frame.plotWidth} y1={yAt(0)} y2={yAt(0)} stroke={TEXT} opacity={0.6} />
     <polyline points={rows.sort((a, b) => a.rank - b.rank).map((row) => `${xAt(row.rank)},${yAt(row.score)}`).join(" ")} fill="none" stroke={colors[0]} strokeWidth={settings.dataLineWidth} strokeLinejoin="round" />
     {rows.filter((row) => row.hit).map((row, index) => <line key={index} x1={xAt(row.rank)} x2={xAt(row.rank)} y1={frame.top + frame.plotHeight - 18} y2={frame.top + frame.plotHeight} stroke={colors[1] ?? TEXT} strokeWidth={1.2} />)}
+    </g>
   </>;
 }
 
@@ -273,12 +292,16 @@ function KmPlot({ frame, dataset, mapping, settings, colors, gridColor }: { fram
   const groups = [...new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "All" : "All"))];
   const colorMap = palette(groups, colors);
   const maxTime = Math.max(...dataset.rows.map((row) => parseNumericValue(row[mapping.time]) ?? 0), 1);
+  const xDomain = resolveAxisDomain([0, maxTime], settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain([0, 1], settings.yMin, settings.yMax);
   const chartFrame = settings.showRiskTable ? { ...frame, plotHeight: Math.max(70, frame.plotHeight - 44) } : frame;
-  const xAt = (value: number) => scaleLinear(value, [0, maxTime], [chartFrame.left, chartFrame.left + chartFrame.plotWidth]);
-  const yAt = (value: number) => scaleLinear(value, [0, 1], [chartFrame.top + chartFrame.plotHeight, chartFrame.top]);
+  const xAt = (value: number) => scaleLinear(value, xDomain, [chartFrame.left, chartFrame.left + chartFrame.plotWidth]);
+  const yAt = (value: number) => scaleLinear(value, yDomain, [chartFrame.top + chartFrame.plotHeight, chartFrame.top]);
   return <>
-    <Axes frame={chartFrame} settings={settings} xDomain={[0, maxTime]} yDomain={[0, 1]} xLabel={settings.xLabel || "Time"} yLabel={settings.yLabel || "Survival probability"} gridColor={gridColor} />
+    <Axes frame={chartFrame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "Time"} yLabel={settings.yLabel || "Survival probability"} gridColor={gridColor} />
+    <g data-plot-data>
     {groups.map((group) => { const records = dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "All" : "All") === group).map((row) => ({ time: parseNumericValue(row[mapping.time]) ?? 0, event: (parseNumericValue(row[mapping.event]) === 1 ? 1 : 0) as 0 | 1 })); const curve = kaplanMeier(records); const path = curve.slice(1).reduce((current, point) => `${current} H ${xAt(point.time)} V ${yAt(point.survival)}`, `M ${xAt(0)} ${yAt(1)}`); const color = colorMap.get(group) ?? colors[0]; return <g key={group}><path d={path} fill="none" stroke={color} strokeWidth={settings.dataLineWidth} />{curve.filter((point) => point.censored > 0).map((point) => <g key={point.time}><line x1={xAt(point.time) - 4} x2={xAt(point.time) + 4} y1={yAt(point.survival)} y2={yAt(point.survival)} stroke={color} strokeWidth={1.5} /><line x1={xAt(point.time)} x2={xAt(point.time)} y1={yAt(point.survival) - 4} y2={yAt(point.survival) + 4} stroke={color} strokeWidth={1.5} /></g>)}{settings.showRiskTable ? <text x={chartFrame.left - 8} y={chartFrame.top + chartFrame.plotHeight + 36 + groups.indexOf(group) * 13} textAnchor="end" fill={color} fontSize={settings.tickSize - 1}>{group.slice(0, 10)}</text> : null}{settings.showRiskTable ? [0, maxTime / 2, maxTime].map((time) => <text key={time} x={xAt(time)} y={chartFrame.top + chartFrame.plotHeight + 36 + groups.indexOf(group) * 13} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize - 1}>{records.filter((record) => record.time >= time).length}</text>) : null}</g>; })}
+    </g>
     {settings.showRiskTable ? <text x={chartFrame.left - 8} y={chartFrame.top + chartFrame.plotHeight + 21} textAnchor="end" fill={TEXT} fontSize={settings.tickSize} fontWeight={700}>At risk</text> : null}
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
@@ -286,7 +309,7 @@ function KmPlot({ frame, dataset, mapping, settings, colors, gridColor }: { fram
 
 function ForestPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const rows = dataset.rows.map((row) => ({ label: row[mapping.label], estimate: parseNumericValue(row[mapping.estimate]) ?? 0, lower: parseNumericValue(row[mapping.lower]) ?? 0, upper: parseNumericValue(row[mapping.upper]) ?? 0, group: mapping.group ? row[mapping.group] || "All" : "All" }));
-  const xDomain = numericExtent([...rows.flatMap((row) => [row.lower, row.upper]), settings.forestReferenceValue]);
+  const xDomain = resolveAxisDomain(numericExtent([...rows.flatMap((row) => [row.lower, row.upper]), settings.forestReferenceValue]), settings.xMin, settings.xMax);
   const groups = [...new Set(rows.map((row) => row.group))];
   const colorMap = palette(groups, colors);
   const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
@@ -294,8 +317,10 @@ function ForestPlot({ frame, dataset, mapping, settings, colors, gridColor }: { 
   const categoryPositions = rows.map((_, index) => frame.top + band * (index + 0.5));
   return <>
     <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={[0, rows.length]} xLabel={settings.xLabel || "Effect estimate (95% CI)"} yLabel="" gridColor={gridColor} hideYTicks categoryYPositions={categoryPositions} />
+    <g data-plot-data>
     <line x1={xAt(settings.forestReferenceValue)} x2={xAt(settings.forestReferenceValue)} y1={frame.top} y2={frame.top + frame.plotHeight} stroke={TEXT} strokeDasharray="5 4" />
     {rows.map((row, index) => { const y = frame.top + band * (index + 0.5); const color = colorMap.get(row.group) ?? colors[0]; return <g key={`${row.label}-${index}`}><line x1={xAt(row.lower)} x2={xAt(row.upper)} y1={y} y2={y} stroke={color} strokeWidth={settings.errorBarLineWidth} /><line x1={xAt(row.lower)} x2={xAt(row.lower)} y1={y - 4} y2={y + 4} stroke={color} /><line x1={xAt(row.upper)} x2={xAt(row.upper)} y1={y - 4} y2={y + 4} stroke={color} /><rect x={xAt(row.estimate) - settings.pointSize} y={y - settings.pointSize} width={settings.pointSize * 2} height={settings.pointSize * 2} fill={color} /><text x={frame.left - 8} y={y + 4} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{row.label.slice(0, 23)}</text></g>; })}
+    </g>
     <Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
 }
@@ -303,13 +328,17 @@ function ForestPlot({ frame, dataset, mapping, settings, colors, gridColor }: { 
 function RocPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
   const groups = [...new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "Model" : "Model"))];
   const colorMap = palette(groups, colors);
-  const xAt = (value: number) => scaleLinear(value, [0, 1], [frame.left, frame.left + frame.plotWidth]);
-  const yAt = (value: number) => scaleLinear(value, [0, 1], [frame.top + frame.plotHeight, frame.top]);
+  const xDomain = resolveAxisDomain([0, 1], settings.xMin, settings.xMax);
+  const yDomain = resolveAxisDomain([0, 1], settings.yMin, settings.yMax);
+  const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
+  const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
   const curves = groups.map((group) => ({ group, ...rocCurve(dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group).map((row) => ({ truth: (parseNumericValue(row[mapping.truth]) === 1 ? 1 : 0) as 0 | 1, score: parseNumericValue(row[mapping.score]) ?? 0 }))) }));
   return <>
-    <Axes frame={frame} settings={settings} xDomain={[0, 1]} yDomain={[0, 1]} xLabel={settings.xLabel || "1 − specificity"} yLabel={settings.yLabel || "Sensitivity"} gridColor={gridColor} />
+    <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "1 − specificity"} yLabel={settings.yLabel || "Sensitivity"} gridColor={gridColor} />
+    <g data-plot-data>
     <line x1={xAt(0)} x2={xAt(1)} y1={yAt(0)} y2={yAt(1)} stroke="#9B9DA3" strokeDasharray="5 4" />
     {curves.map((curve) => <polyline key={curve.group} points={curve.points.map((point) => `${xAt(point.fpr)},${yAt(point.tpr)}`).join(" ")} fill="none" stroke={colorMap.get(curve.group)} strokeWidth={settings.dataLineWidth} />)}
+    </g>
     <Legend entries={curves.map((curve) => ({ label: `${curve.group} · AUC ${Number.isFinite(curve.auc) ? curve.auc.toFixed(3) : "NA"}`, color: colorMap.get(curve.group) ?? colors[0] }))} frame={frame} settings={settings} />
   </>;
 }
@@ -424,6 +453,8 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "circos") content = <CircosPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   return <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${frame.width} ${frame.height}`} width={frame.width} height={frame.height} role="img" data-plot-renderer="advanced" data-chart-text-color={TEXT} aria-label={`${definition.name} scientific figure preview`} style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}>
     <title>{settings.title || `${definition.name} figure`}</title><desc>{definition.summary} Generated in LabNest Visualization Studio.</desc><rect width={frame.width} height={frame.height} fill="#FFFFFF" />
+    <defs><clipPath id={`plot-area-${type}`}><rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} /></clipPath></defs>
+    <style>{`[data-plot-data] path,[data-plot-data] circle,[data-plot-data] rect,[data-plot-data] line,[data-plot-data] polyline,[data-plot-data] polygon,[data-plot-data] text[data-plot-label]{clip-path:url(#plot-area-${type})}`}</style>
     {settings.title ? <text x={frame.left} y={24} fill={TEXT} fontSize={settings.titleSize} fontWeight={700}>{settings.title}</text> : null}
     {content}
   </svg>;

@@ -45,11 +45,33 @@ describe("registered plot-module examples", () => {
 
           const expectedRenderer = expectedAdvancedRenderers.has(plotModule.definition.id) ? "advanced" : "standard";
           expect(plotModule.renderer, plotModule.definition.id).toBe(expectedRenderer);
-          expect(markup, `${plotModule.definition.id} / ${example.label}`).toContain("<svg");
+        expect(markup, `${plotModule.definition.id} / ${example.label}`).toContain("<svg");
+        expect(markup, `${plotModule.definition.id} / ${example.label}`).toContain("<clipPath");
           expect(markup, `${plotModule.definition.id} / ${example.label}`).toContain(`data-plot-renderer="${expectedRenderer}"`);
           expect(markup, `${plotModule.definition.id} / ${example.label}`).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
         }
       }
     }
+  });
+
+  it("keeps threshold annotations inside automatic volcano domains", () => {
+    const plotModule = plotModuleRegistry.get("volcano");
+    const dataset = parseDelimitedData("gene\tlog2FC\tpadj\nA\t0.1\t0.8\nB\t-0.2\t0.6");
+    const markup = renderToStaticMarkup(
+      <ScientificChartPreview
+        svgRef={createRef<SVGSVGElement>()}
+        type="volcano"
+        dataset={dataset}
+        mapping={plotModule.definition.defaultMapping}
+        settings={{ ...defaultVisualizationSettings, foldChangeThreshold: 5, pValueThreshold: 1e-10 }}
+        themeId={defaultVisualizationThemeId}
+      />,
+    );
+    const foldCoordinates = [...markup.matchAll(/data-plot-element="fold-change-threshold" x1="([\d.]+)"/g)].map((match) => Number(match[1]));
+    const pCoordinate = Number(markup.match(/data-plot-element="p-value-threshold"[^>]* y1="([\d.]+)"/)?.[1]);
+    expect(foldCoordinates).toHaveLength(2);
+    expect(foldCoordinates.every((coordinate) => coordinate >= 60 && coordinate <= 218)).toBe(true);
+    expect(pCoordinate).toBeGreaterThanOrEqual(20);
+    expect(pCoordinate).toBeLessThanOrEqual(292);
   });
 });

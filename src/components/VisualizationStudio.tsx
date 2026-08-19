@@ -13,6 +13,7 @@ import {
   defaultVisualizationPaletteSeriesId,
   defaultVisualizationSettings,
   defaultVisualizationThemeId,
+  activeNumericAxes,
   figureFontPresets,
   getPlotDefinition,
   getPlotModule,
@@ -307,6 +308,43 @@ function RangeControl({ label, value, minimum, maximum, step = 1, unit, onChange
   );
 }
 
+function OptionalNumberControl({ label, value, invalid = false, describedBy, onChange }: { label: string; value: number | null; invalid?: boolean; describedBy?: string; onChange: (value: number | null) => void }) {
+  const commit = (draft: string) => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      onChange(null);
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) onChange(parsed);
+  };
+  return (
+    <label className="grid gap-1 text-xs text-graphite">
+      <span>{label}</span>
+      <input
+        className={controlClass}
+        type="text"
+        inputMode="decimal"
+        key={value ?? "auto"}
+        defaultValue={value ?? ""}
+        placeholder="Auto"
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? describedBy : undefined}
+        onBlur={(event) => {
+          commit(event.currentTarget.value);
+          if (event.currentTarget.value.trim() && !Number.isFinite(Number(event.currentTarget.value))) {
+            event.currentTarget.value = value === null ? "" : String(value);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") event.currentTarget.value = value === null ? "" : String(value);
+        }}
+      />
+    </label>
+  );
+}
+
 function ToggleControl({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
     <label className="flex cursor-pointer items-center justify-between gap-3 text-xs text-graphite">
@@ -401,6 +439,9 @@ export function VisualizationStudio() {
   const definition = plotModule.definition;
   const dataExamples = plotModule.examples;
   const guidance = plotModule.guidance;
+  const manualAxes = activeNumericAxes(plotType, settings);
+  const invalidXLimits = manualAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
+  const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
   const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions) : null, [plotType, rawData, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
   const validation = useMemo(
@@ -834,8 +875,17 @@ export function VisualizationStudio() {
             <CardBody className="space-y-4 p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
               <ControlGroup title="Labels">
                 <TextControl label="Title" value={settings.title} onChange={(value) => updateSetting("title", value)} placeholder={`${definition.name} title`} />
-                <TextControl label="X-axis label" value={settings.xLabel} onChange={(value) => updateSetting("xLabel", value)} />
-                <TextControl label="Y-axis label" value={settings.yLabel} onChange={(value) => updateSetting("yLabel", value)} />
+              <TextControl label="X-axis label" value={settings.xLabel} onChange={(value) => updateSetting("xLabel", value)} />
+              <TextControl label="Y-axis label" value={settings.yLabel} onChange={(value) => updateSetting("yLabel", value)} />
+              {manualAxes.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {manualAxes.includes("x") ? <><OptionalNumberControl label="X minimum" value={settings.xMin} invalid={invalidXLimits} describedBy="x-axis-limit-error" onChange={(value) => updateSetting("xMin", value)} /><OptionalNumberControl label="X maximum" value={settings.xMax} invalid={invalidXLimits} describedBy="x-axis-limit-error" onChange={(value) => updateSetting("xMax", value)} /></> : null}
+                  {manualAxes.includes("y") ? <><OptionalNumberControl label="Y minimum" value={settings.yMin} invalid={invalidYLimits} describedBy="y-axis-limit-error" onChange={(value) => updateSetting("yMin", value)} /><OptionalNumberControl label="Y maximum" value={settings.yMax} invalid={invalidYLimits} describedBy="y-axis-limit-error" onChange={(value) => updateSetting("yMax", value)} /></> : null}
+                  {invalidXLimits ? <p id="x-axis-limit-error" className="col-span-2 text-[11px] leading-4 text-error">X minimum must be smaller than X maximum.</p> : null}
+                  {invalidYLimits ? <p id="y-axis-limit-error" className="col-span-2 text-[11px] leading-4 text-error">Y minimum must be smaller than Y maximum.</p> : null}
+                  <p className="col-span-2 text-[11px] leading-4 text-muted">Leave blank for data-aware automatic limits. Clipped mapped values are reported below the preview.</p>
+                </div>
+              ) : null}
               </ControlGroup>
 
             <ControlGroup title="Compact layout">

@@ -1,8 +1,5 @@
 import {
-  createPlotModuleRegistry,
-  type PlotDataShape,
-  type PlotModuleSeed,
-  type PlotRendererId,
+  createLegacyPlotModuleRegistry,
 } from "./plot-module-registry";
 
 export type PlotType =
@@ -1392,37 +1389,7 @@ export const plotGuidance: Record<PlotType, PlotGuidance> = {
   },
 };
 
-const advancedRendererPlotTypes = new Set<PlotType>([
-  "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
-  "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
-  "upset", "sankey", "chord", "circos",
-]);
-
-function rendererFor(type: PlotType): PlotRendererId {
-  return advancedRendererPlotTypes.has(type) ? "advanced" : "standard";
-}
-
-function dataShapeFor(type: PlotType): PlotDataShape {
-  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "pca"].includes(type)) return "matrix";
-  if (["pcoa", "umap"].includes(type)) return "coordinates";
-  if (["venn", "upset"].includes(type)) return "sets";
-  if (["sankey", "chord"].includes(type)) return "network";
-  if (type === "circos") return "genomic-links";
-  return "long";
-}
-
-const plotModuleSeeds: PlotModuleSeed[] = plotDefinitions.map((definition) => ({
-  definition,
-  guidance: plotGuidance[definition.id],
-  renderer: rendererFor(definition.id),
-  capabilities: {
-    dataShape: dataShapeFor(definition.id),
-    grouping: definition.roles.some((role) => role.key === "group" || role.key === "series"),
-    multipleExamples: (definition.examples?.length ?? 0) > 1,
-  },
-}));
-
-export const plotModuleRegistry = createPlotModuleRegistry(plotModuleSeeds);
+export const plotModuleRegistry = createLegacyPlotModuleRegistry<PlotType, keyof VisualizationSettings>(plotDefinitions, plotGuidance);
 
 export function getPlotModule(type: PlotType) {
   return plotModuleRegistry.get(type);

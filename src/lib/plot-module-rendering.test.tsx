@@ -14,7 +14,7 @@ import {
 
 const expectedAdvancedRenderers = new Set([
   "line", "scatter", "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
-  "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
+  "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
@@ -107,6 +107,18 @@ describe("registered plot-module examples", () => {
     expect(summaryX).toBeLessThan(300);
     expect(markup).toContain("two-sided t p");
     expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
+
+  it("assigns distinct static colors to categorical annotation levels beyond the base palette", () => {
+    const heatmapModule = plotModuleRegistry.get("heatmap");
+    const dataset = parseDelimitedData(heatmapModule.examples[0].data);
+    const columnIds = dataset.headers.slice(1);
+    const annotation = ["id\tcohort[categorical]", ...columnIds.map((id, index) => `${id}\tLevel_${index + 1}`)].join("\n");
+    const settings = { ...defaultVisualizationSettings, width: 520, height: 420, heatmapColumnAnnotationData: annotation };
+    expect(validatePlotDataset(heatmapModule.definition, dataset, {}, settings).errors).toEqual([]);
+    const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="heatmap" dataset={dataset} mapping={{}} settings={settings} themeId={defaultVisualizationThemeId} />);
+    const swatchFills = [...markup.matchAll(/data-no-clip="true"[^>]*fill="([^"]+)"/gi)].map((match) => match[1]);
+    expect(new Set(swatchFills).size).toBeGreaterThanOrEqual(Math.min(columnIds.length, 5));
   });
 
   it("calculates long-form bar summaries without requiring a precomputed error column", () => {
@@ -257,5 +269,51 @@ describe("registered plot-module examples", () => {
         }
       }
     }
+  });
+
+  it("renders aligned annotations, deterministic cuts, dendrograms, and a coordinated heatmap summary", () => {
+    const heatmapModule = plotModuleRegistry.get("clustered-heatmap");
+    const dataset = parseDelimitedData(heatmapModule.examples[0].data);
+    const settings = {
+      ...defaultVisualizationSettings,
+      width: 520,
+      height: 420,
+      heatmapRowAnnotationData: "id\tmodule\nTP53\tDamage\nCDKN1A\tDamage\nEGFR\tRTK",
+      heatmapColumnAnnotationData: "id\tgroup\tbatch\nControl_1\tControl\t1\nTreatment_1\tTreatment\t2",
+      heatmapShowSidePlot: true,
+      heatmapShowValues: true,
+    };
+    const validation = validatePlotDataset(heatmapModule.definition, dataset, {}, settings);
+    expect(validation.errors).toEqual([]);
+    expect(validation.warnings.join(" ")).toMatch(/missing from the annotation table/);
+    const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="clustered-heatmap" dataset={dataset} mapping={{}} settings={settings} themeId={defaultVisualizationThemeId} />);
+    expect(markup).toContain('data-plot-family="rectangular-heatmap"');
+    expect(markup).toContain('data-annotation-target="row"');
+    expect(markup).toContain('data-annotation-target="column"');
+    expect(markup).toContain('data-cluster-cut="row"');
+    expect(markup).toContain('data-cluster-cut="column"');
+    expect(markup).toContain('data-plot-element="heatmap-side-plot"');
+    expect(markup).toContain('data-plot-element="heatmap-color-legend"');
+    expect(markup).toContain('data-plot-element="heatmap-annotation-legend"');
+    expect(markup).toContain("Rows");
+    expect(markup).toContain("Columns");
+    const rawSummaryValues = [...markup.matchAll(/<title>mean: ([^<]+)<\/title>/g)].map((match) => Number(match[1]));
+    expect(rawSummaryValues.some((value) => Math.abs(value) > 1)).toBe(true);
+    expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
+
+  it("renders triangular correlation and circular heatmap views with finite geometry", () => {
+    const correlationModule = plotModuleRegistry.get("correlation-heatmap");
+    const correlationDataset = parseDelimitedData(correlationModule.examples[0].data);
+    const triangular = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="correlation-heatmap" dataset={correlationDataset} mapping={{}} settings={{ ...defaultVisualizationSettings, width: 520, height: 420, heatmapTriangle: "lower" }} themeId={defaultVisualizationThemeId} />);
+    const variableCount = correlationDataset.headers.length - 1;
+    expect((triangular.match(/data-plot-element="heatmap-cell"/g) ?? [])).toHaveLength(variableCount * (variableCount + 1) / 2);
+
+    const heatmapModule = plotModuleRegistry.get("heatmap");
+    const heatmapDataset = parseDelimitedData(heatmapModule.examples[0].data);
+    const circular = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="heatmap" dataset={heatmapDataset} mapping={{}} settings={{ ...defaultVisualizationSettings, width: 420, height: 420, heatmapDisplay: "circular", heatmapScale: "none", heatmapColorMode: "sequential" }} themeId={defaultVisualizationThemeId} />);
+    expect(circular).toContain('data-plot-family="circular-heatmap"');
+    expect(circular).toContain('data-plot-element="heatmap-cell"');
+    expect(circular).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
   });
 });

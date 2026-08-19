@@ -6,14 +6,18 @@ import {
   correlation,
   correlationPValue,
   correlationMatrix,
-  hierarchicalClusterOrder,
+  cutHierarchicalCluster,
+  hierarchicalClusterTree,
   kaplanMeier,
   matrixFromRows,
   rocCurve,
   upsetVerticalLayout,
   vennRegionLayout,
+  type HierarchicalClusterNode,
 } from "@/lib/visualization-advanced";
 import {
+  alignHeatmapAnnotations,
+  categoricalColorForIndex,
   boxStatistics,
   confidenceInterval95,
   covarianceEllipsePoints,
@@ -23,6 +27,7 @@ import {
   figureFontPresets,
   formatTick,
   getPlotDefinition,
+  heatmapLayoutMetrics,
   interpolateColor,
   journalThemes,
   kernelDensityEstimate,
@@ -40,6 +45,7 @@ import {
   type ParsedDataset,
   type PlotType,
   type VisualizationSettings,
+  type HeatmapAnnotationTrack,
 } from "@/lib/visualization-studio";
 
 type Props = {
@@ -57,10 +63,13 @@ const TEXT = "#23242A";
 
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   const noAxes = ["venn", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
-  const labelHeavy = ["enrichment-bar", "survival-forest", "upset"].includes(type);
-  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"].includes(type);
+  const heatmapType = ["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(type);
+  const hasHeatmapAnnotationLegend = heatmapType && Boolean(settings.heatmapRowAnnotationData.trim() || settings.heatmapColumnAnnotationData.trim());
+  const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset"].includes(type);
+  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"].includes(type);
   const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
+  if (heatmapType) return heatmapLayoutMetrics(settings, { hasAnnotationLegend: hasHeatmapAnnotationLegend, rowAnnotationTracks: 0, columnAnnotationTracks: 0, showRowCut: false, showColumnCut: false, showRowDendrogram: false, showColumnDendrogram: false, showSidePlot: false, rowCount: 1, columnCount: 1, maxColumnLabelCharacters: 0, maxCutClusters: 0 }).frame;
   const left = noAxes ? 14 : labelHeavy ? Math.min(178, settings.width * 0.32) : 66;
   const top = settings.title ? 48 : 24;
   const bottom = hasLegend && settings.legendPosition === "bottom" ? 80 : 58;
@@ -388,43 +397,252 @@ function DistributionPlot({ type, frame, dataset, mapping, settings, colors, gri
   </>;
 }
 
-function MatrixPlot({ type, frame, dataset, settings, diverging }: { type: "clustered-heatmap" | "correlation-heatmap"; frame: Frame; dataset: ParsedDataset; settings: VisualizationSettings; diverging: [string, string, string] }) {
+function zScore(values: number[]) {
+  const average = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, values.length - 1)) || 1;
+  return values.map((value) => (value - average) / deviation);
+}
+
+function selectedLabelIndices(count: number, availablePixels: number, fontSize: number, density: VisualizationSettings["heatmapLabelDensity"], minimum = 2) {
+  if (density === "none") return new Set<number>();
+  if (density === "all") return new Set(Array.from({ length: count }, (_, index) => index));
+  const maximum = Math.max(minimum, Math.floor(availablePixels / Math.max(11, fontSize + 3)));
+  if (count <= maximum) return new Set(Array.from({ length: count }, (_, index) => index));
+  const step = Math.ceil(count / maximum);
+  return new Set(Array.from({ length: count }, (_, index) => index).filter((index) => index % step === 0 || index === count - 1));
+}
+
+function annotationTrackColor(track: HeatmapAnnotationTrack, value: string, colors: string[], sequential: [string, string]) {
+  if (!value) return "#F1F0ED";
+  if (track.kind === "continuous" && track.numericExtent) {
+    const numeric = parseNumericValue(value) ?? track.numericExtent[0];
+    return interpolateColor(sequential[0], sequential[1], scaleLinear(numeric, track.numericExtent, [0, 1]));
+  }
+  const categoryIndex = Math.max(0, track.categories.indexOf(value));
+  return categoricalColorForIndex(categoryIndex, colors);
+}
+
+function annularSectorPath(cx: number, cy: number, innerRadius: number, outerRadius: number, startAngle: number, endAngle: number) {
+  const point = (radius: number, angle: number) => [cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius] as const;
+  const outerStart = point(outerRadius, startAngle); const outerEnd = point(outerRadius, endAngle);
+  const innerEnd = point(innerRadius, endAngle); const innerStart = point(innerRadius, startAngle);
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  return `M ${outerStart[0]} ${outerStart[1]} A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${outerEnd[0]} ${outerEnd[1]} L ${innerEnd[0]} ${innerEnd[1]} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStart[0]} ${innerStart[1]} Z`;
+}
+
+function HeatmapColorLegend({ id, x, y, width, minimum, maximum, diverging, sequential, useDiverging, label, fontSize }: { id: string; x: number; y: number; width: number; minimum: number; maximum: number; diverging: [string, string, string]; sequential: [string, string]; useDiverging: boolean; label: string; fontSize: number }) {
+  const small = Math.max(8, fontSize - 1);
+  return <g data-plot-element="heatmap-color-legend">
+    <defs><linearGradient id={id} x1="0%" x2="100%">{useDiverging ? <><stop offset="0%" stopColor={diverging[0]} /><stop offset="50%" stopColor={diverging[1]} /><stop offset="100%" stopColor={diverging[2]} /></> : <><stop offset="0%" stopColor={sequential[0]} /><stop offset="100%" stopColor={sequential[1]} /></>}</linearGradient></defs>
+    <text x={x} y={y + 7} fill={TEXT} fontSize={fontSize} fontWeight={700}>{label}</text>
+    <rect data-no-clip="true" x={x + 34} y={y} width={width} height={5} rx={1} fill={`url(#${id})`} stroke="#D7D4CE" strokeWidth={0.4} />
+    <text x={x + 34} y={y + 15} fill={TEXT} fontSize={small} textAnchor="start">{formatTick(minimum)}</text>
+    {useDiverging ? <text x={x + 34 + width / 2} y={y + 15} fill={TEXT} fontSize={small} textAnchor="middle">0</text> : null}
+    <text x={x + 34 + width} y={y + 15} fill={TEXT} fontSize={small} textAnchor="end">{formatTick(maximum)}</text>
+  </g>;
+}
+
+function HeatmapAnnotationLegend({ id, x, y, rowTracks, columnTracks, colors, sequential, fontSize }: { id: string; x: number; y: number; rowTracks: HeatmapAnnotationTrack[]; columnTracks: HeatmapAnnotationTrack[]; colors: string[]; sequential: [string, string]; fontSize: number }) {
+  let cursor = y;
+  const small = Math.max(8, fontSize - 1);
+  const rowHeight = fontSize + 3;
+  const groups = [{ target: "Rows", tracks: rowTracks }, { target: "Columns", tracks: columnTracks }];
+  const content: ReactNode[] = [];
+  groups.forEach(({ target, tracks }) => {
+    if (tracks.length === 0) return;
+    content.push(<text key={`${target}-heading`} x={x} y={cursor + fontSize} fill={TEXT} fontSize={fontSize} fontWeight={700}>{target}</text>);
+    cursor += rowHeight;
+    tracks.forEach((track, trackIndex) => {
+      content.push(<text key={`${target}-${track.name}`} x={x} y={cursor + fontSize} fill={TEXT} fontSize={fontSize} fontWeight={600}>{track.name.slice(0, 14)}</text>);
+      cursor += rowHeight;
+      if (track.kind === "continuous" && track.numericExtent) {
+        const gradientId = `${id}-${target}-${trackIndex}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+        content.push(<g key={`${target}-${track.name}-scale`}><defs><linearGradient id={gradientId} x1="0%" x2="100%"><stop offset="0%" stopColor={sequential[0]} /><stop offset="100%" stopColor={sequential[1]} /></linearGradient></defs><rect data-no-clip="true" x={x} y={cursor} width={52} height={5} rx={1} fill={`url(#${gradientId})`} /><text x={x} y={cursor + rowHeight} fill={TEXT} fontSize={small}>{formatTick(track.numericExtent[0])}</text><text x={x + 52} y={cursor + rowHeight} textAnchor="end" fill={TEXT} fontSize={small}>{formatTick(track.numericExtent[1])}</text></g>);
+        cursor += rowHeight + 5;
+      } else {
+        track.categories.forEach((category, categoryIndex) => {
+          content.push(<g key={`${target}-${track.name}-${category}`}><rect data-no-clip="true" x={x} y={cursor + 1} width={7} height={7} rx={1} fill={categoricalColorForIndex(categoryIndex, colors)} /><text x={x + 11} y={cursor + fontSize} fill={TEXT} fontSize={small}>{category.slice(0, 14)}</text></g>);
+          cursor += rowHeight;
+        });
+      }
+      cursor += 3;
+    });
+  });
+  return <g data-plot-element="heatmap-annotation-legend" aria-label="Heatmap annotation legend">{content}</g>;
+}
+
+function HeatmapCutLegend({ x, y, rowClusters, columnClusters, colors, fontSize }: { x: number; y: number; rowClusters: number; columnClusters: number; colors: string[]; fontSize: number }) {
+  const rows = [{ label: "R", count: rowClusters }, { label: "C", count: columnClusters }].filter(({ count }) => count > 1);
+  if (rows.length === 0) return null;
+  const readable = Math.max(8, fontSize);
+  const rowHeight = readable + 2;
+  const itemStep = Math.max(13, readable * 1.15);
+  return <g data-plot-element="heatmap-cut-legend" aria-label="Cluster cut legend">{rows.map(({ label, count }, rowIndex) => <g key={label} transform={`translate(${x} ${y + rowIndex * rowHeight})`}><text x={0} y={readable} fill={TEXT} fontSize={readable} fontWeight={700}>{label}</text>{Array.from({ length: count }, (_, clusterIndex) => <g key={clusterIndex}><rect data-no-clip="true" x={12 + clusterIndex * itemStep} y={1} width={8} height={8} rx={1} fill={categoricalColorForIndex(clusterIndex, colors)} /><text x={21 + clusterIndex * itemStep} y={readable} fill={TEXT} fontSize={readable}>{clusterIndex + 1}</text></g>)}</g>)}</g>;
+}
+
+function MatrixPlot({ type, dataset, settings, diverging, sequential, colors }: { type: "heatmap" | "clustered-heatmap" | "correlation-heatmap"; frame: Frame; dataset: ParsedDataset; settings: VisualizationSettings; diverging: [string, string, string]; sequential: [string, string]; colors: string[] }) {
   const labelColumn = dataset.headers[0];
   const sourceColumns = dataset.headers.slice(1);
   const source = matrixFromRows(dataset.rows, sourceColumns);
-  let rowLabels: string[];
-  let columnLabels: string[];
-  let matrix: number[][];
+  let sourceRowLabels = dataset.rows.map((row) => row[labelColumn]);
+  const sourceColumnLabels = [...sourceColumns];
+  let sourceMatrix: number[][];
   if (type === "correlation-heatmap") {
-    matrix = correlationMatrix(source, settings.correlationMethod);
-    rowLabels = [...sourceColumns];
-    columnLabels = [...sourceColumns];
-  } else {
-    matrix = settings.heatmapScale === "row" ? source.map((row) => { const avg = row.reduce((sum, value) => sum + value, 0) / row.length; const sd = Math.sqrt(row.reduce((sum, value) => sum + (value - avg) ** 2, 0) / Math.max(1, row.length - 1)) || 1; return row.map((value) => (value - avg) / sd); }) : source;
-    rowLabels = dataset.rows.map((row) => row[labelColumn]);
-    columnLabels = [...sourceColumns];
+    sourceMatrix = correlationMatrix(source, settings.correlationMethod);
+    sourceRowLabels = [...sourceColumns];
+  } else if (settings.heatmapScale === "row") {
+    sourceMatrix = source.map(zScore);
+  } else if (settings.heatmapScale === "column") {
+    const columns = sourceColumns.map((_, columnIndex) => zScore(source.map((row) => row[columnIndex])));
+    sourceMatrix = source.map((_, rowIndex) => columns.map((column) => column[rowIndex]));
+  } else sourceMatrix = source;
+
+  const allowsClustering = type !== "heatmap";
+  const linkedCorrelationClustering = type === "correlation-heatmap" ? settings.clusterRows && settings.clusterColumns : null;
+  const effectiveClusterRows = type === "correlation-heatmap" ? Boolean(linkedCorrelationClustering) : settings.clusterRows;
+  const effectiveClusterColumns = type === "correlation-heatmap" ? Boolean(linkedCorrelationClustering) : settings.clusterColumns;
+  const rowTree = allowsClustering && effectiveClusterRows ? hierarchicalClusterTree(sourceMatrix, settings.heatmapDistance, settings.heatmapLinkage) : null;
+  const sourceColumnVectors = sourceColumnLabels.map((_, columnIndex) => sourceMatrix.map((row) => row[columnIndex]));
+  const columnTree = allowsClustering && effectiveClusterColumns ? hierarchicalClusterTree(sourceColumnVectors, settings.heatmapDistance, settings.heatmapLinkage) : null;
+  let rowOrder = rowTree?.order ?? sourceMatrix.map((_, index) => index);
+  let columnOrder = columnTree?.order ?? sourceColumnLabels.map((_, index) => index);
+  let displayedRowTree = rowTree;
+  let displayedColumnTree = columnTree;
+  if (type === "correlation-heatmap" && (rowTree || columnTree)) {
+    const sharedTree = rowTree ?? columnTree;
+    rowOrder = sharedTree?.order ?? rowOrder;
+    columnOrder = rowOrder;
+    displayedRowTree = effectiveClusterRows ? sharedTree : null;
+    displayedColumnTree = effectiveClusterColumns ? sharedTree : null;
   }
-  const rowOrder = settings.clusterRows ? hierarchicalClusterOrder(matrix) : matrix.map((_, index) => index);
-  const columnVectors = columnLabels.map((_, column) => matrix.map((row) => row[column]));
-  const columnOrder = settings.clusterColumns ? hierarchicalClusterOrder(columnVectors) : columnLabels.map((_, index) => index);
-  if (type === "correlation-heatmap" && (settings.clusterRows || settings.clusterColumns)) {
-    const shared = settings.clusterRows ? rowOrder : columnOrder;
-    rowLabels = shared.map((index) => rowLabels[index]);
-    columnLabels = shared.map((index) => columnLabels[index]);
-    matrix = shared.map((row) => shared.map((column) => matrix[row][column]));
-  } else {
-    rowLabels = rowOrder.map((index) => rowLabels[index]);
-    columnLabels = columnOrder.map((index) => columnLabels[index]);
-    matrix = rowOrder.map((row) => columnOrder.map((column) => matrix[row][column]));
+  const rowLabels = rowOrder.map((index) => sourceRowLabels[index]);
+  const columnLabels = columnOrder.map((index) => sourceColumnLabels[index]);
+  const matrix = rowOrder.map((rowIndex) => columnOrder.map((columnIndex) => sourceMatrix[rowIndex][columnIndex]));
+  const sidePlotMatrix = type === "correlation-heatmap" ? matrix : rowOrder.map((rowIndex) => columnOrder.map((columnIndex) => source[rowIndex][columnIndex]));
+  const rowAnnotations = alignHeatmapAnnotations(settings.heatmapRowAnnotationData, sourceRowLabels, "row").tracks;
+  const columnAnnotations = alignHeatmapAnnotations(settings.heatmapColumnAnnotationData, sourceColumnLabels, "column").tracks;
+  const rowCutCount = settings.heatmapRowClusters;
+  const columnCutCount = type === "correlation-heatmap" ? rowCutCount : settings.heatmapColumnClusters;
+  const rowClusterAssignments = cutHierarchicalCluster(displayedRowTree, rowCutCount);
+  const columnClusterAssignments = cutHierarchicalCluster(displayedColumnTree, columnCutCount);
+  const showRowCut = Boolean(displayedRowTree && rowCutCount > 1);
+  const showColumnCut = Boolean(displayedColumnTree && columnCutCount > 1);
+  const flatValues = matrix.flat();
+  const rawMinimum = Math.min(...flatValues); const rawMaximum = Math.max(...flatValues);
+  const absoluteMaximum = type === "correlation-heatmap" ? 1 : Math.max(Math.abs(rawMinimum), Math.abs(rawMaximum), Number.EPSILON);
+  const useDiverging = type === "correlation-heatmap" || settings.heatmapScale !== "none" || settings.heatmapColorMode === "diverging";
+  const colorMinimum = useDiverging ? -absoluteMaximum : rawMinimum;
+  const colorMaximum = useDiverging ? absoluteMaximum : rawMaximum;
+  const colorScaleLabel = type === "correlation-heatmap" ? (settings.correlationMethod === "spearman" ? "ρ" : "r") : settings.heatmapScale === "none" ? "Value" : "z";
+  const fillFor = (value: number) => useDiverging
+    ? divergingColor(diverging[0], diverging[1], diverging[2], scaleLinear(value, [-absoluteMaximum, absoluteMaximum], [0, 1]))
+    : interpolateColor(sequential[0], sequential[1], scaleLinear(value, [rawMinimum, rawMaximum === rawMinimum ? rawMinimum + 1 : rawMaximum], [0, 1]));
+  const visibleCell = (rowIndex: number, columnIndex: number) => settings.heatmapDisplay === "circular" || type !== "correlation-heatmap" || settings.heatmapTriangle === "full" || (settings.heatmapTriangle === "lower" ? rowIndex >= columnIndex : rowIndex <= columnIndex);
+  const showDendrograms = allowsClustering && settings.heatmapShowDendrograms && settings.heatmapDisplay === "rectangular";
+  const layout = heatmapLayoutMetrics(settings, {
+    hasAnnotationLegend: rowAnnotations.length > 0 || columnAnnotations.length > 0,
+    rowAnnotationTracks: rowAnnotations.length,
+    columnAnnotationTracks: columnAnnotations.length,
+    showRowCut,
+    showColumnCut,
+    showRowDendrogram: Boolean(showDendrograms && displayedRowTree),
+    showColumnDendrogram: Boolean(showDendrograms && displayedColumnTree),
+    showSidePlot: settings.heatmapDisplay === "rectangular" && settings.heatmapShowSidePlot,
+    rowCount: rowLabels.length,
+    columnCount: columnLabels.length,
+    maxColumnLabelCharacters: Math.max(0, ...columnLabels.map((label) => label.length)),
+    maxCutClusters: Math.max(showRowCut ? Math.min(rowCutCount, rowLabels.length) : 0, showColumnCut ? Math.min(columnCutCount, columnLabels.length) : 0),
+  });
+  const frame = layout.frame;
+  const legendFontSize = Math.max(8, settings.legendSize);
+
+  if (settings.heatmapDisplay === "circular") {
+    const cx = frame.left + frame.plotWidth / 2; const cy = frame.top + frame.plotHeight / 2;
+    const outerRadius = Math.max(1, layout.circularOuterRadius);
+    const innerRadius = Math.max(0.5, Math.min(outerRadius - 0.5, layout.circularInnerRadius));
+    const ringWidth = Math.max(0.1, layout.circularRingWidth);
+    const sector = Math.PI * 2 / Math.max(1, columnLabels.length);
+    const columnLabelIndices = selectedLabelIndices(columnLabels.length, outerRadius * Math.PI * 2, settings.tickSize * 4, settings.heatmapLabelDensity);
+    const rowLabelIndices = selectedLabelIndices(rowLabels.length, layout.circularRingListAvailableHeight, legendFontSize, settings.heatmapLabelDensity, 1);
+    return <g data-plot-data data-plot-family="circular-heatmap">
+      {matrix.map((row, rowIndex) => row.map((value, columnIndex) => {
+        if (!visibleCell(rowIndex, columnIndex)) return null;
+        const start = -Math.PI / 2 + columnIndex * sector; const end = start + sector;
+        return <path key={`${rowIndex}-${columnIndex}`} data-plot-element="heatmap-cell" d={annularSectorPath(cx, cy, innerRadius + rowIndex * ringWidth, innerRadius + (rowIndex + 1) * ringWidth + 0.15, start, end)} fill={fillFor(value)} stroke="#FFFFFF" strokeWidth={0.18}><title>{`${rowLabels[rowIndex]} × ${columnLabels[columnIndex]}: ${formatTick(value)}`}</title></path>;
+      }))}
+      {columnAnnotations.map((track, trackIndex) => columnLabels.map((label, columnIndex) => { const start = -Math.PI / 2 + columnIndex * sector; return <path key={`${track.name}-${label}`} data-annotation-target="column" data-annotation-track={track.name} d={annularSectorPath(cx, cy, outerRadius + trackIndex * 5 + 1, outerRadius + (trackIndex + 1) * 5, start, start + sector)} fill={annotationTrackColor(track, track.values.get(label) ?? "", colors, sequential)} stroke="#FFFFFF" strokeWidth={0.2}><title>{`${track.name} · ${label}: ${track.values.get(label) || "missing"}`}</title></path>; }))}
+      {rowAnnotations.map((track, trackIndex) => rowLabels.map((label, rowIndex) => <path key={`${track.name}-${label}`} data-annotation-target="row" data-annotation-track={track.name} d={annularSectorPath(cx, cy, innerRadius + rowIndex * ringWidth, innerRadius + (rowIndex + 1) * ringWidth, -Math.PI / 2 - 0.055 * (trackIndex + 1), -Math.PI / 2 - 0.055 * trackIndex)} fill={annotationTrackColor(track, track.values.get(label) ?? "", colors, sequential)}><title>{`${track.name} · ${label}: ${track.values.get(label) || "missing"}`}</title></path>))}
+      {showColumnCut ? columnLabels.map((label, columnIndex) => { const sourceIndex = sourceColumnLabels.indexOf(label); const start = -Math.PI / 2 + columnIndex * sector; return <path key={`column-cut-${label}`} data-cluster-cut="column" d={annularSectorPath(cx, cy, outerRadius - 3, outerRadius, start, start + sector)} fill={categoricalColorForIndex(columnClusterAssignments[sourceIndex], colors)} />; }) : null}
+      {showRowCut ? rowLabels.map((label, rowIndex) => { const sourceIndex = sourceRowLabels.indexOf(label); return <path key={`row-cut-${label}`} data-cluster-cut="row" d={annularSectorPath(cx, cy, innerRadius + rowIndex * ringWidth, innerRadius + (rowIndex + 1) * ringWidth, -Math.PI / 2, -Math.PI / 2 + 0.05)} fill={categoricalColorForIndex(rowClusterAssignments[sourceIndex], colors)} />; }) : null}
+      {columnLabels.map((label, index) => { if (!columnLabelIndices.has(index)) return null; const angle = -Math.PI / 2 + (index + 0.5) * sector; const radius = outerRadius + columnAnnotations.length * 5 + 10; const x = cx + Math.cos(angle) * radius; const y = cy + Math.sin(angle) * radius; const flip = Math.cos(angle) < 0; const degrees = angle * 180 / Math.PI + (flip ? 180 : 0); return <text key={label} x={x} y={y} transform={`rotate(${degrees} ${x} ${y})`} textAnchor={flip ? "end" : "start"} dominantBaseline="middle" fill={TEXT} fontSize={settings.tickSize}>{label.slice(0, 12)}</text>; })}
+      {settings.heatmapLabelDensity !== "none" ? <><text x={4} y={frame.top + legendFontSize} fill={TEXT} fontSize={legendFontSize} fontWeight={700}>Rings · inner → outer</text>{rowLabels.map((label, index) => rowLabelIndices.has(index) ? <text key={`ring-${label}`} x={4} y={frame.top + legendFontSize * 2 + 4 + [...rowLabelIndices].indexOf(index) * (legendFontSize + 3)} fill={TEXT} fontSize={legendFontSize}>{`${index + 1} · ${label.slice(0, 11)}`}</text> : null)}</> : null}
+      <HeatmapColorLegend id={`heatmap-scale-${type}`} x={cx - 42} y={frame.top + frame.plotHeight - 17} width={48} minimum={colorMinimum} maximum={colorMaximum} diverging={diverging} sequential={sequential} useDiverging={useDiverging} label={colorScaleLabel} fontSize={legendFontSize} />
+      <HeatmapCutLegend x={frame.left} y={frame.top} rowClusters={showRowCut ? Math.min(rowCutCount, rowLabels.length) : 0} columnClusters={showColumnCut ? Math.min(columnCutCount, columnLabels.length) : 0} colors={colors} fontSize={legendFontSize} />
+      {(rowAnnotations.length > 0 || columnAnnotations.length > 0) ? <HeatmapAnnotationLegend id={`heatmap-annotations-${type}`} x={frame.left + frame.plotWidth + 10} y={frame.top} rowTracks={rowAnnotations} columnTracks={columnAnnotations} colors={colors} sequential={sequential} fontSize={legendFontSize} /> : null}
+      <circle cx={cx} cy={cy} r={outerRadius} fill="none" stroke={TEXT} strokeWidth={0.7} />
+    </g>;
   }
-  const max = type === "correlation-heatmap" ? 1 : Math.max(...matrix.flat().map(Math.abs), 1);
-  const cellWidth = frame.plotWidth / Math.max(1, columnLabels.length);
-  const cellHeight = frame.plotHeight / Math.max(1, rowLabels.length);
-  return <g>
-    {matrix.map((row, rowIndex) => row.map((value, columnIndex) => <rect key={`${rowIndex}-${columnIndex}`} x={frame.left + columnIndex * cellWidth} y={frame.top + rowIndex * cellHeight} width={cellWidth + 0.2} height={cellHeight + 0.2} fill={divergingColor(diverging[0], diverging[1], diverging[2], scaleLinear(value, [-max, max], [0, 1]))} />))}
-    {rowLabels.slice(0, Math.floor(frame.plotHeight / Math.max(10, settings.tickSize + 2))).map((label, index) => <text key={label} x={frame.left - 7} y={frame.top + (index + 0.68) * cellHeight} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{label.slice(0, 12)}</text>)}
-    {columnLabels.map((label, index) => <text key={label} x={frame.left + (index + 0.5) * cellWidth} y={frame.top + frame.plotHeight + 8} textAnchor="end" fill={TEXT} fontSize={settings.tickSize} transform={`rotate(-45 ${frame.left + (index + 0.5) * cellWidth} ${frame.top + frame.plotHeight + 8})`}>{label.slice(0, 12)}</text>)}
-    <rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} fill="none" stroke={TEXT} strokeWidth={0.8} />
+
+  const { rowTrackWidth, columnTrackHeight, rowDendrogramWidth, columnDendrogramHeight, sidePlotWidth, colorLegendHeight } = layout;
+  const matrixLeft = frame.left + rowDendrogramWidth + rowTrackWidth;
+  const matrixTop = frame.top + colorLegendHeight + columnDendrogramHeight + columnTrackHeight;
+  const matrixWidth = Math.max(1, layout.matrixWidth);
+  const matrixHeight = Math.max(1, layout.matrixHeight);
+  const cellWidth = matrixWidth / Math.max(1, columnLabels.length);
+  const cellHeight = matrixHeight / Math.max(1, rowLabels.length);
+  const rowLabelIndices = selectedLabelIndices(rowLabels.length, matrixHeight, settings.tickSize, settings.heatmapLabelDensity);
+  const columnLabelIndices = selectedLabelIndices(columnLabels.length, matrixWidth, settings.tickSize * 4, settings.heatmapLabelDensity);
+  const showValues = settings.heatmapShowValues && cellWidth >= 18 && cellHeight >= 12 && matrix.length * columnLabels.length <= 225;
+
+  const dendrogramSegments = (tree: HierarchicalClusterNode | null, orientation: "row" | "column") => {
+    if (!tree) return [] as ReactNode[];
+    const maxHeight = Math.max(tree.height, Number.EPSILON);
+    const originalOrder = orientation === "row" ? rowOrder : columnOrder;
+    const leafPosition = new Map(originalOrder.map((originalIndex, index) => [originalIndex, orientation === "row" ? matrixTop + (index + 0.5) * cellHeight : matrixLeft + (index + 0.5) * cellWidth]));
+    const segments: ReactNode[] = [];
+    const visit = (node: HierarchicalClusterNode): [number, number] => {
+      if (!node.left || !node.right) {
+        const position = leafPosition.get(node.members[0]) ?? 0;
+        return orientation === "row" ? [matrixLeft - rowTrackWidth, position] : [position, matrixTop - columnTrackHeight];
+      }
+      const left = visit(node.left); const right = visit(node.right);
+      if (orientation === "row") {
+        const x = matrixLeft - rowTrackWidth - node.height / maxHeight * rowDendrogramWidth;
+        segments.push(<path key={node.id} data-plot-element="dendrogram" data-dendrogram-axis="row" d={`M ${left[0]} ${left[1]} H ${x} V ${right[1]} H ${right[0]}`} fill="none" stroke={TEXT} strokeWidth={0.7} />);
+        return [x, (left[1] + right[1]) / 2];
+      }
+      const y = matrixTop - columnTrackHeight - node.height / maxHeight * columnDendrogramHeight;
+      segments.push(<path key={node.id} data-plot-element="dendrogram" data-dendrogram-axis="column" d={`M ${left[0]} ${left[1]} V ${y} H ${right[0]} V ${right[1]}`} fill="none" stroke={TEXT} strokeWidth={0.7} />);
+      return [(left[0] + right[0]) / 2, y];
+    };
+    visit(tree);
+    return segments;
+  };
+
+  const rowSummaries = sidePlotMatrix.map((row) => {
+    const average = row.reduce((sum, value) => sum + value, 0) / Math.max(1, row.length);
+    if (settings.heatmapSidePlotStatistic === "sd") return Math.sqrt(row.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, row.length - 1));
+    if (settings.heatmapSidePlotStatistic === "range") return Math.max(...row) - Math.min(...row);
+    return average;
+  });
+  const summaryExtent = [Math.min(0, ...rowSummaries), Math.max(0, ...rowSummaries)] as [number, number];
+  const safeSummaryExtent: [number, number] = summaryExtent[0] === summaryExtent[1] ? [summaryExtent[0], summaryExtent[0] + 1] : summaryExtent;
+  const sideZero = scaleLinear(0, safeSummaryExtent, [matrixLeft + matrixWidth + 4, matrixLeft + matrixWidth + sidePlotWidth - 4]);
+  return <g data-plot-data data-plot-family="rectangular-heatmap">
+    <HeatmapColorLegend id={`heatmap-scale-${type}`} x={matrixLeft} y={frame.top} width={Math.max(28, Math.min(64, matrixWidth - 36))} minimum={colorMinimum} maximum={colorMaximum} diverging={diverging} sequential={sequential} useDiverging={useDiverging} label={colorScaleLabel} fontSize={legendFontSize} />
+    <HeatmapCutLegend x={matrixLeft} y={frame.top + 17} rowClusters={showRowCut ? Math.min(rowCutCount, rowLabels.length) : 0} columnClusters={showColumnCut ? Math.min(columnCutCount, columnLabels.length) : 0} colors={colors} fontSize={legendFontSize} />
+    {(rowAnnotations.length > 0 || columnAnnotations.length > 0) ? <HeatmapAnnotationLegend id={`heatmap-annotations-${type}`} x={frame.left + frame.plotWidth + 10} y={frame.top} rowTracks={rowAnnotations} columnTracks={columnAnnotations} colors={colors} sequential={sequential} fontSize={legendFontSize} /> : null}
+    {dendrogramSegments(displayedRowTree, "row")}
+    {dendrogramSegments(displayedColumnTree, "column")}
+    {matrix.map((row, rowIndex) => row.map((value, columnIndex) => visibleCell(rowIndex, columnIndex) ? <g key={`${rowIndex}-${columnIndex}`}><rect data-plot-element="heatmap-cell" x={matrixLeft + columnIndex * cellWidth} y={matrixTop + rowIndex * cellHeight} width={cellWidth + 0.2} height={cellHeight + 0.2} fill={fillFor(value)}><title>{`${rowLabels[rowIndex]} × ${columnLabels[columnIndex]}: ${formatTick(value)}`}</title></rect>{showValues ? <text x={matrixLeft + (columnIndex + 0.5) * cellWidth} y={matrixTop + (rowIndex + 0.5) * cellHeight + settings.tickSize * 0.32} textAnchor="middle" fill={TEXT} fontSize={Math.min(settings.tickSize, cellHeight * 0.62)}>{formatTick(value)}</text> : null}</g> : null))}
+    {rowAnnotations.map((track, trackIndex) => rowLabels.map((label, rowIndex) => <rect key={`${track.name}-${label}`} data-annotation-target="row" data-annotation-track={track.name} x={matrixLeft - 6 * (trackIndex + 1)} y={matrixTop + rowIndex * cellHeight} width={5.5} height={cellHeight + 0.15} fill={annotationTrackColor(track, track.values.get(label) ?? "", colors, sequential)}><title>{`${track.name} · ${label}: ${track.values.get(label) || "missing"}`}</title></rect>))}
+    {columnAnnotations.map((track, trackIndex) => columnLabels.map((label, columnIndex) => <rect key={`${track.name}-${label}`} data-annotation-target="column" data-annotation-track={track.name} x={matrixLeft + columnIndex * cellWidth} y={matrixTop - 6 * (trackIndex + 1)} width={cellWidth + 0.15} height={5.5} fill={annotationTrackColor(track, track.values.get(label) ?? "", colors, sequential)}><title>{`${track.name} · ${label}: ${track.values.get(label) || "missing"}`}</title></rect>))}
+    {showRowCut ? rowLabels.map((label, rowIndex) => { const originalIndex = sourceRowLabels.indexOf(label); return <rect key={`row-cut-${label}`} data-cluster-cut="row" x={matrixLeft - rowTrackWidth} y={matrixTop + rowIndex * cellHeight} width={5.5} height={cellHeight + 0.15} fill={categoricalColorForIndex(rowClusterAssignments[originalIndex], colors)} />; }) : null}
+    {showColumnCut ? columnLabels.map((label, columnIndex) => { const originalIndex = sourceColumnLabels.indexOf(label); return <rect key={`column-cut-${label}`} data-cluster-cut="column" x={matrixLeft + columnIndex * cellWidth} y={matrixTop - columnTrackHeight} width={cellWidth + 0.15} height={5.5} fill={categoricalColorForIndex(columnClusterAssignments[originalIndex], colors)} />; }) : null}
+    {rowLabels.map((label, index) => rowLabelIndices.has(index) ? <text key={label} x={frame.left - 6} y={matrixTop + (index + 0.68) * cellHeight} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{label.slice(0, 12)}</text> : null)}
+    {columnLabels.map((label, index) => columnLabelIndices.has(index) ? <text key={label} x={matrixLeft + (index + 0.5) * cellWidth} y={matrixTop + matrixHeight + 8} textAnchor="end" fill={TEXT} fontSize={settings.tickSize} transform={`rotate(-45 ${matrixLeft + (index + 0.5) * cellWidth} ${matrixTop + matrixHeight + 8})`}>{label.slice(0, 12)}</text> : null)}
+    {settings.heatmapShowSidePlot ? <g data-plot-element="heatmap-side-plot"><line x1={sideZero} x2={sideZero} y1={matrixTop} y2={matrixTop + matrixHeight} stroke={TEXT} strokeWidth={0.7} />{rowSummaries.map((value, rowIndex) => { const x = scaleLinear(value, safeSummaryExtent, [matrixLeft + matrixWidth + 4, matrixLeft + matrixWidth + sidePlotWidth - 4]); return <rect key={rowLabels[rowIndex]} x={Math.min(x, sideZero)} y={matrixTop + rowIndex * cellHeight + cellHeight * 0.2} width={Math.max(0.7, Math.abs(x - sideZero))} height={Math.max(0.7, cellHeight * 0.6)} fill={colors[0]} fillOpacity={0.78}><title>{`${settings.heatmapSidePlotStatistic}: ${formatTick(value)}`}</title></rect>; })}<text x={matrixLeft + matrixWidth + sidePlotWidth / 2} y={matrixTop - 5} textAnchor="middle" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 2)}>{settings.heatmapSidePlotStatistic.toUpperCase()}</text></g> : null}
+    <rect x={matrixLeft} y={matrixTop} width={matrixWidth} height={matrixHeight} fill="none" stroke={TEXT} strokeWidth={0.8} />
   </g>;
 }
 
@@ -757,7 +975,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "area") content = <AreaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "lollipop") content = <LollipopPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) content = <DistributionPlot type={type as DistributionPlotType} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
-  else if (type === "clustered-heatmap" || type === "correlation-heatmap") content = <MatrixPlot type={type} frame={frame} dataset={dataset} settings={settings} diverging={diverging} />;
+  else if (type === "heatmap" || type === "clustered-heatmap" || type === "correlation-heatmap") content = <MatrixPlot type={type} frame={frame} dataset={dataset} settings={settings} diverging={diverging} sequential={sequential} colors={colors} />;
   else if (type === "enrichment-bar") content = <EnrichmentBar frame={frame} dataset={dataset} mapping={mapping} settings={settings} sequential={sequential} gridColor={theme.grid} />;
   else if (type === "gsea") content = <GseaPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "km") content = <KmPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
@@ -777,7 +995,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   return <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${frame.width} ${frame.height}`} width={frame.width} height={frame.height} role="img" data-plot-renderer="advanced" data-chart-text-color={TEXT} aria-label={`${definition.name} scientific figure preview`} style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}>
     <title>{settings.title || `${definition.name} figure`}</title><desc>{definition.summary} Generated in LabNest Visualization Studio.</desc><rect width={frame.width} height={frame.height} fill="#FFFFFF" />
     <defs><clipPath id={`plot-area-${type}`}><rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} /></clipPath></defs>
-    <style>{`[data-plot-data] path,[data-plot-data] circle,[data-plot-data] rect,[data-plot-data] line,[data-plot-data] polyline,[data-plot-data] polygon,[data-plot-data] text[data-plot-label]{clip-path:url(#plot-area-${type})}`}</style>
+    <style>{`[data-plot-data] path:not([data-no-clip]),[data-plot-data] circle:not([data-no-clip]),[data-plot-data] rect:not([data-no-clip]),[data-plot-data] line:not([data-no-clip]),[data-plot-data] polyline:not([data-no-clip]),[data-plot-data] polygon:not([data-no-clip]),[data-plot-data] text[data-plot-label]{clip-path:url(#plot-area-${type})}`}</style>
     {settings.title ? <text x={frame.left} y={24} fill={TEXT} fontSize={settings.titleSize} fontWeight={700}>{settings.title}</text> : null}
     {content}
   </svg>;

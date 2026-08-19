@@ -231,7 +231,7 @@ function uniqueColumnValues(rows: Array<Record<string, string>>, column: string 
 function categoricalColorLabels(plotType: PlotType, rows: Array<Record<string, string>>, mapping: Record<string, string>) {
   if (plotType === "bar") return uniqueColumnValues(rows, mapping.group, "Value");
   if (plotType === "line" || plotType === "area") return uniqueColumnValues(rows, mapping.series, "All");
-  if (["scatter", "correlation", "quadrant", "pca", "pcoa", "umap", "errorbar", "lollipop", "km", "survival-forest", "roc"].includes(plotType)) return uniqueColumnValues(rows, mapping.group, "All");
+  if (["scatter", "correlation", "quadrant", "pca", "pcoa", "umap", "tsne", "nmds", "errorbar", "lollipop", "km", "survival-forest", "roc"].includes(plotType)) return uniqueColumnValues(rows, mapping.group, "All");
   if (distributionPlotTypes.includes(plotType)) return uniqueColumnValues(rows, mapping.group, "All");
   if (plotType === "volcano" || plotType === "ma") return ["Down", "Up", "Not significant"];
   if (plotType === "gsea") return ["Running ES", "Gene-set hits"];
@@ -425,6 +425,7 @@ export function VisualizationStudio() {
   const [paletteSeriesId, setPaletteSeriesId] = useState<PaletteSeriesId>(defaultVisualizationPaletteSeriesId);
   const [settings, setSettings] = useState<VisualizationSettings>(() => settingsForTheme(defaultVisualizationThemeId));
   const [pcaOptions, setPcaOptions] = useState<PcaOptions>(defaultPcaOptions);
+  const [pcaObservationMetadata, setPcaObservationMetadata] = useState("");
   const [customPalettes, setCustomPalettes] = useState<CustomPalette[]>([]);
   const [selectedCustomPaletteId, setSelectedCustomPaletteId] = useState("");
   const [customPaletteName, setCustomPaletteName] = useState("");
@@ -491,7 +492,7 @@ export function VisualizationStudio() {
   const manualAxes = activeNumericAxes(plotType, settings);
   const invalidXLimits = manualAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
-  const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions) : null, [plotType, rawData, pcaOptions]);
+  const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, rawData, pcaObservationMetadata, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
   const barBreakRange = useMemo(() => {
     if (plotType !== "bar" || !mapping.value) return { minimum: -100, maximum: 100, step: 0.5 };
@@ -525,10 +526,13 @@ export function VisualizationStudio() {
   const hasUnsavedColorChanges = currentColorFingerprint !== selectedPaletteFingerprint;
   const previewSettings = useMemo(() => {
     if (!pcaAnalysis) return settings;
+    if (settings.ordinationView === "scree") return settings;
+    const displayedX = settings.swapAxes ? mapping.y : mapping.x;
+    const displayedY = settings.swapAxes ? mapping.x : mapping.y;
     return {
       ...settings,
-      xLabel: settings.xLabel || pcaAxisLabel(mapping.x, pcaAnalysis.explainedVariance),
-      yLabel: settings.yLabel || pcaAxisLabel(mapping.y, pcaAnalysis.explainedVariance),
+      xLabel: settings.xLabel || pcaAxisLabel(displayedX, pcaAnalysis.explainedVariance),
+      yLabel: settings.yLabel || pcaAxisLabel(displayedY, pcaAnalysis.explainedVariance),
     };
   }, [mapping.x, mapping.y, pcaAnalysis, settings]);
 
@@ -551,6 +555,7 @@ export function VisualizationStudio() {
     if (!example) return;
     setSelectedExampleIndex(exampleIndex);
     setRawData(example.data);
+    setPcaObservationMetadata(example.metadata ?? "");
     setMapping(example.mapping ?? definition.defaultMapping);
     setLoadedFileName("");
     setFileError("");
@@ -565,6 +570,7 @@ export function VisualizationStudio() {
     setPlotType(nextType);
     setSelectedExampleIndex(0);
     setRawData(nextExample.data);
+    setPcaObservationMetadata(nextExample.metadata ?? "");
     setMapping(nextExample.mapping ?? next.defaultMapping);
     setLoadedFileName("");
     setFileError("");
@@ -575,6 +581,7 @@ export function VisualizationStudio() {
       xLabel: "",
       yLabel: "",
       swapAxes: false,
+      ordinationView: (["pca", "pcoa", "umap", "tsne", "nmds"] as PlotType[]).includes(nextType) ? "scores" : current.ordinationView,
       clusterColumns: nextType === "correlation-heatmap" ? current.clusterRows : current.clusterColumns,
       heatmapColumnClusters: nextType === "correlation-heatmap" ? current.heatmapRowClusters : current.heatmapColumnClusters,
       compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
@@ -698,7 +705,7 @@ export function VisualizationStudio() {
       setRawData(text);
       setSelectedExampleIndex(-1);
       setLoadedFileName(file.name);
-      if (plotType === "pca") setMapping(definition.defaultMapping);
+      if (plotType === "pca") { setPcaObservationMetadata(""); setMapping(definition.defaultMapping); }
       else setMapping(inferPlotMapping(definition, parseDelimitedData(text).headers));
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "The selected file could not be read.");
@@ -709,6 +716,12 @@ export function VisualizationStudio() {
   const downloadInputTemplate = () => {
     const example = dataExamples[selectedExampleIndex >= 0 ? selectedExampleIndex : 0] ?? dataExamples[0];
     downloadBlob(new Blob([example.data], { type: "text/tab-separated-values;charset=utf-8" }), `${slug(definition.name)}-${slug(example.label)}-template.tsv`);
+  };
+
+  const downloadPcaMetadataTemplate = () => {
+    const example = dataExamples[selectedExampleIndex >= 0 ? selectedExampleIndex : 0] ?? dataExamples[0];
+    const metadata = example.metadata ?? "sample\tgroup\tbatch\tlabel\nSample_1\tControl\tBatch 1\tS1";
+    downloadBlob(new Blob([metadata], { type: "text/tab-separated-values;charset=utf-8" }), `${slug(definition.name)}-observation-metadata-template.tsv`);
   };
 
   const exportSvg = () => {
@@ -757,9 +770,12 @@ export function VisualizationStudio() {
         detectedLayer: pcaAnalysis.detectedLayer,
         sampleColumns: pcaAnalysis.sampleColumns,
         featuresRead: pcaAnalysis.featuresRead,
+        featuresComplete: pcaAnalysis.featuresComplete,
+        featuresVariable: pcaAnalysis.featuresVariable,
         featuresUsed: pcaAnalysis.featuresUsed,
         explainedVariance: pcaAnalysis.explainedVariance,
         transformation: pcaAnalysis.transformation,
+        observationMetadata: pcaObservationMetadata,
       } : undefined,
       data: rawData,
     };
@@ -905,6 +921,7 @@ export function VisualizationStudio() {
                     <pre className="mt-3 max-h-40 overflow-hidden whitespace-pre-wrap font-mono text-[10px] leading-4 text-graphite">{rawData.slice(0, 8_000)}</pre>
                   </div>
                 ) : <textarea aria-label={plotType === "pca" ? "Feature matrix" : "CSV or TSV data"} value={rawData} onChange={(event) => { setRawData(event.target.value); setSelectedExampleIndex(-1); setLoadedFileName(""); }} spellCheck={false} className="focus-ring min-h-44 resize-y rounded-[8px] border border-hairline bg-[#FBFBF9] p-3 font-mono text-[11px] leading-5 text-ink" />}
+                {plotType === "pca" ? <div className="grid gap-1.5"><span className="flex items-center justify-between gap-2"><label htmlFor="pca-observation-metadata">Observation metadata <span className="font-normal text-muted">(optional; exact sample-ID join)</span></label><button type="button" onClick={downloadPcaMetadataTemplate} className="focus-ring rounded px-1.5 py-1 text-[11px] font-medium text-moss hover:bg-sage-surface">Metadata template</button></span><textarea id="pca-observation-metadata" aria-label="PCA observation metadata" value={pcaObservationMetadata} onChange={(event) => { setPcaObservationMetadata(event.target.value); setSelectedExampleIndex(-1); }} spellCheck={false} placeholder={'sample\tgroup\tbatch\tlabel\nSample_1\tControl\tBatch 1\tS1'} className="focus-ring min-h-28 resize-y rounded-[8px] border border-hairline bg-[#FBFBF9] p-3 font-mono text-[11px] leading-5 text-ink" /><span className="text-[11px] leading-4 text-muted">The first column must match matrix observation names after removing _count, _counts, _tpm, or _fpkm. Duplicate or missing IDs block export.</span></div> : null}
                 {fileError ? <span className="text-error">{fileError}</span> : null}
               </div>
               <div className="space-y-2.5">
@@ -917,7 +934,7 @@ export function VisualizationStudio() {
                 </div>
                 {plotType === "pca" && pcaAnalysis ? <>
                   <SelectControl label="Data layer" value={pcaOptions.dataLayer} onChange={(value) => setPcaOptions((current) => ({ ...current, dataLayer: value as PcaDataLayer }))}>
-                    <option value="auto">Auto-detect (recommended)</option>
+                    <option value="auto">Auto by explicit suffix; otherwise normalized</option>
                     <option value="counts">Count matrix → log₂(CPM + 1)</option>
                     <option value="abundance">Non-negative abundance → log₂(x + 1)</option>
                     <option value="normalized">Continuous / already normalized</option>
@@ -932,10 +949,16 @@ export function VisualizationStudio() {
                   <SelectControl label="Y component" value={mapping.y} onChange={(value) => setMapping((current) => ({ ...current, y: value }))}>
                     {dataset.headers.filter((header) => /^PC\d+$/.test(header)).map((header) => <option key={header} value={header}>{pcaAxisLabel(header, pcaAnalysis.explainedVariance)}</option>)}
                   </SelectControl>
+                  {settings.ordinationView === "3d" ? <SelectControl label="Z component" value={mapping.z} onChange={(value) => setMapping((current) => ({ ...current, z: value }))}>
+                    {dataset.headers.filter((header) => /^PC\d+$/.test(header)).map((header) => <option key={header} value={header}>{pcaAxisLabel(header, pcaAnalysis.explainedVariance)}</option>)}
+                  </SelectControl> : null}
+                  <SelectControl label="Color group" value={mapping.group} onChange={(value) => setMapping((current) => ({ ...current, group: value }))}><option value="">None</option>{dataset.headers.map((header) => <option key={header} value={header}>{header}</option>)}</SelectControl>
+                  <SelectControl label="Shape group" value={mapping.shape} onChange={(value) => setMapping((current) => ({ ...current, shape: value }))}><option value="">None</option>{dataset.headers.map((header) => <option key={header} value={header}>{header}</option>)}</SelectControl>
+                  <SelectControl label="Observation label" value={mapping.label} onChange={(value) => setMapping((current) => ({ ...current, label: value }))}><option value="">None</option>{dataset.headers.map((header) => <option key={header} value={header}>{header}</option>)}</SelectControl>
                   <div className="rounded-[8px] border border-hairline px-3 py-2 text-[11px] leading-5 text-muted">
-                    <p>{pcaAnalysis.sampleColumns.length} observations · {pcaAnalysis.featuresUsed.toLocaleString()} / {pcaAnalysis.featuresRead.toLocaleString()} features used</p>
+                    <p>{pcaAnalysis.sampleColumns.length} observations · {pcaAnalysis.featuresUsed.toLocaleString()} used / {pcaAnalysis.featuresVariable.toLocaleString()} variable / {pcaAnalysis.featuresComplete.toLocaleString()} complete / {pcaAnalysis.featuresRead.toLocaleString()} input features</p>
                     <p>{pcaAnalysis.transformation || "Waiting for a valid feature matrix."}</p>
-                    <p>{pcaAnalysis.groups.length} inferred group{pcaAnalysis.groups.length === 1 ? "" : "s"}: {pcaAnalysis.groups.join(" · ") || "—"}</p>
+                    <p>{pcaAnalysis.groups.length} displayed group{pcaAnalysis.groups.length === 1 ? "" : "s"}: {pcaAnalysis.groups.join(" · ") || "—"}{pcaObservationMetadata.trim() ? " · exact-ID metadata" : " · inferred from delimited replicate suffixes"}</p>
                     {pcaAnalysis.availableLayers.length > 1 ? <p>Detected layers: {pcaAnalysis.availableLayers.map((layer) => `${layer.label} (${layer.columns})`).join(" · ")}</p> : null}
                   </div>
                 </> : visibleRoles.length === 0 ? <p className="rounded-[8px] bg-stone px-3 py-2 text-xs leading-5 text-graphite">The first column supplies row labels; all remaining columns form the numeric matrix.</p> : visibleRoles.map((role) => (
@@ -993,9 +1016,9 @@ export function VisualizationStudio() {
               {hasSetting("opacity") ? <RangeControl label="Opacity" value={settings.opacity} minimum={0.25} maximum={1} step={0.05} onChange={(value) => updateSetting("opacity", value)} /> : null}
               {hasSetting("grid") ? <SelectControl label="Grid" value={settings.grid} onChange={(value) => updateSetting("grid", value as VisualizationSettings["grid"])}><option value="none">None</option><option value="y">Horizontal only</option><option value="both">Both axes</option></SelectControl> : null}
               {hasSetting("legendPosition") && !((plotType === "scatter" || plotType === "correlation") && ["density", "hexbin"].includes(settings.associationVariant)) ? <SelectControl label="Legend" value={settings.legendPosition} onChange={(value) => updateSetting("legendPosition", value as VisualizationSettings["legendPosition"])}><option value="right">Right</option>{plotType !== "enrichment" && plotType !== "enrichment-bar" ? <option value="bottom">Bottom</option> : null}<option value="none">Hidden</option></SelectControl> : null}
-              {(plotType === "line" || plotType === "pca" || ((plotType === "scatter" || plotType === "correlation") && !["pair-matrix", "3d", "ternary"].includes(settings.associationVariant)) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant))) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
+              {(plotType === "line" || (plotType === "pca" && settings.ordinationView === "scores") || ((plotType === "scatter" || plotType === "correlation") && !["pair-matrix", "3d", "ternary"].includes(settings.associationVariant)) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant))) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
               {(plotType === "scatter" || plotType === "correlation") && ["points", "marginal", "ellipse", "hull"].includes(settings.associationVariant) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
-              {(["pca", "pcoa", "umap", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
+              {(["pca", "pcoa", "umap", "tsne", "nmds", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
             </ControlGroup> : null}
 
             {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} uncertainty`}>
@@ -1050,6 +1073,24 @@ export function VisualizationStudio() {
               <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Pearson tests linear association; Spearman tests monotonic rank association. Reported P values use a two-sided t approximation and do not adjust for multiple testing. Confidence ribbons are mean-response intervals for linear fits, not prediction intervals. Ternary rows are normalized to proportions. The 3D view independently min–max scales X, Y, and Z before a fixed-size orthographic projection; it preserves order, not cross-axis units or perspective.</p>
             </ControlGroup> : null}
             {plotType === "correlation-heatmap" ? <ControlGroup title="Correlation"><SelectControl label="Method" value={settings.correlationMethod} onChange={(value) => updateSetting("correlationMethod", value as VisualizationSettings["correlationMethod"])}><option value="pearson">Pearson</option><option value="spearman">Spearman</option></SelectControl><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Each matrix cell is calculated from paired complete observations. This view reports coefficients, not inferential P values.</p></ControlGroup> : null}
+            {(["pca", "pcoa", "umap", "tsne", "nmds"] as PlotType[]).includes(plotType) ? <>
+              <ControlGroup title="Ordination view">
+                <SelectControl label="View" value={settings.ordinationView} onChange={(value) => updateSetting("ordinationView", value as VisualizationSettings["ordinationView"])}><option value="scores">Scores / coordinates</option>{plotType === "pca" ? <option value="scree">Scree plot</option> : null}<option value="3d">Orthographic 3D projection</option></SelectControl>
+                {settings.ordinationView === "scores" ? <><ToggleControl label="Group covariance ellipses" checked={settings.ordinationShowEllipse} onChange={(value) => updateSetting("ordinationShowEllipse", value)} /><ToggleControl label="Group convex hulls" checked={settings.ordinationShowHull} onChange={(value) => updateSetting("ordinationShowHull", value)} /><ToggleControl label="Group centroids" checked={settings.ordinationShowCentroids} onChange={(value) => updateSetting("ordinationShowCentroids", value)} />{plotType === "pca" ? <><ToggleControl label="Feature loading arrows" checked={settings.ordinationShowLoadings} onChange={(value) => updateSetting("ordinationShowLoadings", value)} />{settings.ordinationShowLoadings ? <RangeControl label="Loading labels" value={settings.ordinationLoadingCount} minimum={1} maximum={30} step={1} onChange={(value) => updateSetting("ordinationLoadingCount", value)} /> : null}</> : null}</> : settings.ordinationView === "3d" ? <ToggleControl label="Group centroids" checked={settings.ordinationShowCentroids} onChange={(value) => updateSetting("ordinationShowCentroids", value)} /> : null}
+                {settings.ordinationView !== "scree" ? <ToggleControl label="Use mapped shapes" checked={settings.ordinationUseShapes} onChange={(value) => updateSetting("ordinationUseShapes", value)} /> : null}
+              <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Ellipses summarize within-group covariance; hulls only enclose observed extremes. Neither is a confidence region. The 3D view independently min–max scales each axis before a fixed orthographic projection, so cross-axis distances, angles, and apparent separation are not quantitative; manual 2D limits do not apply.</p>
+              </ControlGroup>
+              {settings.ordinationView !== "scree" ? <><ControlGroup title={plotType === "pca" ? "Analysis note" : "Upstream method"}>
+                {plotType === "pcoa" ? <div className="grid grid-cols-2 gap-2"><OptionalNumberControl label="PCoA 1 variance (%)" value={settings.ordinationXVariance} onChange={(value) => updateSetting("ordinationXVariance", value)} /><OptionalNumberControl label="PCoA 2 variance (%)" value={settings.ordinationYVariance} onChange={(value) => updateSetting("ordinationYVariance", value)} /><OptionalNumberControl label="PCoA 3 variance (%)" value={settings.ordinationZVariance} onChange={(value) => updateSetting("ordinationZVariance", value)} /></div> : null}
+                {plotType === "nmds" ? <OptionalNumberControl label="Supplied stress" value={settings.ordinationStress} onChange={(value) => updateSetting("ordinationStress", value)} /> : null}
+                <TextControl label="Method note" value={settings.ordinationMethodNote} onChange={(value) => updateSetting("ordinationMethodNote", value)} placeholder={plotType === "pca" ? "PERMANOVA formula, distance, strata, and permutation scheme" : plotType === "umap" ? "seed=42; n_neighbors=15; min_dist=0.1; metric=cosine" : plotType === "tsne" ? "seed=42; perplexity=30; iterations=1000" : plotType === "nmds" ? "Bray–Curtis; k=2; 50 starts; converged" : "Bray–Curtis distance; correction=none"} />
+              </ControlGroup>
+              <ControlGroup title="Supplied PERMANOVA">
+                <div className="grid grid-cols-2 gap-2"><OptionalNumberControl label="R²" value={settings.ordinationPermanovaR2} onChange={(value) => updateSetting("ordinationPermanovaR2", value)} /><OptionalNumberControl label="P value" value={settings.ordinationPermanovaP} onChange={(value) => updateSetting("ordinationPermanovaP", value)} /><OptionalNumberControl label="Permutations" value={settings.ordinationPermanovaPermutations} onChange={(value) => updateSetting("ordinationPermanovaPermutations", value)} /></div>
+                <p className="text-[11px] leading-4 text-muted">These values are displayed exactly as supplied and are never inferred from the plotted coordinates. Report the upstream distance, grouping formula, strata/blocking, and permutation scheme in the method note.</p>
+              </ControlGroup>
+              </> : null}
+            </> : null}
             {plotType === "quadrant" ? <ControlGroup title="Quadrant thresholds"><RangeControl label="X threshold" value={settings.xThreshold} minimum={-10} maximum={10} step={0.1} onChange={(value) => updateSetting("xThreshold", value)} /><RangeControl label="Y threshold" value={settings.yThreshold} minimum={-10} maximum={10} step={0.1} onChange={(value) => updateSetting("yThreshold", value)} /></ControlGroup> : null}
             {plotType === "errorbar" ? <ControlGroup title="Error bars"><RangeControl label="Error line" value={settings.errorBarLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("errorBarLineWidth", value)} /><RangeControl label="Cap width" value={settings.errorBarCapSize} minimum={4} maximum={30} step={1} unit=" px" onChange={(value) => updateSetting("errorBarCapSize", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The mapped error column must already contain SD or SEM. Record which statistic you used in the title, axis, caption, or exported config.</p></ControlGroup> : null}
             {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) ? <>

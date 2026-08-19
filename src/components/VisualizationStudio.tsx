@@ -219,6 +219,14 @@ function categoricalColorLabels(plotType: PlotType, rows: Array<Record<string, s
   if (plotType === "venn" || plotType === "upset") return uniqueColumnValues(rows, mapping.set, "Set");
   if (plotType === "sankey" || plotType === "chord") return [...new Set(rows.flatMap((row) => [row[mapping.source], row[mapping.target]]).filter(Boolean))];
   if (plotType === "circos") return [...new Set(rows.flatMap((row) => [row[mapping.sourceChr], row[mapping.targetChr]]).filter(Boolean))];
+  if (["pie", "donut", "rose", "waffle"].includes(plotType)) return uniqueColumnValues(rows, mapping.category, "Part");
+  if (plotType === "treemap" || plotType === "sunburst") {
+    const root = rows.find((row) => !mapping.parent || !row[mapping.parent]?.trim())?.[mapping.node];
+    const topLevel = root && mapping.parent ? rows.filter((row) => row[mapping.parent] === root).map((row) => row[mapping.node]).filter(Boolean) : [];
+    return [...new Set(topLevel.length > 0 ? topLevel : ["Node"])].slice(0, 12);
+  }
+  if (plotType === "radar" || plotType === "polar-profile") return uniqueColumnValues(rows, mapping.series, "All");
+  if (plotType === "population-pyramid") return uniqueColumnValues(rows, mapping.group, "Group");
   return [];
 }
 
@@ -441,6 +449,7 @@ export function VisualizationStudio() {
   const definition = plotModule.definition;
   const dataExamples = plotModule.examples;
   const guidance = plotModule.guidance;
+  const hasSetting = (key: keyof VisualizationSettings) => plotModule.capabilities.settingKeys.includes(key);
   const visibleRoles = definition.roles.filter((role) => isPlotRoleActive(plotType, role.key, settings));
   const manualAxes = activeNumericAxes(plotType, settings);
   const invalidXLimits = manualAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
@@ -529,6 +538,7 @@ export function VisualizationStudio() {
       xLabel: "",
       yLabel: "",
       swapAxes: false,
+      compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
       legendPosition: (["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment", "enrichment-bar", "venn", "upset", "sankey", "chord", "circos"] as PlotType[]).includes(nextType) && current.legendPosition === "bottom" ? "right" : current.legendPosition,
     }));
     window.requestAnimationFrame(() => {
@@ -894,12 +904,15 @@ export function VisualizationStudio() {
 
         <div className="flex min-h-0 flex-col gap-[var(--ln-vis-panel-gap)] overflow-hidden xl:sticky xl:top-[var(--visualization-panel-top)] xl:h-[var(--visualization-panel-height)]">
           <Card className="min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col">
-            <CardHeader className="h-12 shrink-0" title="Figure parameters" action={<Button size="sm" variant="ghost" onClick={() => setSettings(settingsForTheme(themeId))}><RotateCcw className="h-3.5 w-3.5" aria-hidden />Reset</Button>} />
+            <CardHeader className="h-12 shrink-0" title="Figure parameters" action={<Button size="sm" variant="ghost" onClick={() => {
+              const resetSettings = settingsForTheme(themeId);
+              setSettings(plotType === "rose" ? { ...resetSettings, compositionLabelMode: "value" } : resetSettings);
+            }}><RotateCcw className="h-3.5 w-3.5" aria-hidden />Reset</Button>} />
             <CardBody className="space-y-4 p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
               <ControlGroup title="Labels">
                 <TextControl label="Title" value={settings.title} onChange={(value) => updateSetting("title", value)} placeholder={`${definition.name} title`} />
-              <TextControl label="X-axis label" value={settings.xLabel} onChange={(value) => updateSetting("xLabel", value)} />
-              <TextControl label="Y-axis label" value={settings.yLabel} onChange={(value) => updateSetting("yLabel", value)} />
+              {hasSetting("xLabel") ? <TextControl label="X-axis label" value={settings.xLabel} onChange={(value) => updateSetting("xLabel", value)} /> : null}
+              {hasSetting("yLabel") ? <TextControl label="Y-axis label" value={settings.yLabel} onChange={(value) => updateSetting("yLabel", value)} /> : null}
               {manualAxes.length > 0 ? (
                 <div className="grid grid-cols-2 gap-2">
                   {manualAxes.includes("x") ? <><OptionalNumberControl label="X minimum" value={settings.xMin} invalid={invalidXLimits} describedBy="x-axis-limit-error" onChange={(value) => updateSetting("xMin", value)} /><OptionalNumberControl label="X maximum" value={settings.xMax} invalid={invalidXLimits} describedBy="x-axis-limit-error" onChange={(value) => updateSetting("xMax", value)} /></> : null}
@@ -915,24 +928,24 @@ export function VisualizationStudio() {
               <RangeControl label="Width" value={settings.width} minimum={300} maximum={1600} step={10} unit=" px" onChange={(value) => updateSetting("width", value)} />
               <RangeControl label="Height" value={settings.height} minimum={280} maximum={1200} step={10} unit=" px" onChange={(value) => updateSetting("height", value)} />
               <RangeControl label="Title size" value={settings.titleSize} minimum={13} maximum={26} unit=" pt" onChange={(value) => updateSetting("titleSize", value)} />
-              <RangeControl label="Axis label size" value={settings.axisLabelSize} minimum={10} maximum={20} unit=" pt" onChange={(value) => updateSetting("axisLabelSize", value)} />
-              <RangeControl label="Tick size" value={settings.tickSize} minimum={9} maximum={16} unit=" pt" onChange={(value) => updateSetting("tickSize", value)} />
-              <RangeControl label="Legend size" value={settings.legendSize} minimum={9} maximum={16} unit=" pt" onChange={(value) => updateSetting("legendSize", value)} />
+              {hasSetting("axisLabelSize") ? <RangeControl label="Axis label size" value={settings.axisLabelSize} minimum={10} maximum={20} unit=" pt" onChange={(value) => updateSetting("axisLabelSize", value)} /> : null}
+              {hasSetting("tickSize") ? <RangeControl label="Tick size" value={settings.tickSize} minimum={9} maximum={16} unit=" pt" onChange={(value) => updateSetting("tickSize", value)} /> : null}
+              {hasSetting("legendSize") ? <RangeControl label="Legend size" value={settings.legendSize} minimum={9} maximum={16} unit=" pt" onChange={(value) => updateSetting("legendSize", value)} /> : null}
             </ControlGroup>
 
-            <ControlGroup title="Marks & axes">
-              <RangeControl label="Axis line" value={settings.axisLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("axisLineWidth", value)} />
-              <RangeControl label="Grid line" value={settings.gridLineWidth} minimum={0.4} maximum={2} step={0.1} unit=" px" onChange={(value) => updateSetting("gridLineWidth", value)} />
-              <RangeControl label="Data line" value={settings.dataLineWidth} minimum={1} maximum={5} step={0.1} unit=" px" onChange={(value) => updateSetting("dataLineWidth", value)} />
-              <RangeControl label="Point size" value={settings.pointSize} minimum={2} maximum={12} step={0.5} unit=" px" onChange={(value) => updateSetting("pointSize", value)} />
-              <RangeControl label="Opacity" value={settings.opacity} minimum={0.25} maximum={1} step={0.05} onChange={(value) => updateSetting("opacity", value)} />
-              <SelectControl label="Grid" value={settings.grid} onChange={(value) => updateSetting("grid", value as VisualizationSettings["grid"])}><option value="none">None</option><option value="y">Horizontal only</option><option value="both">Both axes</option></SelectControl>
-              {!(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"] as PlotType[]).includes(plotType) ? <SelectControl label="Legend" value={settings.legendPosition} onChange={(value) => updateSetting("legendPosition", value as VisualizationSettings["legendPosition"])}><option value="right">Right</option>{plotType !== "enrichment" && plotType !== "enrichment-bar" ? <option value="bottom">Bottom</option> : null}<option value="none">Hidden</option></SelectControl> : null}
+            {(["axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid", "legendPosition", "swapAxes", "showTrend", "showLabels", "showPoints", "showSampleSize"] as Array<keyof VisualizationSettings>).some(hasSetting) ? <ControlGroup title="Marks & axes">
+              {hasSetting("axisLineWidth") ? <RangeControl label="Axis line" value={settings.axisLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("axisLineWidth", value)} /> : null}
+              {hasSetting("gridLineWidth") ? <RangeControl label="Grid line" value={settings.gridLineWidth} minimum={0.4} maximum={2} step={0.1} unit=" px" onChange={(value) => updateSetting("gridLineWidth", value)} /> : null}
+              {hasSetting("dataLineWidth") ? <RangeControl label="Data line" value={settings.dataLineWidth} minimum={1} maximum={5} step={0.1} unit=" px" onChange={(value) => updateSetting("dataLineWidth", value)} /> : null}
+              {hasSetting("pointSize") ? <RangeControl label="Point size" value={settings.pointSize} minimum={2} maximum={12} step={0.5} unit=" px" onChange={(value) => updateSetting("pointSize", value)} /> : null}
+              {hasSetting("opacity") ? <RangeControl label="Opacity" value={settings.opacity} minimum={0.25} maximum={1} step={0.05} onChange={(value) => updateSetting("opacity", value)} /> : null}
+              {hasSetting("grid") ? <SelectControl label="Grid" value={settings.grid} onChange={(value) => updateSetting("grid", value as VisualizationSettings["grid"])}><option value="none">None</option><option value="y">Horizontal only</option><option value="both">Both axes</option></SelectControl> : null}
+              {hasSetting("legendPosition") ? <SelectControl label="Legend" value={settings.legendPosition} onChange={(value) => updateSetting("legendPosition", value as VisualizationSettings["legendPosition"])}><option value="right">Right</option>{plotType !== "enrichment" && plotType !== "enrichment-bar" ? <option value="bottom">Bottom</option> : null}<option value="none">Hidden</option></SelectControl> : null}
               {(["line", "scatter", "pca"] as PlotType[]).includes(plotType) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant)) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
               {plotType === "scatter" || plotType === "correlation" ? <><ToggleControl label="Linear trend" checked={settings.showTrend} onChange={(value) => updateSetting("showTrend", value)} /><ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /></> : null}
               {(["pca", "pcoa", "umap", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
               {(["box", "violin", "beeswarm", "raincloud"] as PlotType[]).includes(plotType) ? <><ToggleControl label="Show observations" checked={settings.showPoints} onChange={(value) => updateSetting("showPoints", value)} /><ToggleControl label="Show sample size" checked={settings.showSampleSize} onChange={(value) => updateSetting("showSampleSize", value)} /></> : null}
-            </ControlGroup>
+            </ControlGroup> : null}
 
             {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} error bars`}>
               <SelectControl label="Error representation" value={plotType === "bar" ? settings.barErrorType : settings.lineErrorType} onChange={(value) => selectErrorType(plotType === "bar" ? "barErrorType" : "lineErrorType", value as VisualizationSettings["barErrorType"])}><option value="none">None</option><option value="sd">Mean ± SD</option><option value="sem">Mean ± SEM</option></SelectControl>
@@ -972,6 +985,30 @@ export function VisualizationStudio() {
             {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) ? <ControlGroup title="Heatmap">{plotType !== "correlation-heatmap" ? <SelectControl label="Scaling" value={settings.heatmapScale} onChange={(value) => updateSetting("heatmapScale", value as VisualizationSettings["heatmapScale"])}><option value="row">Row z-score</option><option value="none">Raw values</option></SelectControl> : null}{plotType !== "heatmap" ? <><ToggleControl label="Cluster rows" checked={settings.clusterRows} onChange={(value) => updateSetting("clusterRows", value)} /><ToggleControl label="Cluster columns" checked={settings.clusterColumns} onChange={(value) => updateSetting("clusterColumns", value)} /><p className="text-[11px] leading-4 text-muted">Deterministic Euclidean average-linkage ordering is used for the preview.</p></> : null}</ControlGroup> : null}
             {plotType === "km" ? <ControlGroup title="Survival"><ToggleControl label="Show numbers at risk" checked={settings.showRiskTable} onChange={(value) => updateSetting("showRiskTable", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Kaplan–Meier estimates and censor marks are calculated from individual records. A log-rank P value is intentionally omitted until a tested inferential module is added.</p></ControlGroup> : null}
             {plotType === "survival-forest" ? <ControlGroup title="Forest reference"><RangeControl label="Null reference" value={settings.forestReferenceValue} minimum={0} maximum={5} step={0.1} onChange={(value) => updateSetting("forestReferenceValue", value)} /><p className="text-[11px] leading-4 text-muted">Use 1 for ratios such as HR/OR and 0 for additive coefficients.</p></ControlGroup> : null}
+
+            {(["pie", "donut", "waffle", "treemap", "sunburst"] as PlotType[]).includes(plotType) ? <ControlGroup title="Labels & composition">
+              <SelectControl label="Value labels" value={settings.compositionLabelMode} onChange={(value) => updateSetting("compositionLabelMode", value as VisualizationSettings["compositionLabelMode"])}><option value="percent">Percent</option><option value="value">Value</option><option value="both">Value + percent</option><option value="none">Hidden</option></SelectControl>
+              {plotType === "donut" ? <RangeControl label="Center hole" value={settings.donutHole} minimum={0.32} maximum={0.72} step={0.02} onChange={(value) => updateSetting("donutHole", value)} /> : null}
+              {plotType === "waffle" ? <RangeControl label="Grid units" value={settings.waffleCells} minimum={25} maximum={225} step={25} onChange={(value) => updateSetting("waffleCells", value)} /> : null}
+              {plotType === "treemap" || plotType === "sunburst" ? <RangeControl label="Hierarchy gap" value={settings.hierarchyGap} minimum={0} maximum={8} step={0.5} unit=" px" onChange={(value) => updateSetting("hierarchyGap", value)} /> : null}
+              <p className="text-[11px] leading-4 text-muted">Percentages are calculated from the currently mapped non-negative values. Exported labels retain the underlying total.</p>
+            </ControlGroup> : null}
+
+            {plotType === "rose" ? <ControlGroup title="Rose labels">
+              <SelectControl label="Sector labels" value={settings.compositionLabelMode === "none" ? "none" : "value"} onChange={(value) => updateSetting("compositionLabelMode", value as "value" | "none")}><option value="value">Category + value</option><option value="none">Hidden</option></SelectControl>
+              <p className="text-[11px] leading-4 text-muted">Rose sector area is proportional to magnitude, with radius scaled by the square root of the value. Values are not normalized to percentages.</p>
+            </ControlGroup> : null}
+
+            {(["rose", "radar", "polar-profile"] as PlotType[]).includes(plotType) ? <ControlGroup title="Radial scale">
+              <OptionalNumberControl label="Radial maximum" value={settings.radialMaximum} invalid={settings.radialMaximum !== null && settings.radialMaximum <= 0} onChange={(value) => updateSetting("radialMaximum", value)} />
+              {plotType === "radar" || plotType === "polar-profile" ? <RangeControl label="Profile fill" value={settings.radarFillOpacity} minimum={0} maximum={0.5} step={0.02} onChange={(value) => updateSetting("radarFillOpacity", value)} /> : null}
+              <p className="text-[11px] leading-4 text-muted">Auto uses a padded maximum from the mapped values. A manual maximum must be positive and may clip larger values.</p>
+            </ControlGroup> : null}
+
+            {plotType === "population-pyramid" ? <ControlGroup title="Population pyramid scale">
+              <SelectControl label="Display values" value={settings.pyramidDisplayMode} onChange={(value) => updateSetting("pyramidDisplayMode", value as VisualizationSettings["pyramidDisplayMode"])}><option value="value">Absolute values</option><option value="percent">Within-group percent</option></SelectControl>
+              <p className="text-[11px] leading-4 text-muted">Mirroring is a layout convention, not a negative measurement. Percent mode normalizes each of the two groups independently to 100%.</p>
+            </ControlGroup> : null}
 
               <ControlGroup title="Editable colors">
                 {categoryLabels.map((label, index) => <ColorControl key={`${label}-${index}`} label={`${index + 1} · ${label}`} value={settings.categoricalColors[index] ?? journalThemes[themeId].categorical[index % journalThemes[themeId].categorical.length]} onChange={(value) => updateCategoryColor(index, value)} />)}

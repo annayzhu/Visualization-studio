@@ -48,13 +48,14 @@ type LegendEntry = { label: string; color: string };
 const TEXT = "#23242A";
 
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
-  const noAxes = ["venn", "sankey", "chord", "circos"].includes(type);
+  const noAxes = ["venn", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const labelHeavy = ["enrichment-bar", "survival-forest", "upset"].includes(type);
-  const hasLegend = !["beeswarm", "raincloud", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"].includes(type);
-  const legend = hasLegend && settings.legendPosition === "right" ? 145 : 0;
-  const left = noAxes ? 22 : labelHeavy ? Math.min(178, settings.width * 0.32) : 66;
+  const hasLegend = !["beeswarm", "raincloud", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"].includes(type);
+  const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
+  const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
+  const left = noAxes ? 14 : labelHeavy ? Math.min(178, settings.width * 0.32) : 66;
   const top = settings.title ? 48 : 24;
-  const bottom = settings.legendPosition === "bottom" ? 80 : 58;
+  const bottom = hasLegend && settings.legendPosition === "bottom" ? 80 : 58;
   const right = 22 + legend;
   return { width: settings.width, height: settings.height, left, right, top, bottom, plotWidth: Math.max(100, settings.width - left - right), plotHeight: Math.max(90, settings.height - top - bottom) };
 }
@@ -89,7 +90,12 @@ function Axes({ frame, settings, xDomain, yDomain, xLabel, yLabel, gridColor, hi
 
 function Legend({ entries, frame, settings }: { entries: LegendEntry[]; frame: Frame; settings: VisualizationSettings }) {
   if (settings.legendPosition === "none" || entries.length < 2) return null;
-  if (settings.legendPosition === "bottom") return <g transform={`translate(${frame.left} ${frame.height - 23})`}>{entries.slice(0, 8).map((entry, index) => <g key={entry.label} transform={`translate(${index * Math.min(120, frame.plotWidth / Math.max(1, entries.length))} 0)`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 15)}</text></g>)}</g>;
+  if (settings.legendPosition === "bottom") {
+    const visible = entries.slice(0, 12);
+    const perRow = Math.max(2, Math.min(4, Math.floor(frame.plotWidth / 90)));
+    const cellWidth = frame.plotWidth / perRow;
+    return <g transform={`translate(${frame.left} ${frame.height - 72})`}>{visible.map((entry, index) => <g key={entry.label} transform={`translate(${(index % perRow) * cellWidth} ${Math.floor(index / perRow) * (settings.legendSize + 7)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 15)}</text></g>)}</g>;
+  }
   return <g transform={`translate(${frame.left + frame.plotWidth + 18} ${frame.top + 5})`}>{entries.slice(0, 12).map((entry, index) => <g key={entry.label} transform={`translate(0 ${index * (settings.legendSize + 10)})`}><circle cx={4} cy={-4} r={4} fill={entry.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{entry.label.slice(0, 24)}</text></g>)}</g>;
 }
 
@@ -426,6 +432,149 @@ function CircosPlot({ frame, dataset, mapping, settings, colors }: { frame: Fram
   </g>;
 }
 
+function sectorPath(cx: number, cy: number, outerRadius: number, start: number, end: number, innerRadius = 0) {
+  const safeEnd = Math.min(end, start + Math.PI * 2 - 1e-6);
+  const outerStart = polar(cx, cy, outerRadius, start);
+  const outerEnd = polar(cx, cy, outerRadius, safeEnd);
+  const large = safeEnd - start > Math.PI ? 1 : 0;
+  if (innerRadius <= 0) return `M ${cx} ${cy} L ${outerStart[0]} ${outerStart[1]} A ${outerRadius} ${outerRadius} 0 ${large} 1 ${outerEnd[0]} ${outerEnd[1]} Z`;
+  const innerEnd = polar(cx, cy, innerRadius, safeEnd);
+  const innerStart = polar(cx, cy, innerRadius, start);
+  return `M ${outerStart[0]} ${outerStart[1]} A ${outerRadius} ${outerRadius} 0 ${large} 1 ${outerEnd[0]} ${outerEnd[1]} L ${innerEnd[0]} ${innerEnd[1]} A ${innerRadius} ${innerRadius} 0 ${large} 0 ${innerStart[0]} ${innerStart[1]} Z`;
+}
+
+function compositionLabel(mode: VisualizationSettings["compositionLabelMode"], value: number, total: number) {
+  const percent = total > 0 ? `${(value / total * 100).toFixed(value / total < 0.1 ? 1 : 0)}%` : "0%";
+  if (mode === "value") return formatTick(value);
+  if (mode === "both") return `${formatTick(value)} (${percent})`;
+  return mode === "percent" ? percent : "";
+}
+
+function CompositionPlot({ type, frame, dataset, mapping, settings, colors }: { type: "pie" | "donut" | "rose"; frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
+  const rows = dataset.rows.map((row) => ({ category: row[mapping.category], value: Math.max(0, parseNumericValue(row[mapping.value]) ?? 0) }));
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  const colorMap = palette(rows.map((row) => row.category), colors);
+  const cx = frame.left + frame.plotWidth / 2;
+  const cy = frame.top + frame.plotHeight / 2;
+  const radius = Math.min(frame.plotWidth, frame.plotHeight) * 0.42;
+  if (type === "rose") {
+    const maximum = settings.radialMaximum && settings.radialMaximum > 0 ? settings.radialMaximum : Math.max(...rows.map((row) => row.value), 1) * 1.05;
+    const step = Math.PI * 2 / rows.length;
+    return <><g data-plot-data data-plot-family="rose">{[0.25, 0.5, 0.75, 1].map((fraction) => <circle key={fraction} cx={cx} cy={cy} r={radius * fraction} fill="none" stroke="#E4E1DC" strokeWidth={settings.gridLineWidth} />)}{rows.map((row, index) => {
+      const start = -Math.PI / 2 + index * step + 0.018;
+      const end = start + step - 0.036;
+      const rowRadius = radius * Math.sqrt(Math.min(1, row.value / maximum));
+      const labelPoint = polar(cx, cy, radius + 13, start + (end - start) / 2);
+      const labelCosine = Math.cos(start + (end - start) / 2);
+      return <g key={`${row.category}-${index}`}><path data-plot-element="rose-sector" d={sectorPath(cx, cy, rowRadius, start, end)} fill={colorMap.get(row.category)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={1} />{settings.compositionLabelMode !== "none" ? <text x={labelPoint[0]} y={labelPoint[1] + 3} textAnchor={labelCosine < -0.2 ? "start" : labelCosine > 0.2 ? "end" : "middle"} fill={TEXT} fontSize={settings.tickSize}>{row.category.slice(0, 8)} {formatTick(row.value)}</text> : null}</g>;
+    })}</g><Legend entries={rows.map((row) => ({ label: row.category, color: colorMap.get(row.category) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+  }
+  const inner = type === "donut" ? radius * settings.donutHole : 0;
+  return <><g data-plot-data data-plot-family={type}>{rows.map((row, index) => {
+    const previous = rows.slice(0, index).reduce((sum, entry) => sum + entry.value, 0);
+    const start = -Math.PI / 2 + (previous / Math.max(total, Number.EPSILON)) * Math.PI * 2;
+    const end = start + (row.value / Math.max(total, Number.EPSILON)) * Math.PI * 2;
+    const middle = (start + end) / 2;
+    const labelRadius = inner + (radius - inner) * 0.61;
+    const labelPoint = polar(cx, cy, labelRadius, middle);
+    const label = compositionLabel(settings.compositionLabelMode, row.value, total);
+    return <g key={`${row.category}-${index}`}><path data-plot-element={`${type}-sector`} d={sectorPath(cx, cy, radius, start, end, inner)} fill={colorMap.get(row.category)} fillOpacity={settings.opacity} stroke="#FFFFFF" strokeWidth={1.2} />{label && row.value / total >= 0.045 ? <text x={labelPoint[0]} y={labelPoint[1] + 3} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize} fontWeight={700}>{label}</text> : null}</g>;
+  })}{type === "donut" ? <><text x={cx} y={cy - 3} textAnchor="middle" fill={TEXT} fontSize={settings.legendSize}>Total</text><text x={cx} y={cy + settings.axisLabelSize} textAnchor="middle" fill={TEXT} fontSize={settings.axisLabelSize} fontWeight={700}>{formatTick(total)}</text></> : null}</g><Legend entries={rows.map((row) => ({ label: `${row.category} ${compositionLabel("percent", row.value, total)}`, color: colorMap.get(row.category) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+}
+
+function WafflePlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
+  const rows = dataset.rows.map((row) => ({ category: row[mapping.category], value: Math.max(0, parseNumericValue(row[mapping.value]) ?? 0) }));
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  const count = Math.max(25, Math.min(400, Math.round(settings.waffleCells)));
+  const columns = Math.ceil(Math.sqrt(count)); const rowCount = Math.ceil(count / columns);
+  const gap = 2; const cell = Math.max(2, Math.min((frame.plotWidth - gap * (columns - 1)) / columns, (frame.plotHeight - gap * (rowCount - 1)) / rowCount));
+  const gridWidth = columns * cell + (columns - 1) * gap; const gridHeight = rowCount * cell + (rowCount - 1) * gap;
+  const left = frame.left + (frame.plotWidth - gridWidth) / 2; const top = frame.top + (frame.plotHeight - gridHeight) / 2;
+  const colorMap = palette(rows.map((row) => row.category), colors);
+  const cumulative = rows.reduce<number[]>((acc, row) => [...acc, (acc.at(-1) ?? 0) + row.value / Math.max(total, Number.EPSILON) * count], []);
+  return <><g data-plot-data data-plot-family="waffle">{Array.from({ length: count }, (_, index) => {
+    const matchedIndex = cumulative.findIndex((boundary) => index + 0.5 <= boundary);
+    const row = rows[matchedIndex < 0 ? rows.length - 1 : matchedIndex];
+    const columnIndex = index % columns; const rowIndex = rowCount - 1 - Math.floor(index / columns);
+    return <rect key={index} data-plot-element="waffle-cell" x={left + columnIndex * (cell + gap)} y={top + rowIndex * (cell + gap)} width={cell} height={cell} rx={Math.min(1.5, cell * 0.15)} fill={colorMap.get(row.category)} fillOpacity={settings.opacity} />;
+  })}</g><Legend entries={rows.map((row) => ({ label: settings.compositionLabelMode === "none" ? row.category : `${row.category} ${compositionLabel(settings.compositionLabelMode, row.value, total)}`, color: colorMap.get(row.category) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+}
+
+type HierarchyNode = { name: string; ownValue: number; value: number; depth: number; children: HierarchyNode[]; color: string };
+function hierarchyFromRows(dataset: ParsedDataset, mapping: Record<string, string>, colors: string[]) {
+  const nodes = new Map<string, HierarchyNode>();
+  dataset.rows.forEach((row) => nodes.set(row[mapping.node], { name: row[mapping.node], ownValue: Math.max(0, parseNumericValue(row[mapping.value]) ?? 0), value: 0, depth: 0, children: [], color: colors[0] }));
+  let root: HierarchyNode | undefined;
+  dataset.rows.forEach((row) => { const node = nodes.get(row[mapping.node])!; const parentName = mapping.parent ? row[mapping.parent] : ""; const parent = parentName ? nodes.get(parentName) : undefined; if (parent) parent.children.push(node); else root = node; });
+  const fill = (node: HierarchyNode, depth: number, inheritedColor: string): number => { node.depth = depth; node.color = inheritedColor; node.value = node.children.length ? node.children.reduce((sum, child, index) => sum + fill(child, depth + 1, depth === 0 ? colors[index % colors.length] : inheritedColor), 0) : node.ownValue; return node.value; };
+  if (root) fill(root, 0, colors[0]);
+  return root;
+}
+
+function TreemapPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
+  const root = hierarchyFromRows(dataset, mapping, colors);
+  if (!root) return null;
+  const marks: ReactNode[] = [];
+  const layout = (node: HierarchyNode, x: number, y: number, width: number, height: number, vertical: boolean, key: string) => {
+    if (node.depth > 0) {
+      const gap = Math.min(settings.hierarchyGap, width / 5, height / 5);
+      marks.push(<g key={key}><rect data-plot-element="treemap-node" x={x + gap / 2} y={y + gap / 2} width={Math.max(0, width - gap)} height={Math.max(0, height - gap)} fill={node.color} fillOpacity={Math.max(0.28, settings.opacity - node.depth * 0.12)} stroke="#FFFFFF" strokeWidth={0.8} />{width > 55 && height > 24 ? <><text x={x + 6} y={y + 15} fill={TEXT} fontSize={settings.tickSize} fontWeight={node.children.length ? 700 : 500}>{node.name.slice(0, Math.max(6, Math.floor(width / 7)))}</text>{settings.compositionLabelMode !== "none" && height > 39 ? <text x={x + 6} y={y + 30} fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)}>{compositionLabel(settings.compositionLabelMode, node.value, root.value)}</text> : null}</> : null}</g>);
+    }
+    if (!node.children.length || node.value <= 0) return;
+    let cursor = vertical ? x : y;
+    node.children.forEach((child, index) => { const fraction = child.value / node.value; const childWidth = vertical ? width * fraction : width; const childHeight = vertical ? height : height * fraction; layout(child, vertical ? cursor : x, vertical ? y : cursor, childWidth, childHeight, !vertical, `${key}-${index}`); cursor += vertical ? childWidth : childHeight; });
+  };
+  layout(root, frame.left, frame.top, frame.plotWidth, frame.plotHeight, frame.plotWidth >= frame.plotHeight, "root");
+  return <g data-plot-data data-plot-family="treemap">{marks}</g>;
+}
+
+function SunburstPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
+  const root = hierarchyFromRows(dataset, mapping, colors);
+  if (!root) return null;
+  const cx = frame.left + frame.plotWidth / 2; const cy = frame.top + frame.plotHeight / 2;
+  const depthOf = (node: HierarchyNode): number => node.children.length ? Math.max(node.depth, ...node.children.map(depthOf)) : node.depth;
+  const maximumDepth = Math.max(1, depthOf(root));
+  const radius = Math.min(frame.plotWidth, frame.plotHeight) * 0.43; const ring = radius / (maximumDepth + 1);
+  const safeGap = Math.min(settings.hierarchyGap, ring * 0.7);
+  const marks: ReactNode[] = [];
+  const renderNode = (node: HierarchyNode, start: number, end: number, key: string) => {
+    if (node.depth > 0) {
+      marks.push(<path key={key} data-plot-element="sunburst-node" d={sectorPath(cx, cy, ring * (node.depth + 1) - safeGap / 2, start, end, ring * node.depth + safeGap / 2)} fill={node.color} fillOpacity={Math.max(0.3, settings.opacity - node.depth * 0.1)} stroke="#FFFFFF" strokeWidth={0.7} />);
+    }
+    let cursor = start;
+    node.children.forEach((child, index) => { const childEnd = cursor + (end - start) * child.value / Math.max(node.value, Number.EPSILON); renderNode(child, cursor, childEnd, `${key}-${index}`); cursor = childEnd; });
+  };
+  renderNode(root, -Math.PI / 2, Math.PI * 1.5, "root");
+  return <><g data-plot-data data-plot-family="sunburst"><circle cx={cx} cy={cy} r={Math.max(5, ring - safeGap / 2)} fill="#F5F2ED" /><text x={cx} y={cy + 3} textAnchor="middle" fill={TEXT} fontSize={Math.max(8, settings.tickSize - 1)} fontWeight={700}>{root.name.slice(0, 11)}</text>{marks}</g><Legend entries={root.children.map((node) => ({ label: settings.compositionLabelMode === "none" ? node.name : `${node.name} ${compositionLabel(settings.compositionLabelMode, node.value, root.value)}`, color: node.color }))} frame={frame} settings={settings} /></>;
+}
+
+function RadialProfilePlot({ type, frame, dataset, mapping, settings, colors }: { type: "radar" | "polar-profile"; frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
+  const categoryKey = type === "radar" ? "feature" : "angle";
+  const categories = [...new Set(dataset.rows.map((row) => row[mapping[categoryKey]]))];
+  const series = [...new Set(dataset.rows.map((row) => mapping.series ? row[mapping.series] || "All" : "All"))];
+  const colorMap = palette(series, colors); const values = dataset.rows.map((row) => Math.max(0, parseNumericValue(row[mapping.value]) ?? 0));
+  const maximum = settings.radialMaximum && settings.radialMaximum > 0 ? settings.radialMaximum : Math.max(...values, 1) * 1.08;
+  const cx = frame.left + frame.plotWidth / 2 + Math.min(22, frame.plotWidth * 0.1); const cy = frame.top + frame.plotHeight / 2; const radius = Math.min(frame.plotWidth * 0.31, frame.plotHeight * 0.39);
+  const angleAt = (index: number) => -Math.PI / 2 + index * Math.PI * 2 / categories.length;
+  const pointAt = (category: string, currentSeries: string) => { const row = dataset.rows.find((entry) => entry[mapping[categoryKey]] === category && (mapping.series ? entry[mapping.series] || "All" : "All") === currentSeries); const value = Math.max(0, parseNumericValue(row?.[mapping.value]) ?? 0); return polar(cx, cy, radius * Math.min(1, value / maximum), angleAt(categories.indexOf(category))); };
+  return <><g data-plot-data data-plot-family={type}>{[0.25, 0.5, 0.75, 1].map((fraction) => <polygon key={fraction} points={categories.map((_, index) => polar(cx, cy, radius * fraction, angleAt(index)).join(",")).join(" ")} fill="none" stroke="#DDD9D2" strokeWidth={settings.gridLineWidth} />)}{categories.map((category, index) => { const end = polar(cx, cy, radius, angleAt(index)); const label = polar(cx, cy, radius + 16, angleAt(index)); return <g key={category}><line x1={cx} y1={cy} x2={end[0]} y2={end[1]} stroke="#DDD9D2" strokeWidth={settings.gridLineWidth} /><text x={label[0]} y={label[1] + 3} textAnchor={Math.cos(angleAt(index)) > 0.2 ? "start" : Math.cos(angleAt(index)) < -0.2 ? "end" : "middle"} fill={TEXT} fontSize={settings.tickSize}>{category.slice(0, 13)}</text></g>; })}{series.map((currentSeries) => { const points = categories.map((category) => pointAt(category, currentSeries)); const closed = [...points, points[0]]; return <g key={currentSeries}><polygon data-plot-element={`${type}-profile`} points={points.map((point) => point.join(",")).join(" ")} fill={colorMap.get(currentSeries)} fillOpacity={settings.radarFillOpacity} stroke={colorMap.get(currentSeries)} strokeWidth={settings.dataLineWidth} />{closed.slice(0, -1).map((point, index) => <circle key={index} cx={point[0]} cy={point[1]} r={Math.max(2.5, settings.pointSize * 0.65)} fill={colorMap.get(currentSeries)} stroke="#FFFFFF" strokeWidth={0.7} />)}</g>; })}</g><Legend entries={series.map((entry) => ({ label: entry, color: colorMap.get(entry) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+}
+
+function PopulationPyramidPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
+  const categories = [...new Set(dataset.rows.map((row) => row[mapping.category]))]; const groups = [...new Set(dataset.rows.map((row) => row[mapping.group]))];
+  const groupTotals = new Map(groups.map((group) => [group, dataset.rows.filter((row) => row[mapping.group] === group).reduce((sum, row) => sum + Math.max(0, parseNumericValue(row[mapping.value]) ?? 0), 0)]));
+  const displayedValue = (row: Record<string, string> | undefined, group: string) => {
+    const raw = Math.max(0, parseNumericValue(row?.[mapping.value]) ?? 0);
+    return settings.pyramidDisplayMode === "percent" ? raw / Math.max(groupTotals.get(group) ?? 0, Number.EPSILON) * 100 : raw;
+  };
+  const maximum = Math.max(...dataset.rows.map((row) => displayedValue(row, row[mapping.group])), 1) * 1.08;
+  const center = frame.left + frame.plotWidth / 2; const half = frame.plotWidth * 0.43; const band = frame.plotHeight / Math.max(1, categories.length);
+  const colorMap = palette(groups, colors);
+  const valueFor = (category: string, group: string) => displayedValue(dataset.rows.find((row) => row[mapping.category] === category && row[mapping.group] === group), group);
+  const valueLabel = (value: number) => settings.pyramidDisplayMode === "percent" ? `${value.toFixed(value < 10 ? 1 : 0)}%` : formatTick(value);
+  return <><g data-plot-data data-plot-family="population-pyramid"><line x1={center} x2={center} y1={frame.top} y2={frame.top + frame.plotHeight} stroke={TEXT} strokeWidth={settings.axisLineWidth} />{categories.map((category, index) => { const y = frame.top + index * band + band * 0.14; const height = band * 0.72; const leftValue = valueFor(category, groups[0]); const rightValue = valueFor(category, groups[1]); const leftWidth = leftValue / maximum * half; const rightWidth = rightValue / maximum * half; return <g key={category}><rect data-plot-element="pyramid-bar" x={center - leftWidth} y={y} width={leftWidth} height={height} fill={colorMap.get(groups[0])} fillOpacity={settings.opacity} /><rect data-plot-element="pyramid-bar" x={center} y={y} width={rightWidth} height={height} fill={colorMap.get(groups[1])} fillOpacity={settings.opacity} /><text x={center} y={y + height / 2 + settings.tickSize * 0.35} textAnchor="middle" fill="#FFFFFF" stroke={TEXT} strokeWidth={2.8} paintOrder="stroke" fontSize={settings.tickSize} fontWeight={700}>{category.slice(0, 11)}</text><text x={center - leftWidth - 5} y={y + height / 2 + 4} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{valueLabel(leftValue)}</text><text x={center + rightWidth + 5} y={y + height / 2 + 4} fill={TEXT} fontSize={settings.tickSize}>{valueLabel(rightValue)}</text></g>; })}</g><Legend entries={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0] }))} frame={frame} settings={settings} /></>;
+}
+
 export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping, settings, themeId }: Props) {
   const theme = journalThemes[themeId];
   const definition = getPlotDefinition(type);
@@ -451,6 +600,12 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "chord") content = <ChordPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "circos") content = <CircosPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "pie" || type === "donut" || type === "rose") content = <CompositionPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "waffle") content = <WafflePlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "treemap") content = <TreemapPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "sunburst") content = <SunburstPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "radar" || type === "polar-profile") content = <RadialProfilePlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "population-pyramid") content = <PopulationPyramidPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   return <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${frame.width} ${frame.height}`} width={frame.width} height={frame.height} role="img" data-plot-renderer="advanced" data-chart-text-color={TEXT} aria-label={`${definition.name} scientific figure preview`} style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}>
     <title>{settings.title || `${definition.name} figure`}</title><desc>{definition.summary} Generated in LabNest Visualization Studio.</desc><rect width={frame.width} height={frame.height} fill="#FFFFFF" />
     <defs><clipPath id={`plot-area-${type}`}><rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} /></clipPath></defs>

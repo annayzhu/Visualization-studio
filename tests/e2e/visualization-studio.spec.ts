@@ -175,4 +175,86 @@ test.describe("Visualization Studio browser acceptance", () => {
       expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
     }
   });
+
+  test("renders composition and profile families responsively and exports finite SVG", async ({ page }, testInfo) => {
+    await page.goto("/");
+    const plotSelect = page.getByRole("combobox", { name: "Plot type" });
+    const newPlots = ["pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"];
+
+    if (testInfo.project.name === "desktop-chromium") {
+      for (const plotType of newPlots) {
+        await page.getByRole("button", { name: new RegExp(`^${plotType === "polar-profile" ? "Polar profile" : plotType === "population-pyramid" ? "Population pyramid" : plotType[0].toUpperCase() + plotType.slice(1)}`) }).click();
+        await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+        const svg = page.locator(`svg[data-plot-renderer='advanced'][aria-label$='scientific figure preview']`);
+        await expect(svg.locator("[data-plot-data]")).toHaveCount(1);
+        const clippedLabels = await svg.evaluate((element) => {
+          const canvas = element.getBoundingClientRect();
+          return [...element.querySelectorAll("text")].flatMap((label) => {
+            const box = label.getBoundingClientRect();
+            const inside = box.left >= canvas.left - 1 && box.top >= canvas.top - 1 && box.right <= canvas.right + 1 && box.bottom <= canvas.bottom + 1;
+            return inside ? [] : [{ text: label.textContent, left: box.left - canvas.left, top: box.top - canvas.top, right: box.right - canvas.left, bottom: box.bottom - canvas.top }];
+          });
+        });
+        expect(clippedLabels, `${plotType} labels should remain inside the export canvas`).toEqual([]);
+      }
+      await expect(page.getByRole("combobox", { name: "Display values" })).toBeVisible();
+      await page.getByRole("combobox", { name: "Display values" }).selectOption("percent");
+      await expect(page.locator("svg[aria-label='Population pyramid scientific figure preview']")).toContainText("%");
+
+      await page.getByRole("button", { name: /^Rose/ }).click();
+      await page.getByRole("button", { name: "Reset" }).click();
+      const roseConfigEvent = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Config" }).click();
+      const roseConfigPath = await (await roseConfigEvent).path();
+      expect(roseConfigPath).not.toBeNull();
+      const roseConfig = JSON.parse(await readFile(roseConfigPath!, "utf8"));
+      expect(roseConfig.settings.compositionLabelMode).toBe("value");
+
+      await page.getByRole("button", { name: /^Pie/ }).click();
+      await expect(page.getByRole("textbox", { name: "X-axis label" })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Grid" })).toHaveCount(0);
+      const compositionInput = page.getByRole("textbox", { name: "CSV or TSV data" });
+      await compositionInput.fill(`category\tvalue\n${Array.from({ length: 13 }, (_, index) => `Part ${index + 1}\t${index + 1}`).join("\n")}`);
+      await page.getByRole("button", { name: "Auto-map" }).click();
+      await expect(page.getByText(/limited to 12 categories/)).toBeVisible();
+      await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+      await compositionInput.fill(`category\tvalue\n${Array.from({ length: 12 }, (_, index) => `Part ${index + 1}\t${index + 1}`).join("\n")}`);
+      await page.getByRole("button", { name: "Auto-map" }).click();
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      await page.getByRole("combobox", { name: "Legend" }).selectOption("bottom");
+      const pieSvg = page.locator("svg[aria-label='Pie scientific figure preview']");
+      const clippedPieLabels = await pieSvg.evaluate((element) => {
+        const canvas = element.getBoundingClientRect();
+        return [...element.querySelectorAll("text")].filter((label) => {
+          const box = label.getBoundingClientRect();
+          return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1;
+        }).map((label) => label.textContent);
+      });
+      expect(clippedPieLabels).toEqual([]);
+
+      await page.getByRole("button", { name: /^Sunburst/ }).click();
+      await page.getByRole("combobox", { name: "Legend" }).selectOption("right");
+      const previewCard = page.getByRole("heading", { name: "Sunburst preview" }).locator("xpath=ancestor::section");
+      await expect(previewCard).toHaveScreenshot("sunburst-hierarchy-desktop.png", { animations: "disabled", maxDiffPixels: 100 });
+    } else {
+      await plotSelect.selectOption("radar");
+      await expect(page.getByRole("heading", { name: "Radar preview" })).toBeVisible();
+      const svgBox = await page.locator("svg[aria-label='Radar scientific figure preview']").boundingBox();
+      expect(svgBox).not.toBeNull();
+      expect(svgBox!.width).toBeLessThanOrEqual(340);
+      const previewCard = page.getByRole("heading", { name: "Radar preview" }).locator("xpath=ancestor::section");
+      await expect(previewCard).toHaveScreenshot("radar-profile-mobile.png", { animations: "disabled" });
+      await plotSelect.selectOption("sunburst");
+    }
+
+    const downloadEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "SVG" }).click();
+    const download = await downloadEvent;
+    const path = await download.path();
+    expect(path).not.toBeNull();
+    const source = await readFile(path!, "utf8");
+    expect(source).toContain('data-plot-renderer="advanced"');
+    expect(source).toContain('data-plot-family="sunburst"');
+    expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
 });

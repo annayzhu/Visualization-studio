@@ -95,8 +95,9 @@ describe("Visualization Studio data contracts", () => {
       "scatter", "correlation", "volcano", "ma", "quadrant", "bar", "errorbar", "line", "area", "lollipop",
       "box", "violin", "beeswarm", "raincloud", "clustered-heatmap", "correlation-heatmap", "pca", "pcoa", "umap",
       "enrichment", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn", "upset", "sankey", "chord", "circos",
+      "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
     ];
-    expect(plotDefinitions).toHaveLength(31);
+    expect(plotDefinitions).toHaveLength(40);
     expect(requested.every((id) => plotDefinitions.some((definition) => definition.id === id && definition.sampleData.length > 20))).toBe(true);
     plotDefinitions.forEach((definition) => {
       const examples = getPlotExamples(definition);
@@ -355,5 +356,97 @@ describe("Visualization Studio data contracts", () => {
     expect(numericExtent([4, 8, 10], true)).toEqual([0, 10.8]);
     expect(numericExtent([-10, -4], true)).toEqual([-10.8, 0]);
     expect(numericExtent([-2, 3], true)).toEqual([-2.4, 3.4]);
+  });
+
+  it("rejects invalid composition totals and negative radial values", () => {
+    const pie = validatePlotDataset(
+      getPlotDefinition("pie"),
+      parseDelimitedData("category\tvalue\nA\t0\nB\t0"),
+      { category: "category", value: "value" },
+      defaultVisualizationSettings,
+    );
+    expect(pie.errors).toContain("Pie requires a positive displayed total.");
+
+    const rose = validatePlotDataset(
+      getPlotDefinition("rose"),
+      parseDelimitedData("category\tvalue\tgroup\nA\t2\tG\nB\t-1\tG\nC\t3\tG"),
+      { category: "category", value: "value", group: "group" },
+      defaultVisualizationSettings,
+    );
+    expect(rose.errors.some((error) => error.includes("requires non-negative values"))).toBe(true);
+
+    const densePie = validatePlotDataset(
+      getPlotDefinition("pie"),
+      parseDelimitedData(`category\tvalue\n${Array.from({ length: 13 }, (_, index) => `Part ${index + 1}\t${index + 1}`).join("\n")}`),
+      { category: "category", value: "value" },
+      defaultVisualizationSettings,
+    );
+    expect(densePie.errors.some((error) => error.includes("limited to 12 categories"))).toBe(true);
+  });
+
+  it("validates hierarchy, radial-profile, and population-pyramid contracts", () => {
+    const hierarchy = validatePlotDataset(
+      getPlotDefinition("treemap"),
+      parseDelimitedData("node\tparent\tvalue\nRoot\t\t0\nA\tMissing\t4"),
+      { node: "node", parent: "parent", value: "value" },
+      defaultVisualizationSettings,
+    );
+    expect(hierarchy.errors.some((error) => error.includes("missing parent"))).toBe(true);
+
+    const cyclicHierarchy = validatePlotDataset(
+      getPlotDefinition("sunburst"),
+      parseDelimitedData("node\tparent\tvalue\nRoot\t\t0\nLeaf\tRoot\t4\nA\tB\t0\nB\tA\t0"),
+      { node: "node", parent: "parent", value: "value" },
+      defaultVisualizationSettings,
+    );
+    expect(cyclicHierarchy.errors).toContain("Hierarchy parent relationships contain a cycle.");
+
+    const blankHierarchyNode = validatePlotDataset(
+      getPlotDefinition("treemap"),
+      parseDelimitedData("node\tparent\tvalue\nRoot\t\t0\n\tRoot\t4"),
+      { node: "node", parent: "parent", value: "value" },
+      defaultVisualizationSettings,
+    );
+    expect(blankHierarchyNode.errors).toContain("Node contains 1 blank value.");
+
+    const denseSunburst = validatePlotDataset(
+      getPlotDefinition("sunburst"),
+      parseDelimitedData(`node\tparent\tvalue\nRoot\t\t0\n${Array.from({ length: 13 }, (_, index) => `Branch ${index + 1}\tRoot\t1`).join("\n")}`),
+      { node: "node", parent: "parent", value: "value" },
+      defaultVisualizationSettings,
+    );
+    expect(denseSunburst.errors.some((error) => error.includes("limited to 12 top-level branches"))).toBe(true);
+
+    const radar = validatePlotDataset(
+      getPlotDefinition("radar"),
+      parseDelimitedData("feature\tvalue\tseries\nA\t1\tOne\nB\t2\tOne\nC\t3\tOne\nA\t1\tTwo\nB\t2\tTwo"),
+      { feature: "feature", value: "value", series: "series" },
+      defaultVisualizationSettings,
+    );
+    expect(radar.errors).toContain("Every Radar series must contain the same category set.");
+
+    const reorderedPolar = validatePlotDataset(
+      getPlotDefinition("polar-profile"),
+      parseDelimitedData("angle\tvalue\tseries\nA\t1\tOne\nB\t2\tOne\nC\t3\tOne\nA\t1\tTwo\nC\t3\tTwo\nB\t2\tTwo"),
+      { angle: "angle", value: "value", series: "series" },
+      defaultVisualizationSettings,
+    );
+    expect(reorderedPolar.errors).toContain("Every Polar profile series must use the same category order.");
+
+    const pyramid = validatePlotDataset(
+      getPlotDefinition("population-pyramid"),
+      parseDelimitedData("category\tvalue\tgroup\nYoung\t10\tA\nYoung\t9\tB\nYoung\t8\tC"),
+      { category: "category", value: "value", group: "group" },
+      defaultVisualizationSettings,
+    );
+    expect(pyramid.errors).toContain("Population pyramids require exactly two groups; detected 3.");
+
+    const zeroGroupPyramid = validatePlotDataset(
+      getPlotDefinition("population-pyramid"),
+      parseDelimitedData("category\tvalue\tgroup\nYoung\t0\tA\nYoung\t9\tB\nOld\t0\tA\nOld\t3\tB"),
+      { category: "category", value: "value", group: "group" },
+      defaultVisualizationSettings,
+    );
+    expect(zeroGroupPyramid.errors).toContain("Each population-pyramid group requires a positive displayed total.");
   });
 });

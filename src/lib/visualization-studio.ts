@@ -192,6 +192,15 @@ export type VisualizationSettings = {
   showBox: boolean;
   boxErrorType: "none" | "sd" | "sem";
   barErrorType: "none" | "sd" | "sem";
+  barVariant: "grouped" | "stacked" | "percentage" | "horizontal" | "bidirectional" | "faceted" | "polar" | "bullet" | "pyramid" | "axis-break" | "dual-axis" | "overlay";
+  barInputMode: "summary" | "long";
+  barOverlayType: "line" | "points";
+  secondaryAxisLabel: string;
+  showSignificance: boolean;
+  significanceThreshold: number;
+  axisBreakStart: number;
+  axisBreakEnd: number;
+  barGap: number;
   lineErrorType: "none" | "sd" | "sem";
   barBorderWidth: number;
   barBorderColor: string;
@@ -248,6 +257,15 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   showBox: true,
   boxErrorType: "none",
   barErrorType: "none",
+  barVariant: "grouped",
+  barInputMode: "summary",
+  barOverlayType: "line",
+  secondaryAxisLabel: "Secondary value",
+  showSignificance: false,
+  significanceThreshold: 0.05,
+  axisBreakStart: 5.5,
+  axisBreakEnd: 6.5,
+  barGap: 0.18,
   lineErrorType: "none",
   barBorderWidth: 0,
   barBorderColor: "#1D4C50",
@@ -597,6 +615,28 @@ Low\t18\tNight A
 Medium\t32\tNight B
 High\t27\tNight C
 Very high\t14\tNight D`,
+  barLong: `category\tvalue\tgroup\tfacet
+Day 1\t3.7\tControl\tEarly
+Day 1\t3.9\tControl\tEarly
+Day 1\t4.0\tControl\tEarly
+Day 1\t4.4\tTreatment\tEarly
+Day 1\t4.6\tTreatment\tEarly
+Day 1\t4.7\tTreatment\tEarly
+Day 7\t7.1\tControl\tLate
+Day 7\t7.3\tControl\tLate
+Day 7\t7.2\tControl\tLate
+Day 7\t8.2\tTreatment\tLate
+Day 7\t8.5\tTreatment\tLate
+Day 7\t8.4\tTreatment\tLate`,
+  barVariants: `category\tvalue\tsd\tgroup\tsecondary\ttarget\tp_value\tfacet
+Day 1\t3.8\t0.31\tControl\t4.0\t4.5\t0.41\tEarly
+Day 1\t4.2\t0.36\tTreatment A\t4.4\t4.8\t0.12\tEarly
+Day 1\t4.5\t0.40\tTreatment B\t4.6\t5.0\t0.032\tEarly
+Day 1\t4.8\t0.42\tTreatment C\t4.9\t5.2\t0.008\tEarly
+Day 7\t7.2\t0.54\tControl\t6.8\t7.5\t0.18\tLate
+Day 7\t7.8\t0.61\tTreatment A\t7.4\t8.1\t0.041\tLate
+Day 7\t8.4\t0.66\tTreatment B\t8.0\t8.8\t0.006\tLate
+Day 7\t9.0\t0.72\tTreatment C\t8.6\t9.4\t0.0007\tLate`,
   line: `time\tvalue\tsd\tsem\tseries
 0\t1.0\t0.12\t0.05\tControl
 1\t1.3\t0.16\t0.07\tControl
@@ -764,19 +804,24 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id: "bar",
     name: "Bar",
     family: "Comparison",
-    summary: "Compact categorical comparison with optional grouping and axis swap.",
-    inputHint: "One row per category. Map an optional non-negative SD or SEM column to draw symmetric error bars.",
+    summary: "One categorical family for grouped, stacked, radial, target, overlay, and uncertainty comparisons.",
+    inputHint: "Summary mode uses one row per category/group; long-form mode aggregates replicate observations into means and SD/SEM.",
     roles: [
       { key: "category", label: "Category", kind: "category", required: true },
       { key: "value", label: "Value", kind: "number", required: true },
       { key: "error", label: "Error magnitude (SD / SEM)", kind: "number", required: false },
       { key: "group", label: "Group", kind: "category", required: false },
+      { key: "secondary", label: "Secondary value", kind: "number", required: false },
+      { key: "target", label: "Target value", kind: "number", required: false },
+      { key: "pValue", label: "P value", kind: "number", required: false },
+      { key: "facet", label: "Facet", kind: "category", required: false },
     ],
-    defaultMapping: { category: "category", value: "value", error: "sd", group: "group" },
-    sampleData: samples.bar,
+    defaultMapping: { category: "category", value: "value", error: "sd", group: "group", secondary: "secondary", target: "target", pValue: "p_value", facet: "facet" },
+    sampleData: samples.barVariants,
     examples: [
-      { label: "Example 1", description: "Summary values with SD and SEM columns.", data: samples.bar, mapping: { category: "category", value: "value", error: "sd", group: "group" } },
-      { label: "Example 2", description: "Category counts or proportions without error bars.", data: samples.barCount, mapping: { category: "category", value: "value", error: "", group: "group" } },
+      { label: "Example 1", description: "Summary values with uncertainty, secondary values, targets, P values, and facets.", data: samples.barVariants, mapping: { category: "category", value: "value", error: "sd", group: "group", secondary: "secondary", target: "target", pValue: "p_value", facet: "facet" } },
+      { label: "Example 2", description: "Long-form replicate observations; select Long-form observations to calculate means and uncertainty.", data: samples.barLong, mapping: { category: "category", value: "value", error: "", group: "group", secondary: "", target: "", pValue: "", facet: "facet" } },
+      { label: "Example 3", description: "Category counts or proportions without uncertainty.", data: samples.barCount, mapping: { category: "category", value: "value", error: "", group: "group", secondary: "", target: "", pValue: "", facet: "" } },
     ],
   },
   {
@@ -1187,9 +1232,9 @@ export const plotReferences = {
 
 const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
   bar: {
-    definition: "用从共同基线出发的柱长编码离散类别的数值；每根柱表示一个汇总量，而不是完整的原始分布。",
-    suitableData: "离散类别对应的汇总值、计数、比例或均值；可同时提供 SD/SEM。",
-    answers: "不同类别的总体大小或汇总水平是否存在直观差异。",
+    definition: "以共同基线上的长度编码类别汇总量；同一数据契约可切换分组、堆叠、百分比、双向、分面、极坐标、目标线、断轴、双轴和叠加表达。柱形仍代表汇总量，而不是完整原始分布。",
+    suitableData: "离散类别的计数、比例、均值或其他汇总值；可输入预先计算的 SD/SEM，也可由长表重复观测计算。Bullet 需要目标值，叠加/双轴需要第二数值，显著性标记需要有效 P 值。",
+    answers: "类别间大小、组成、方向、分层差异或相对目标的偏离。百分比图回答组成而非绝对量；双轴仅用于单位明确且必须同时展示的指标。",
     origin: "William Playfair 在 1786 年的《Commercial and Political Atlas》中用柱形比较贸易量，奠定了现代统计柱状图的形式。",
     references: [plotReferences.visualizationHistory, plotReferences.graphicalPerception, plotReferences.errorBars],
   },
@@ -1411,7 +1456,7 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
 ];
 const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
-  bar: ["swapAxes", "barErrorType", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
+  bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
   scatter: ["swapAxes", "showTrend", "showLabels"], correlation: ["showTrend", "showLabels", "correlationMethod"], pca: ["swapAxes", "showLabels"],
   pcoa: ["showLabels"], umap: ["showLabels"],
@@ -1445,9 +1490,22 @@ function numericAxesFor(type: PlotType): Array<"x" | "y"> {
   return ["x", "y"];
 }
 
-export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes">): Array<"x" | "y"> {
-  if (type === "bar") return settings.swapAxes ? ["x"] : ["y"];
+export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant">): Array<"x" | "y"> {
+  if (type === "bar") {
+    if (settings.barVariant === "polar") return [];
+    return settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant) ? ["x"] : ["y"];
+  }
   return numericAxesFor(type);
+}
+
+export function isPlotRoleActive(type: PlotType, roleKey: string, settings: VisualizationSettings) {
+  if (type !== "bar") return true;
+  if (roleKey === "secondary") return ["dual-axis", "overlay"].includes(settings.barVariant);
+  if (roleKey === "target") return settings.barVariant === "bullet";
+  if (roleKey === "pValue") return settings.showSignificance && settings.barVariant !== "polar";
+  if (roleKey === "facet") return settings.barVariant === "faceted";
+  if (roleKey === "error") return settings.barErrorType !== "none" && !["stacked", "percentage", "polar"].includes(settings.barVariant);
+  return true;
 }
 
 const plotModuleSeeds: Array<PlotModuleSeed<PlotType, keyof VisualizationSettings>> = plotDefinitionSeeds.map((definition) => ({
@@ -1580,6 +1638,9 @@ export function parseRatioValue(value: string | undefined) {
 const mappingAliases: Record<string, string[]> = {
   category: ["category", "condition", "sample", "name", "term"],
   value: ["value", "mean", "expression", "score", "abundance", "count"],
+  secondary: ["secondary", "secondaryvalue", "comparison", "overlay", "value2"],
+  target: ["target", "reference", "goal", "benchmark", "to", "receiver"],
+  facet: ["facet", "panel", "stratum", "cohort"],
   group: ["group", "class", "condition", "cluster", "ontology"],
   series: ["series", "group", "condition", "class"],
   x: ["x", "time", "dose", "pc1", "dim1", "dimension1", "umap1"],
@@ -1604,7 +1665,6 @@ const mappingAliases: Record<string, string[]> = {
   item: ["item", "gene", "feature", "id"],
   set: ["set", "geneset", "list", "collection"],
   source: ["source", "from", "sender"],
-  target: ["target", "to", "receiver"],
   sourceChr: ["sourcechr", "chr1", "chromosome1"],
   sourceStart: ["sourcestart", "start1"],
   sourceEnd: ["sourceend", "end1"],
@@ -1661,7 +1721,7 @@ export function validatePlotDataset(
     return { errors, warnings };
   }
 
-  definition.roles.forEach((role) => {
+  definition.roles.filter((role) => !settings || isPlotRoleActive(definition.id, role.key, settings)).forEach((role) => {
     const column = mapping[role.key];
     if (role.required && !column) errors.push(`${role.label} must be mapped to a column.`);
     if (column && !dataset.headers.includes(column)) errors.push(`${role.label} references a missing column (${column}).`);
@@ -1688,16 +1748,74 @@ export function validatePlotDataset(
   }
 
   if (definition.id === "bar" || definition.id === "line" || definition.id === "errorbar") {
-    const errorType = definition.id === "bar" ? settings?.barErrorType : settings?.lineErrorType;
-    if (definition.id !== "errorbar" && errorType !== undefined && errorType !== "none" && !mapping.error) {
+    const barSupportsUncertainty = definition.id !== "bar" || !settings || !["stacked", "percentage", "polar"].includes(settings.barVariant);
+    const errorType = definition.id === "bar" ? (barSupportsUncertainty ? settings?.barErrorType : "none") : settings?.lineErrorType;
+    const calculatesFromLongForm = definition.id === "bar" && settings?.barInputMode === "long";
+    if (definition.id !== "errorbar" && errorType !== undefined && errorType !== "none" && !mapping.error && !calculatesFromLongForm) {
       errors.push(`Map an error column before displaying ${errorType.toUpperCase()} error bars.`);
     }
-    if (mapping.error) {
+    if (mapping.error && (definition.id !== "bar" || !settings || isPlotRoleActive("bar", "error", settings))) {
       const negativeErrors = dataset.rows.filter((row) => {
         const value = parseNumericValue(row[mapping.error]);
         return value !== null && value < 0;
       }).length;
       if (negativeErrors > 0) errors.push(`Error magnitude contains ${negativeErrors} negative value${negativeErrors === 1 ? "" : "s"}; SD and SEM must be non-negative.`);
+    }
+  }
+
+  if (definition.id === "bar" && settings) {
+    const needsSecondary = ["dual-axis", "overlay"].includes(settings.barVariant);
+    const needsTarget = settings.barVariant === "bullet";
+    const needsFacet = settings.barVariant === "faceted";
+    if (needsSecondary && !mapping.secondary) errors.push(`${settings.barVariant === "dual-axis" ? "Dual-axis" : "Overlay"} bars require a mapped secondary value column.`);
+    if (needsTarget && !mapping.target) errors.push("Bullet charts require a mapped target value column.");
+    if (needsFacet && !mapping.facet) errors.push("Faceted bars require a mapped facet column.");
+    if (settings.showSignificance && settings.barVariant !== "polar" && !mapping.pValue) errors.push("Map a P value column before displaying significance annotations.");
+    if (mapping.pValue && isPlotRoleActive("bar", "pValue", settings)) {
+      const invalidP = dataset.rows.filter((row) => {
+        const value = parseNumericValue(row[mapping.pValue]);
+        return value === null || value <= 0 || value > 1;
+      }).length;
+      if (invalidP > 0) errors.push(`P value contains ${invalidP} value${invalidP === 1 ? "" : "s"} outside (0, 1].`);
+    }
+    if (settings.barVariant === "axis-break" && settings.axisBreakStart >= settings.axisBreakEnd) {
+      errors.push("Axis-break start must be lower than axis-break end.");
+    }
+    if (settings.barVariant === "pyramid" && (!mapping.group || new Set(dataset.rows.map((row) => row[mapping.group]).filter(Boolean)).size < 2)) {
+      errors.push("Pyramid charts require at least two groups.");
+    }
+    if (settings.barVariant === "polar") {
+      const negativeValues = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) < 0).length;
+      if (negativeValues > 0) errors.push("Polar bars require non-negative values because radius cannot encode direction.");
+    }
+    if (settings.barVariant === "percentage") {
+      const negativeValues = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) < 0).length;
+      if (negativeValues > 0) errors.push("100% stacked bars require non-negative parts; use Bidirectional for signed values.");
+    }
+    if (settings.barVariant === "axis-break") {
+      const displayedValues = settings.barInputMode === "long" ? [...dataset.rows.reduce((buckets, row) => {
+        const value = parseNumericValue(row[mapping.value]);
+        if (value === null) return buckets;
+        const key = `${row[mapping.category] ?? ""}\u0000${mapping.group ? row[mapping.group] ?? "" : ""}\u0000${mapping.facet ? row[mapping.facet] ?? "" : ""}`;
+        const bucket = buckets.get(key) ?? []; bucket.push(value); buckets.set(key, bucket); return buckets;
+      }, new Map<string, number[]>()).values()].flatMap((values) => {
+        const summary = meanErrorStatistics(values);
+        const error = settings.barErrorType === "sd" ? summary.sd : settings.barErrorType === "sem" ? summary.sem : 0;
+        return error > 0 ? [summary.mean, summary.mean - error, summary.mean + error] : [summary.mean];
+      }) : dataset.rows.flatMap((row) => {
+        const value = parseNumericValue(row[mapping.value]);
+        if (value === null) return [];
+        const error = isPlotRoleActive("bar", "error", settings) && mapping.error ? Math.max(0, parseNumericValue(row[mapping.error]) ?? 0) : 0;
+        return error > 0 ? [value, value - error, value + error] : [value];
+      });
+      if (!displayedValues.some((value) => value <= settings.axisBreakStart) || !displayedValues.some((value) => value >= settings.axisBreakEnd)) {
+        warnings.push("The current data do not span both sides of the requested axis break; the preview will use an unbroken scale.");
+      }
+      const insideBreak = displayedValues.filter((value) => value > settings.axisBreakStart && value < settings.axisBreakEnd).length;
+      if (insideBreak > 0) errors.push(`Axis break contains ${insideBreak} displayed value${insideBreak === 1 ? "" : "s"} or uncertainty bound${insideBreak === 1 ? "" : "s"}; choose an empty interval so no marks are hidden or relocated.`);
+    }
+    if (settings.barInputMode === "long" && mapping.error) {
+      warnings.push("Long-form mode calculates SD or SEM from replicate observations; the mapped summary error column is ignored.");
     }
   }
 
@@ -1934,13 +2052,37 @@ export function axisLimitWarning(
     });
     [xValues, yValues] = settings.swapAxes ? [valueExtent, ordered] : [ordered, valueExtent];
   } else if (definition.id === "bar") {
-    const valueExtent = dataset.rows.flatMap((row) => {
+    let valueExtent = dataset.rows.flatMap((row) => {
       const value = numberAt(row, "value");
       if (value === null) return [];
-      const error = settings.barErrorType !== "none" ? Math.max(0, numberAt(row, "error") ?? 0) : 0;
+      const showsUncertainty = settings.barErrorType !== "none" && !["stacked", "percentage", "polar"].includes(settings.barVariant);
+      const error = showsUncertainty ? Math.max(0, numberAt(row, "error") ?? 0) : 0;
       return [value - error, value + error];
     });
-    if (settings.swapAxes) xValues = valueExtent;
+    if (["stacked", "percentage"].includes(settings.barVariant)) {
+      if (settings.barVariant === "percentage") valueExtent = [0, 100];
+      else {
+        const categories = new Map<string, { positive: number; negative: number }>();
+        dataset.rows.forEach((row) => {
+          const category = row[mapping.category] ?? ""; const value = numberAt(row, "value") ?? 0;
+          const totals = categories.get(category) ?? { positive: 0, negative: 0 };
+          if (value >= 0) totals.positive += value; else totals.negative += value;
+          categories.set(category, totals);
+        });
+        valueExtent = [...categories.values()].flatMap((totals) => [totals.negative, totals.positive]);
+      }
+    } else {
+      if (settings.barVariant === "overlay") valueExtent.push(...valuesAt("secondary"));
+      if (settings.barVariant === "bullet") valueExtent.push(...valuesAt("target"));
+      if (settings.barVariant === "pyramid" && mapping.group) {
+        const groups = [...new Set(dataset.rows.map((row) => row[mapping.group]).filter(Boolean))];
+        valueExtent = dataset.rows.flatMap((row) => {
+          const value = numberAt(row, "value"); if (value === null) return [];
+          return [groups.indexOf(row[mapping.group]) < Math.ceil(groups.length / 2) ? -Math.abs(value) : Math.abs(value)];
+        });
+      }
+    }
+    if (settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant)) xValues = valueExtent;
     else yValues = valueExtent;
   } else if (definition.id === "errorbar") {
     yValues = dataset.rows.flatMap((row) => {

@@ -180,6 +180,25 @@ function settingsForTheme(themeId: JournalThemeId): VisualizationSettings {
   };
 }
 
+const distributionPlotTypes: PlotType[] = ["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"];
+
+function settingsForDistributionPreset(current: VisualizationSettings, type: PlotType): VisualizationSettings {
+  if (!distributionPlotTypes.includes(type)) return current;
+  return {
+    ...current,
+    showDensity: ["violin", "raincloud", "density", "ridge"].includes(type),
+    showHistogram: type === "histogram",
+    showBox: ["box", "raincloud"].includes(type),
+    showPoints: ["box", "violin", "beeswarm", "raincloud"].includes(type),
+    showSampleSize: true,
+    distributionSummary: ["violin", "raincloud"].includes(type) ? "median" : "none",
+    boxErrorType: "none",
+    distributionShowPairedLines: false,
+    distributionShowSignificance: false,
+    distributionOrientation: type === "ridge" ? "horizontal" : "vertical",
+  };
+}
+
 function mappingRoleLabel(plotType: PlotType, role: FieldRole, swapAxes: boolean) {
   if (plotType !== "bar") return role.label;
   if (role.key === "category") return `${swapAxes ? "Y" : "X"}-axis · category`;
@@ -213,7 +232,7 @@ function categoricalColorLabels(plotType: PlotType, rows: Array<Record<string, s
   if (plotType === "bar") return uniqueColumnValues(rows, mapping.group, "Value");
   if (plotType === "line" || plotType === "area") return uniqueColumnValues(rows, mapping.series, "All");
   if (["scatter", "correlation", "quadrant", "pca", "pcoa", "umap", "errorbar", "lollipop", "km", "survival-forest", "roc"].includes(plotType)) return uniqueColumnValues(rows, mapping.group, "All");
-  if (["box", "violin", "beeswarm", "raincloud"].includes(plotType)) return uniqueColumnValues(rows, mapping.group, "All");
+  if (distributionPlotTypes.includes(plotType)) return uniqueColumnValues(rows, mapping.group, "All");
   if (plotType === "volcano" || plotType === "ma") return ["Down", "Up", "Not significant"];
   if (plotType === "gsea") return ["Running ES", "Gene-set hits"];
   if (plotType === "venn" || plotType === "upset") return uniqueColumnValues(rows, mapping.set, "Set");
@@ -532,7 +551,7 @@ export function VisualizationStudio() {
     setLoadedFileName("");
     setFileError("");
     if (nextType === "pca") setPcaOptions(defaultPcaOptions);
-    setSettings((current) => ({
+    setSettings((current) => settingsForDistributionPreset({
       ...current,
       title: "",
       xLabel: "",
@@ -540,9 +559,9 @@ export function VisualizationStudio() {
       swapAxes: false,
       compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
       legendPosition: (["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment", "enrichment-bar", "venn", "upset", "sankey", "chord", "circos"] as PlotType[]).includes(nextType) && current.legendPosition === "bottom" ? "right" : current.legendPosition,
-    }));
+    }, nextType));
     window.requestAnimationFrame(() => {
-      previewCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      previewCardRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
     });
   };
 
@@ -906,7 +925,8 @@ export function VisualizationStudio() {
           <Card className="min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col">
             <CardHeader className="h-12 shrink-0" title="Figure parameters" action={<Button size="sm" variant="ghost" onClick={() => {
               const resetSettings = settingsForTheme(themeId);
-              setSettings(plotType === "rose" ? { ...resetSettings, compositionLabelMode: "value" } : resetSettings);
+              const plotResetSettings = plotType === "rose" ? { ...resetSettings, compositionLabelMode: "value" as const } : resetSettings;
+              setSettings(settingsForDistributionPreset(plotResetSettings, plotType));
             }}><RotateCcw className="h-3.5 w-3.5" aria-hidden />Reset</Button>} />
             <CardBody className="space-y-4 p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
               <ControlGroup title="Labels">
@@ -944,7 +964,6 @@ export function VisualizationStudio() {
               {(["line", "scatter", "pca"] as PlotType[]).includes(plotType) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant)) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
               {plotType === "scatter" || plotType === "correlation" ? <><ToggleControl label="Linear trend" checked={settings.showTrend} onChange={(value) => updateSetting("showTrend", value)} /><ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /></> : null}
               {(["pca", "pcoa", "umap", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
-              {(["box", "violin", "beeswarm", "raincloud"] as PlotType[]).includes(plotType) ? <><ToggleControl label="Show observations" checked={settings.showPoints} onChange={(value) => updateSetting("showPoints", value)} /><ToggleControl label="Show sample size" checked={settings.showSampleSize} onChange={(value) => updateSetting("showSampleSize", value)} /></> : null}
             </ControlGroup> : null}
 
             {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} error bars`}>
@@ -970,13 +989,23 @@ export function VisualizationStudio() {
               {settings.barVariant !== "polar" ? <ControlGroup title="Bar appearance"><RangeControl label="Border width" value={settings.barBorderWidth} minimum={0} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("barBorderWidth", value)} />{settings.barBorderWidth > 0 ? <ColorControl label="Border color" value={settings.barBorderColor} onChange={(value) => updateSetting("barBorderColor", value)} /> : null}<p className="text-[11px] leading-4 text-muted">Set the width to 0 for borderless bars. The outline remains fully opaque so it stays legible when fill opacity is reduced.</p></ControlGroup> : null}
             </> : null}
 
-            {plotType === "box" ? <ControlGroup title="Box & summary">
-              <ToggleControl label="Show box & whiskers" checked={settings.showBox} onChange={(value) => updateSetting("showBox", value)} />
-              <SelectControl label="Summary error bar" value={settings.boxErrorType} onChange={(value) => updateSetting("boxErrorType", value as VisualizationSettings["boxErrorType"])}><option value="none">None</option><option value="sd">Mean ± SD</option><option value="sem">Mean ± SEM</option></SelectControl>
-              {settings.boxErrorType !== "none" ? <><RangeControl label="Error line" value={settings.errorBarLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("errorBarLineWidth", value)} /><RangeControl label="Cap width" value={settings.errorBarCapSize} minimum={4} maximum={30} step={1} unit=" px" onChange={(value) => updateSetting("errorBarCapSize", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Calculated from the raw observations in each group. SD uses the sample estimate (n−1); SEM = SD / √n. The open center marker denotes the mean.</p></> : <p className="text-[11px] leading-4 text-muted">Turn off the box layer to show raw points only, or add a mean ± SD/SEM summary bar.</p>}
+            {distributionPlotTypes.includes(plotType) ? <ControlGroup title="Distribution layers">
+              <SelectControl label="Orientation" value={settings.distributionOrientation} onChange={(value) => updateSetting("distributionOrientation", value as VisualizationSettings["distributionOrientation"])}><option value="vertical">Vertical values</option><option value="horizontal">Horizontal values</option></SelectControl>
+              <ToggleControl label="Density" checked={settings.showDensity} onChange={(value) => updateSetting("showDensity", value)} />
+              <ToggleControl label="Histogram" checked={settings.showHistogram} onChange={(value) => updateSetting("showHistogram", value)} />
+              <ToggleControl label="Box & whiskers" checked={settings.showBox} onChange={(value) => updateSetting("showBox", value)} />
+              <ToggleControl label="Raw observations" checked={settings.showPoints} onChange={(value) => updateSetting("showPoints", value)} />
+              <SelectControl label="Center summary" value={settings.distributionSummary} onChange={(value) => updateSetting("distributionSummary", value as VisualizationSettings["distributionSummary"])}><option value="none">Hidden</option><option value="median">Median</option><option value="mean">Mean</option></SelectControl>
+              <SelectControl label="Uncertainty" value={settings.boxErrorType} onChange={(value) => updateSetting("boxErrorType", value as VisualizationSettings["boxErrorType"])}><option value="none">Hidden</option><option value="sd">Mean ± SD</option><option value="sem">Mean ± SEM</option><option value="ci95">Mean 95% CI</option></SelectControl>
+              <ToggleControl label="Paired lines" checked={settings.distributionShowPairedLines} onChange={(value) => updateSetting("distributionShowPairedLines", value)} />
+              <ToggleControl label="Supplied P-value labels" checked={settings.distributionShowSignificance} onChange={(value) => updateSetting("distributionShowSignificance", value)} />
+              <ToggleControl label="Sample size" checked={settings.showSampleSize} onChange={(value) => updateSetting("showSampleSize", value)} />
+              {settings.showHistogram ? <RangeControl label="Histogram bins" value={settings.histogramBins} minimum={3} maximum={30} step={1} onChange={(value) => updateSetting("histogramBins", value)} /> : null}
+              {settings.showDensity ? <><RangeControl label="Bandwidth" value={settings.violinBandwidth} minimum={0.5} maximum={2.5} step={0.05} unit="×" onChange={(value) => updateSetting("violinBandwidth", value)} /><RangeControl label="Density width" value={settings.violinWidth} minimum={0.18} maximum={0.46} step={0.01} onChange={(value) => updateSetting("violinWidth", value)} /></> : null}
+              {settings.boxErrorType !== "none" ? <><RangeControl label="Uncertainty line" value={settings.errorBarLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("errorBarLineWidth", value)} /><RangeControl label="Cap width" value={settings.errorBarCapSize} minimum={4} maximum={30} step={1} unit=" px" onChange={(value) => updateSetting("errorBarCapSize", value)} /></> : null}
+              {settings.distributionShowSignificance ? <RangeControl label="P-value threshold" value={settings.significanceThreshold} minimum={0.001} maximum={0.1} step={0.001} onChange={(value) => updateSetting("significanceThreshold", value)} /> : null}
+              <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">SD describes sample spread, SEM describes mean precision, and the 95% CI uses a two-sided Student t interval. Paired lines require a subject ID. P-value labels display mapped results only; this tool does not choose or run a significance test.</p>
             </ControlGroup> : null}
-
-            {plotType === "violin" || plotType === "raincloud" ? <ControlGroup title={`${plotType === "violin" ? "Violin" : "Raincloud"} density`}><RangeControl label="Bandwidth" value={settings.violinBandwidth} minimum={0.5} maximum={2.5} step={0.05} unit="×" onChange={(value) => updateSetting("violinBandwidth", value)} />{plotType === "violin" ? <RangeControl label="Body width" value={settings.violinWidth} minimum={0.18} maximum={0.46} step={0.01} onChange={(value) => updateSetting("violinWidth", value)} /> : null}<p className="text-[11px] leading-4 text-muted">Higher bandwidth produces a smoother density; the raw observations remain available as a separate layer.</p></ControlGroup> : null}
 
             {plotType === "volcano" || plotType === "ma" ? <ControlGroup title={`${plotType === "volcano" ? "Volcano" : "MA"} thresholds`}><RangeControl label="|log₂FC| threshold" value={settings.foldChangeThreshold} minimum={0} maximum={5} step={0.1} onChange={(value) => updateSetting("foldChangeThreshold", value)} /><RangeControl label="Adjusted P threshold" value={settings.pValueThreshold} minimum={0.001} maximum={0.1} step={0.001} onChange={(value) => updateSetting("pValueThreshold", value)} /><RangeControl label="Maximum labels" value={settings.labelLimit} minimum={0} maximum={30} onChange={(value) => updateSetting("labelLimit", value)} /></ControlGroup> : null}
             {plotType === "correlation" || plotType === "correlation-heatmap" ? <ControlGroup title="Correlation"><SelectControl label="Method" value={settings.correlationMethod} onChange={(value) => updateSetting("correlationMethod", value as VisualizationSettings["correlationMethod"])}><option value="pearson">Pearson</option><option value="spearman">Spearman</option></SelectControl><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The coefficient is calculated from the mapped values. The tool reports r/ρ and n but does not fabricate an inferential P value.</p></ControlGroup> : null}

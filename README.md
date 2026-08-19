@@ -5,8 +5,9 @@ A browser-local scientific visualization workspace for creating compact, publica
 ## Highlights
 
 - Publication-oriented defaults with Arial typography and compact figure dimensions
-- Forty registry-owned modules, including categorical comparison, distribution, dimension reduction, enrichment, survival, set, network, genomic, composition, hierarchy, cyclic profile, and paired-distribution families
+- Forty-three registry-owned modules, including categorical comparison, distribution, dimension reduction, enrichment, survival, set, network, genomic, composition, hierarchy, cyclic profile, and paired-distribution families
 - Distinct pie, donut, rose, waffle, treemap, sunburst, radar, polar-profile, and population-pyramid contracts with scientific suitability guidance and references
+- A unified Box, Violin, Beeswarm, Raincloud, Histogram, Density, and Ridge layer system with deterministic binning, KDE, quartiles, SD, SEM, Student t confidence intervals, pairing, facets, and orientation controls
 - Adjustable labels, dimensions, line weights, marks, grids, legends, uncertainty bars, palettes, and plot-specific parameters
 - Built-in journal-inspired and traditional Chinese color palettes
 - SVG, 600 dpi PNG, and reproducible JSON configuration export

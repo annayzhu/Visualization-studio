@@ -1,5 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+
+async function expectStablePreviewScreenshot(page: Page, locator: Locator, name: string, options: { maxDiffPixels?: number } = {}) {
+  await page.addStyleTag({ content: "[data-visualization-sticky-header]{position:static!important}" });
+  await locator.scrollIntoViewIfNeeded();
+  await expect(locator).toHaveScreenshot(name, { animations: "disabled", ...options });
+}
 
 test.describe("Visualization Studio browser acceptance", () => {
   test("selects, resets, remaps, adjusts, and exports a representative plot", async ({ page }, testInfo) => {
@@ -72,7 +78,7 @@ test.describe("Visualization Studio browser acceptance", () => {
     expect(rasterEvidence.nonWhite).toBeGreaterThan(50);
 
     const previewCard = page.getByRole("heading", { name: "Raincloud preview" }).locator("xpath=ancestor::section");
-    await expect(previewCard).toHaveScreenshot("raincloud-dense-desktop.png", { animations: "disabled" });
+    await expectStablePreviewScreenshot(page, previewCard, "raincloud-dense-desktop.png");
 
     const yMaximum = page.getByRole("textbox", { name: "Y maximum", exact: true });
     await yMaximum.fill("5");
@@ -102,7 +108,7 @@ test.describe("Visualization Studio browser acceptance", () => {
 8\t5.5\tIndependent validation cohort\tS8`);
     await page.getByRole("button", { name: "Auto-map" }).click();
     const legendPreview = page.getByRole("heading", { name: "Scatter preview" }).locator("xpath=ancestor::section");
-    await expect(legendPreview).toHaveScreenshot("scatter-long-legend-desktop.png", { animations: "disabled" });
+    await expectStablePreviewScreenshot(page, legendPreview, "scatter-long-legend-desktop.png");
 
     await page.getByRole("textbox", { name: "X minimum", exact: true }).fill("10");
     await page.getByRole("textbox", { name: "X minimum", exact: true }).press("Enter");
@@ -129,7 +135,7 @@ test.describe("Visualization Studio browser acceptance", () => {
     await expect(paletteToggle).toHaveAttribute("aria-expanded", "true");
 
     const previewCard = page.getByRole("heading", { name: "Correlation heatmap preview" }).locator("xpath=ancestor::section");
-    await expect(previewCard).toHaveScreenshot("correlation-heatmap-mobile.png", { animations: "disabled" });
+    await expectStablePreviewScreenshot(page, previewCard, "correlation-heatmap-mobile.png");
   });
 
   test("switches categorical variants and computes long-form uncertainty", async ({ page }, testInfo) => {
@@ -157,7 +163,7 @@ test.describe("Visualization Studio browser acceptance", () => {
     await variant.selectOption("dual-axis");
     await expect(page.getByRole("textbox", { name: "Secondary axis label" })).toHaveValue("Secondary value");
     const previewCard = page.getByRole("heading", { name: "Bar preview" }).locator("xpath=ancestor::section");
-    await expect(previewCard).toHaveScreenshot("bar-dual-axis-desktop.png", { animations: "disabled" });
+    await expectStablePreviewScreenshot(page, previewCard, "bar-dual-axis-desktop.png");
 
     await variant.selectOption("bidirectional");
     await page.getByRole("combobox", { name: "Error representation" }).selectOption("none");
@@ -235,7 +241,7 @@ test.describe("Visualization Studio browser acceptance", () => {
       await page.getByRole("button", { name: /^Sunburst/ }).click();
       await page.getByRole("combobox", { name: "Legend" }).selectOption("right");
       const previewCard = page.getByRole("heading", { name: "Sunburst preview" }).locator("xpath=ancestor::section");
-      await expect(previewCard).toHaveScreenshot("sunburst-hierarchy-desktop.png", { animations: "disabled", maxDiffPixels: 100 });
+      await expectStablePreviewScreenshot(page, previewCard, "sunburst-hierarchy-desktop.png", { maxDiffPixels: 100 });
     } else {
       await plotSelect.selectOption("radar");
       await expect(page.getByRole("heading", { name: "Radar preview" })).toBeVisible();
@@ -243,7 +249,7 @@ test.describe("Visualization Studio browser acceptance", () => {
       expect(svgBox).not.toBeNull();
       expect(svgBox!.width).toBeLessThanOrEqual(340);
       const previewCard = page.getByRole("heading", { name: "Radar preview" }).locator("xpath=ancestor::section");
-      await expect(previewCard).toHaveScreenshot("radar-profile-mobile.png", { animations: "disabled" });
+      await expectStablePreviewScreenshot(page, previewCard, "radar-profile-mobile.png");
       await plotSelect.selectOption("sunburst");
     }
 
@@ -256,5 +262,51 @@ test.describe("Visualization Studio browser acceptance", () => {
     expect(source).toContain('data-plot-renderer="advanced"');
     expect(source).toContain('data-plot-family="sunburst"');
     expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
+
+  test("composes distribution layers, paired facets, and orientation responsively", async ({ page }, testInfo) => {
+    await page.goto("/");
+    if (testInfo.project.name === "desktop-chromium") {
+      await page.getByRole("button", { name: /^Histogram/ }).click();
+      await expect(page.getByRole("checkbox", { name: "Histogram" })).toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Density" })).not.toBeChecked();
+      await page.getByRole("button", { name: "Example 2" }).click();
+      await page.getByRole("checkbox", { name: "Density" }).check({ force: true });
+      await page.getByRole("checkbox", { name: "Box & whiskers" }).check({ force: true });
+      await page.getByRole("checkbox", { name: "Paired lines" }).check({ force: true });
+      await page.getByRole("checkbox", { name: "Supplied P-value labels" }).check({ force: true });
+      await page.getByRole("combobox", { name: "Center summary" }).selectOption("mean");
+      await page.getByRole("combobox", { name: "Uncertainty" }).selectOption("ci95");
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      const svg = page.locator("svg[aria-label='Histogram scientific figure preview']");
+      for (const element of ["density", "histogram-bin", "box-layer", "center-summary", "uncertainty", "paired-line", "facet-label"]) expect(await svg.locator(`[data-plot-element='${element}']`).count(), element).toBeGreaterThan(0);
+      await expect(svg).toContainText("Discovery");
+      await expect(svg).toContainText("p=0.03");
+      const distributionPreview = page.getByRole("heading", { name: "Histogram preview" }).locator("xpath=ancestor::section");
+      await expectStablePreviewScreenshot(page, distributionPreview, "distribution-layers-desktop.png");
+      await page.getByRole("combobox", { name: "Orientation" }).selectOption("horizontal");
+      await expect(page.getByRole("textbox", { name: "X minimum", exact: true })).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Y minimum", exact: true })).toHaveCount(0);
+
+      const downloadEvent = page.waitForEvent("download");
+      await page.getByRole("button", { name: "SVG" }).click();
+      const path = await (await downloadEvent).path();
+      expect(path).not.toBeNull();
+      const source = await readFile(path!, "utf8");
+      expect(source).toContain('data-plot-family="distribution"');
+      expect(source).toContain('data-plot-element="paired-line"');
+      expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+
+      await page.getByRole("button", { name: /^Ridge/ }).click();
+      await expect(page.getByRole("combobox", { name: "Orientation" })).toHaveValue("horizontal");
+      await expect(page.getByRole("checkbox", { name: "Density" })).toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Histogram" })).not.toBeChecked();
+    } else {
+      await page.getByRole("combobox", { name: "Plot type" }).selectOption("ridge");
+      await expect(page.getByRole("heading", { name: "Ridge preview" })).toBeVisible();
+      const svgBox = await page.locator("svg[aria-label='Ridge scientific figure preview']").boundingBox();
+      expect(svgBox).not.toBeNull();
+      expect(svgBox!.width).toBeLessThanOrEqual(340);
+    }
   });
 });

@@ -16,6 +16,9 @@ export type PlotType =
   | "violin"
   | "beeswarm"
   | "raincloud"
+  | "histogram"
+  | "density"
+  | "ridge"
   | "volcano"
   | "ma"
   | "quadrant"
@@ -199,7 +202,14 @@ export type VisualizationSettings = {
   showPoints: boolean;
   showSampleSize: boolean;
   showBox: boolean;
-  boxErrorType: "none" | "sd" | "sem";
+  boxErrorType: "none" | "sd" | "sem" | "ci95";
+  showDensity: boolean;
+  showHistogram: boolean;
+  distributionSummary: "none" | "median" | "mean";
+  distributionShowPairedLines: boolean;
+  distributionShowSignificance: boolean;
+  distributionOrientation: "vertical" | "horizontal";
+  histogramBins: number;
   barErrorType: "none" | "sd" | "sem";
   barVariant: "grouped" | "stacked" | "percentage" | "horizontal" | "bidirectional" | "faceted" | "polar" | "bullet" | "pyramid" | "axis-break" | "dual-axis" | "overlay";
   barInputMode: "summary" | "long";
@@ -272,6 +282,13 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   showSampleSize: true,
   showBox: true,
   boxErrorType: "none",
+  showDensity: false,
+  showHistogram: false,
+  distributionSummary: "median",
+  distributionShowPairedLines: false,
+  distributionShowSignificance: false,
+  distributionOrientation: "vertical",
+  histogramBins: 8,
   barErrorType: "none",
   barVariant: "grouped",
   barInputMode: "summary",
@@ -720,6 +737,19 @@ Treatment B\t5.6
 Treatment B\t6.1
 Treatment B\t7.0
 Treatment B\t7.8`,
+  distributionPaired: `subject\tgroup\tvalue\tfacet\tp_value
+S01\tControl\t4.1\tDiscovery\t0.032
+S01\tTreatment\t5.5\tDiscovery\t0.032
+S02\tControl\t4.6\tDiscovery\t0.032
+S02\tTreatment\t6.2\tDiscovery\t0.032
+S03\tControl\t4.8\tDiscovery\t0.032
+S03\tTreatment\t6.4\tDiscovery\t0.032
+S04\tControl\t4.3\tValidation\t0.018
+S04\tTreatment\t5.8\tValidation\t0.018
+S05\tControl\t4.9\tValidation\t0.018
+S05\tTreatment\t6.7\tValidation\t0.018
+S06\tControl\t5.1\tValidation\t0.018
+S06\tTreatment\t7.0\tValidation\t0.018`,
   volcano: `gene\tlog2FC\tpadj
 TP53\t-2.8\t0.0002
 EGFR\t2.4\t0.0008
@@ -971,9 +1001,16 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     roles: [
       { key: "group", label: "Group", kind: "category", required: true },
       { key: "value", label: "Value", kind: "number", required: true },
+      { key: "subject", label: "Subject / pair ID", kind: "label", required: false },
+      { key: "facet", label: "Facet", kind: "category", required: false },
+      { key: "pValue", label: "Facet / comparison P value", kind: "number", required: false },
     ],
-    defaultMapping: { group: "group", value: "value" },
+    defaultMapping: { group: "group", value: "value", subject: "", facet: "", pValue: "" },
     sampleData: samples.distribution,
+    examples: [
+      { label: "Example 1", description: "Independent long-form observations grouped by condition.", data: samples.distribution, mapping: { group: "group", value: "value", subject: "", facet: "", pValue: "" } },
+      { label: "Example 2", description: "Paired observations with subject IDs, facets, and supplied group P values.", data: samples.distributionPaired, mapping: { group: "group", value: "value", subject: "subject", facet: "facet", pValue: "p_value" } },
+    ],
   },
   {
     id: "violin",
@@ -984,9 +1021,16 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     roles: [
       { key: "group", label: "Group", kind: "category", required: true },
       { key: "value", label: "Value", kind: "number", required: true },
+      { key: "subject", label: "Subject / pair ID", kind: "label", required: false },
+      { key: "facet", label: "Facet", kind: "category", required: false },
+      { key: "pValue", label: "Facet / comparison P value", kind: "number", required: false },
     ],
-    defaultMapping: { group: "group", value: "value" },
+    defaultMapping: { group: "group", value: "value", subject: "", facet: "", pValue: "" },
     sampleData: samples.distribution,
+    examples: [
+      { label: "Example 1", description: "Independent long-form observations grouped by condition.", data: samples.distribution, mapping: { group: "group", value: "value", subject: "", facet: "", pValue: "" } },
+      { label: "Example 2", description: "Paired observations with subject IDs, facets, and supplied group P values.", data: samples.distributionPaired, mapping: { group: "group", value: "value", subject: "subject", facet: "facet", pValue: "p_value" } },
+    ],
   },
   {
     id: "volcano",
@@ -1120,18 +1164,25 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     defaultMapping: { category: "category", value: "value", group: "group" },
     sampleData: samples.lollipop,
   },
-  ...(["beeswarm", "raincloud"] as const).map((id) => ({
+  ...(["beeswarm", "raincloud", "histogram", "density", "ridge"] as const).map((id) => ({
     id,
-    name: id === "beeswarm" ? "Beeswarm" : "Raincloud",
+    name: id === "beeswarm" ? "Beeswarm" : id === "raincloud" ? "Raincloud" : id === "histogram" ? "Histogram" : id === "density" ? "Density" : "Ridge",
     family: "Distribution",
-    summary: id === "beeswarm" ? "Deterministically packed raw observations without an enclosing box." : "Half-violin density, raw observations, and a compact median/IQR summary.",
+    summary: id === "beeswarm" ? "Deterministically packed raw observations without an enclosing box." : id === "raincloud" ? "Density, raw observations, and compact summaries in one layered view." : id === "histogram" ? "Deterministically binned frequency distributions for grouped observations." : id === "density" ? "Kernel-density estimates with explicit bandwidth and optional raw-data layers." : "Overlapping kernel-density profiles arranged as compact ridgelines.",
     inputHint: "Long format: one row per raw observation. At least three values per group are recommended.",
     roles: [
       { key: "group", label: "Group", kind: "category" as const, required: true },
       { key: "value", label: "Value", kind: "number" as const, required: true },
+      { key: "subject", label: "Subject / pair ID", kind: "label" as const, required: false },
+      { key: "facet", label: "Facet", kind: "category" as const, required: false },
+      { key: "pValue", label: "Facet / comparison P value", kind: "number" as const, required: false },
     ],
-    defaultMapping: { group: "group", value: "value" },
+    defaultMapping: { group: "group", value: "value", subject: "", facet: "", pValue: "" },
     sampleData: samples.distribution,
+    examples: [
+      { label: "Example 1", description: "Independent long-form observations grouped by condition.", data: samples.distribution, mapping: { group: "group", value: "value", subject: "", facet: "", pValue: "" } },
+      { label: "Example 2", description: "Paired observations with subject IDs, facets, and supplied group P values.", data: samples.distributionPaired, mapping: { group: "group", value: "value", subject: "subject", facet: "facet", pValue: "p_value" } },
+    ],
   })),
   ...(["pcoa", "umap"] as const).map((id) => ({
     id,
@@ -1382,6 +1433,9 @@ export const plotReferences = {
   violin: { citation: "Hintze & Nelson, 1998. Violin Plots: A Box Plot-Density Trace Synergism. The American Statistician.", href: "https://doi.org/10.1080/00031305.1998.10480559" },
   rawData: { citation: "Weissgerber et al., 2015. Beyond Bar and Line Graphs: Time for a New Data Presentation Paradigm. PLoS Biol.", href: "https://doi.org/10.1371/journal.pbio.1002128" },
   raincloud: { citation: "Allen et al., 2021. Raincloud plots: a multi-platform tool for robust data visualization. Wellcome Open Res.", href: "https://doi.org/10.12688/wellcomeopenres.15191.2" },
+  histogram: { citation: "Scott, 1979. On optimal and data-based histograms. Biometrika.", href: "https://doi.org/10.1093/biomet/66.3.605" },
+  kernelDensity: { citation: "Silverman, 1986. Density Estimation for Statistics and Data Analysis. Chapman and Hall.", href: "https://doi.org/10.1201/9781315140919" },
+  ridgeline: { citation: "Wilke, 2019. Fundamentals of Data Visualization: Visualizing many distributions at once. O'Reilly.", href: "https://clauswilke.com/dataviz/visualizing-many-distributions-at-once.html" },
   volcano: { citation: "Li, 2012. Volcano Plots in Analyzing Differential Expressions with mRNA Microarrays. J Bioinform Comput Biol.", href: "https://doi.org/10.1142/S0219720012310038" },
   ma: { citation: "Yang et al., 2002. Normalization for cDNA microarray data. Nucleic Acids Res.", href: "https://doi.org/10.1093/nar/30.4.e15" },
   lollipop: { citation: "Jay & Brouwer, 2016. Lollipops in the Clinic: Information Dense Mutation Plots for Precision Medicine. PLoS ONE.", href: "https://doi.org/10.1371/journal.pone.0160519" },
@@ -1481,6 +1535,24 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     answers: "组间中心趋势、分布形状和个体变异能否同时得到支持。",
     origin: "Allen 等人于 2019 年系统整理并命名 raincloud plot，用一个视图同时保留分布、原始数据和汇总统计。",
     references: [plotReferences.raincloud],
+  },
+  histogram: {
+    definition: "把连续数值划入等宽区间，以每个区间的频数绘制相邻矩形；图形形状会随箱数改变。",
+    suitableData: "单组或多组连续原始观测，可按分组与分面比较；应报告箱数或箱宽。",
+    answers: "数据集中在哪些范围，是否偏态、多峰、长尾或存在稀疏区间。",
+    references: [plotReferences.histogram, plotReferences.rawData],
+  },
+  density: {
+    definition: "用核函数平滑每个观察值并求和，得到连续概率密度估计；曲线面积而非高度总和对应 1。",
+    suitableData: "具有足够样本量的连续原始观测；带宽必须可追踪并避免把小样本的平滑形状当作真实结构。",
+    answers: "分布的整体形状、偏态、峰和尾部如何，且这些形状对带宽是否稳定。",
+    references: [plotReferences.kernelDensity, plotReferences.violin],
+  },
+  ridge: {
+    definition: "把多个密度曲线沿分类轴错开排列，以紧凑方式比较许多组的分布轮廓。",
+    suitableData: "多个有序或可比较分组的连续原始观测，尤其适合时间点、剂量层级或细胞群。",
+    answers: "分布位置与形状如何沿组别移动；曲线重叠较多时不适合精确读取单个密度值。",
+    references: [plotReferences.kernelDensity, plotReferences.graphicalPerception],
   },
   volcano: {
     definition: "以效应量（常为 log₂ fold change）为 X，以 −log₁₀(P 值或 FDR) 为 Y 的差异结果散点图。",
@@ -1682,7 +1754,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 };
 
 const advancedRendererIds = new Set<PlotType>([
-  "correlation", "pcoa", "umap", "beeswarm", "raincloud", "ma", "quadrant", "errorbar", "area", "lollipop",
+  "correlation", "pcoa", "umap", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -1692,15 +1764,19 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
   "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ];
-const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"]);
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "errorBarLineWidth", "errorBarCapSize"],
   scatter: ["swapAxes", "showTrend", "showLabels"], correlation: ["showTrend", "showLabels", "correlationMethod"], pca: ["swapAxes", "showLabels"],
   pcoa: ["showLabels"], umap: ["showLabels"],
-  box: ["showBox", "showPoints", "showSampleSize", "boxErrorType", "errorBarLineWidth", "errorBarCapSize"],
-  violin: ["showPoints", "showSampleSize", "violinBandwidth", "violinWidth"], beeswarm: ["showPoints", "showSampleSize"],
-  raincloud: ["showPoints", "showSampleSize", "violinBandwidth"],
+  box: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
+  violin: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
+  beeswarm: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
+  raincloud: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
+  histogram: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
+  density: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
+  ridge: ["showDensity", "showHistogram", "showBox", "showPoints", "showSampleSize", "distributionSummary", "boxErrorType", "distributionShowPairedLines", "distributionShowSignificance", "significanceThreshold", "distributionOrientation", "histogramBins", "violinBandwidth", "violinWidth", "errorBarLineWidth", "errorBarCapSize"],
   volcano: ["showLabels", "foldChangeThreshold", "pValueThreshold", "labelLimit"],
   ma: ["showLabels", "foldChangeThreshold", "pValueThreshold", "labelLimit"], quadrant: ["showLabels", "xThreshold", "yThreshold"],
   errorbar: ["errorBarLineWidth", "errorBarCapSize"],
@@ -1740,16 +1816,18 @@ function dataShapeFor(type: PlotType): PlotDataShape {
 function numericAxesFor(type: PlotType): Array<"x" | "y"> {
   if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
   if (["enrichment", "enrichment-bar", "survival-forest"].includes(type)) return ["x"];
-  if (["box", "violin", "beeswarm", "raincloud", "errorbar", "lollipop"].includes(type)) return ["y"];
+  if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return ["x", "y"];
+  if (["errorbar", "lollipop"].includes(type)) return ["y"];
   if (type === "bar") return ["x", "y"];
   return ["x", "y"];
 }
 
-export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant">): Array<"x" | "y"> {
+export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation">): Array<"x" | "y"> {
   if (type === "bar") {
     if (settings.barVariant === "polar") return [];
     return settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant) ? ["x"] : ["y"];
   }
+  if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return settings.distributionOrientation === "horizontal" ? ["x"] : ["y"];
   return numericAxesFor(type);
 }
 
@@ -1896,6 +1974,7 @@ const mappingAliases: Record<string, string[]> = {
   secondary: ["secondary", "secondaryvalue", "comparison", "overlay", "value2"],
   target: ["target", "reference", "goal", "benchmark", "to", "receiver"],
   facet: ["facet", "panel", "stratum", "cohort"],
+  subject: ["subject", "subjectid", "pair", "pairid", "participant", "sampleid"],
   group: ["group", "class", "condition", "cluster", "ontology"],
   series: ["series", "group", "condition", "class"],
   x: ["x", "time", "dose", "pc1", "dim1", "dimension1", "umap1"],
@@ -2199,10 +2278,58 @@ export function validatePlotDataset(
     }
   }
 
-  if (["box", "violin", "beeswarm", "raincloud"].includes(definition.id) && mapping.group) {
-    const groups = groupNumericValues(dataset.rows, mapping.group, mapping.value);
-    for (const [group, values] of groups) {
-      if (values.length < 3) warnings.push(`${group} has n=${values.length}; distribution estimates are unstable.`);
+  if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(definition.id) && mapping.group) {
+    const lanes = distributionNumericLanes(dataset.rows, mapping.group, mapping.value, mapping.facet);
+    for (const lane of lanes) {
+      const label = mapping.facet ? `${lane.facet} / ${lane.group}` : lane.group;
+      if (lane.values.length < 3) warnings.push(`${label} has n=${lane.values.length}; distribution estimates are unstable.`);
+    }
+    if (settings) {
+      const visibleLayers = settings.showDensity || settings.showHistogram || settings.showBox || settings.showPoints || settings.distributionSummary !== "none" || settings.boxErrorType !== "none";
+      if (!visibleLayers) errors.push("Enable at least one distribution layer before exporting.");
+      if (settings.histogramBins < 3 || settings.histogramBins > 60 || !Number.isInteger(settings.histogramBins)) errors.push("Histogram bins must be an integer from 3 to 60.");
+      if (settings.distributionShowPairedLines) {
+        if (!mapping.subject) errors.push("Map a Subject / pair ID column before displaying paired lines.");
+        else {
+          const blankSubjects = dataset.rows.filter((row) => !row[mapping.subject]?.trim()).length;
+          if (blankSubjects > 0) errors.push(`Subject / pair ID contains ${blankSubjects} blank value${blankSubjects === 1 ? "" : "s"}; paired lines require a complete identifier for every row.`);
+          const pairKeys = dataset.rows.filter((row) => row[mapping.subject]?.trim()).map((row) => `${mapping.facet ? row[mapping.facet] || "All" : "All"}\u0000${row[mapping.group]}\u0000${row[mapping.subject]}`);
+          if (new Set(pairKeys).size !== pairKeys.length) errors.push("Paired distribution data require at most one value per subject, group, and facet combination.");
+          const facets = [...new Set(dataset.rows.map((row) => mapping.facet ? row[mapping.facet] || "All" : "All"))];
+          for (const facet of facets) {
+            const facetRows = dataset.rows.filter((row) => (mapping.facet ? row[mapping.facet] || "All" : "All") === facet && row[mapping.subject]?.trim());
+            const requiredGroups = [...new Set(facetRows.map((row) => row[mapping.group] || "All"))].sort();
+            if (requiredGroups.length < 2) {
+              errors.push(`${mapping.facet ? `${facet}: ` : ""}Paired lines require at least two groups.`);
+              continue;
+            }
+            const subjects = [...new Set(facetRows.map((row) => row[mapping.subject]))];
+            for (const subject of subjects) {
+              const observedGroups = [...new Set(facetRows.filter((row) => row[mapping.subject] === subject).map((row) => row[mapping.group] || "All"))].sort();
+              if (observedGroups.length !== requiredGroups.length || observedGroups.some((group, index) => group !== requiredGroups[index])) {
+                errors.push(`${mapping.facet ? `${facet}: ` : ""}Subject ${subject} is missing one or more paired groups; every subject must have the same group set within a facet.`);
+              }
+            }
+          }
+        }
+      }
+      if (settings.distributionShowSignificance) {
+        if (!mapping.pValue) errors.push("Map a Group P value column before displaying significance labels.");
+        else {
+          const invalidP = dataset.rows.filter((row) => {
+            const value = parseNumericValue(row[mapping.pValue]);
+            return value === null || value <= 0 || value > 1;
+          }).length;
+          if (invalidP > 0) errors.push(`Facet / comparison P value contains ${invalidP} value${invalidP === 1 ? "" : "s"} outside (0, 1].`);
+          const facetValues = new Map<string, Set<number>>();
+          dataset.rows.forEach((row) => { const value = parseNumericValue(row[mapping.pValue]); if (value === null) return; const facet = mapping.facet ? row[mapping.facet] || "All" : "All"; const values = facetValues.get(facet) ?? new Set<number>(); values.add(value); facetValues.set(facet, values); });
+          if ([...facetValues.values()].some((values) => values.size > 1)) errors.push("Each facet must supply one consistent comparison P value.");
+        }
+      }
+      if (settings.boxErrorType !== "none") {
+        const insufficient = lanes.filter((lane) => lane.values.length < 2).map((lane) => mapping.facet ? `${lane.facet} / ${lane.group}` : lane.group);
+        if (insufficient.length > 0) errors.push(`Uncertainty requires at least two observations in every facet × group lane; insufficient: ${insufficient.join(", ")}.`);
+      }
     }
   }
 
@@ -2279,6 +2406,21 @@ export function groupNumericValues(rows: DelimitedRow[], groupColumn: string, va
   return groups;
 }
 
+export function distributionNumericLanes(rows: DelimitedRow[], groupColumn: string, valueColumn: string, facetColumn = "") {
+  const lanes = new Map<string, { facet: string; group: string; values: number[] }>();
+  rows.forEach((row) => {
+    const facet = facetColumn ? row[facetColumn] || "All" : "All";
+    const group = row[groupColumn] || "All";
+    const value = parseNumericValue(row[valueColumn]);
+    if (value === null) return;
+    const key = `${facet}\u0000${group}`;
+    const lane = lanes.get(key) ?? { facet, group, values: [] };
+    lane.values.push(value);
+    lanes.set(key, lane);
+  });
+  return [...lanes.values()];
+}
+
 export function quantile(values: number[], probability: number) {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -2317,6 +2459,112 @@ export function meanErrorStatistics(values: number[]) {
     : 0;
   const sd = Math.sqrt(variance);
   return { mean, sd, sem: sd / Math.sqrt(finite.length), n: finite.length };
+}
+
+export function confidenceInterval95(values: number[]) {
+  const summary = meanErrorStatistics(values);
+  if (summary.n < 2) return { mean: summary.mean, lower: summary.mean, upper: summary.mean, margin: 0, n: summary.n };
+  const criticalValues = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042];
+  const degreesOfFreedom = summary.n - 1;
+  const critical = degreesOfFreedom <= criticalValues.length ? criticalValues[degreesOfFreedom - 1] : studentTCritical95(degreesOfFreedom);
+  const margin = critical * summary.sem;
+  return { mean: summary.mean, lower: summary.mean - margin, upper: summary.mean + margin, margin, n: summary.n };
+}
+
+export function studentTCritical95(degreesOfFreedom: number) {
+  if (!Number.isFinite(degreesOfFreedom) || degreesOfFreedom <= 0) return Number.NaN;
+  const df = Math.max(1, degreesOfFreedom);
+  const z = 1.959963984540054;
+  const z2 = z * z;
+  const z3 = z2 * z;
+  const z5 = z3 * z2;
+  const z7 = z5 * z2;
+  const z9 = z7 * z2;
+  const inverseDf = 1 / df;
+  return z
+    + (z3 + z) * inverseDf / 4
+    + (5 * z5 + 16 * z3 + 3 * z) * inverseDf ** 2 / 96
+    + (3 * z7 + 19 * z5 + 17 * z3 - 15 * z) * inverseDf ** 3 / 384
+    + (79 * z9 + 776 * z7 + 1482 * z5 - 1920 * z3 - 945 * z) * inverseDf ** 4 / 92160;
+}
+
+export function deterministicHistogram(values: number[], requestedBins: number, domain?: [number, number]) {
+  const finite = values.filter(Number.isFinite);
+  const count = Math.max(3, Math.min(60, Math.round(requestedBins)));
+  const automatic = numericExtent(finite);
+  const [minimum, maximum] = domain ?? automatic;
+  const span = Math.max(maximum - minimum, Number.EPSILON);
+  const width = span / count;
+  const bins = Array.from({ length: count }, (_, index) => ({
+    index,
+    lower: minimum + index * width,
+    upper: index === count - 1 ? maximum : minimum + (index + 1) * width,
+    midpoint: minimum + (index + 0.5) * width,
+    count: 0,
+  }));
+  finite.forEach((value) => {
+    if (value < minimum || value > maximum) return;
+    const index = value === maximum ? count - 1 : Math.min(count - 1, Math.max(0, Math.floor((value - minimum) / width)));
+    bins[index].count += 1;
+  });
+  return bins;
+}
+
+export function deterministicBeeswarmLayout(valuePositions: number[], requestedPointRadius: number, maximumOffset: number) {
+  const requestedRadius = Math.max(0.05, requestedPointRadius);
+  const limit = Math.max(0, maximumOffset);
+  const order = valuePositions.map((valuePosition, index) => ({ valuePosition, index })).sort((left, right) => left.valuePosition - right.valuePosition || left.index - right.index);
+  const attempt = (pointRadius: number, gap: number) => {
+    const minimumDistance = pointRadius * 2 + gap;
+    const candidateStep = Math.max(minimumDistance / 3, Number.EPSILON);
+    const candidates = [0];
+    for (let distance = candidateStep; distance <= limit + Number.EPSILON; distance += candidateStep) {
+      const bounded = Math.min(limit, distance);
+      candidates.push(bounded, -bounded);
+    }
+    const offsets = Array(valuePositions.length).fill(0) as number[];
+    const cells = new Map<string, Array<{ valuePosition: number; offset: number }>>();
+    const cellAt = (value: number) => Math.floor(value / minimumDistance);
+    const clears = (valuePosition: number, offset: number) => {
+      const valueCell = cellAt(valuePosition);
+      const offsetCell = cellAt(offset);
+      for (let valueDelta = -1; valueDelta <= 1; valueDelta += 1) {
+        for (let offsetDelta = -1; offsetDelta <= 1; offsetDelta += 1) {
+          const neighbors = cells.get(`${valueCell + valueDelta}\u0000${offsetCell + offsetDelta}`) ?? [];
+          if (neighbors.some((point) => Math.hypot(valuePosition - point.valuePosition, offset - point.offset) < minimumDistance - 1e-7)) return false;
+        }
+      }
+      return true;
+    };
+    for (const { valuePosition, index } of order) {
+      const selected = candidates.find((candidate) => clears(valuePosition, candidate));
+      if (selected === undefined) return null;
+      offsets[index] = selected;
+      const key = `${cellAt(valuePosition)}\u0000${cellAt(selected)}`;
+      const points = cells.get(key) ?? [];
+      points.push({ valuePosition, offset: selected });
+      cells.set(key, points);
+    }
+    return { offsets, pointRadius, minimumDistance };
+  };
+  const requested = attempt(requestedRadius, 0.8);
+  if (requested) return { ...requested, scaled: false };
+  const capacityDistance = valuePositions.length > 1 ? (limit * 2) / (valuePositions.length - 1) : requestedRadius * 2 + 0.8;
+  let scaledRadius = Math.min(requestedRadius, Math.max(Number.EPSILON, capacityDistance / 2.25));
+  for (let retry = 0; retry < 12; retry += 1) {
+    const scaled = attempt(scaledRadius, scaledRadius * 0.25);
+    if (scaled) return { ...scaled, scaled: true };
+    scaledRadius *= 0.9;
+  }
+  const fallbackSpacing = valuePositions.length > 1 ? (limit * 2) / (valuePositions.length - 1) : requestedRadius * 2.25;
+  const fallbackRadius = fallbackSpacing / 2.25;
+  const offsets = Array(valuePositions.length).fill(0) as number[];
+  order.forEach(({ index }, orderIndex) => { offsets[index] = valuePositions.length > 1 ? -limit + orderIndex * fallbackSpacing : 0; });
+  return { offsets, pointRadius: fallbackRadius, minimumDistance: fallbackSpacing, scaled: true };
+}
+
+export function deterministicBeeswarmOffsets(valuePositions: number[], pointRadius: number, maximumOffset: number) {
+  return deterministicBeeswarmLayout(valuePositions, pointRadius, maximumOffset).offsets;
 }
 
 export function kernelDensityEstimate(
@@ -2471,13 +2719,28 @@ export function axisLimitWarning(
       const error = Math.max(0, numberAt(row, "error") ?? 0);
       return [value - error, value + error];
     });
-  } else if (["box", "violin", "beeswarm", "raincloud"].includes(definition.id)) {
-    yValues = valuesAt("value");
-    if (definition.id === "box" && settings.boxErrorType !== "none" && mapping.group) {
-      for (const values of groupNumericValues(dataset.rows, mapping.group, mapping.value).values()) {
-        const summary = meanErrorStatistics(values);
-        const error = settings.boxErrorType === "sd" ? summary.sd : summary.sem;
-        yValues.push(summary.mean - error, summary.mean + error);
+  } else if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(definition.id)) {
+    const distributionValues = valuesAt("value");
+    if (settings.distributionOrientation === "horizontal") xValues = distributionValues;
+    else yValues = distributionValues;
+    if (settings.showDensity && mapping.group) {
+      const rawDomain = numericExtent(distributionValues);
+      const rawSpan = Math.max(rawDomain[1] - rawDomain[0], 1e-9);
+      const densityBoundaryDomain: [number, number] = [rawDomain[0] - rawSpan * 0.16, rawDomain[1] + rawSpan * 0.16];
+      const densitySupport = distributionNumericLanes(dataset.rows, mapping.group, mapping.value, mapping.facet).flatMap((lane) => {
+        const points = kernelDensityEstimate(lane.values, densityBoundaryDomain, settings.violinBandwidth).points;
+        return points.length > 0 ? [points[0].position, points[points.length - 1].position] : [];
+      });
+      if (settings.distributionOrientation === "horizontal") xValues.push(...densitySupport);
+      else yValues.push(...densitySupport);
+    }
+    if (settings.boxErrorType !== "none" && mapping.group) {
+      for (const lane of distributionNumericLanes(dataset.rows, mapping.group, mapping.value, mapping.facet)) {
+        if (lane.values.length < 2) continue;
+        const summary = meanErrorStatistics(lane.values);
+        const error = settings.boxErrorType === "sd" ? summary.sd : settings.boxErrorType === "sem" ? summary.sem : confidenceInterval95(lane.values).margin;
+        if (settings.distributionOrientation === "horizontal") xValues.push(summary.mean - error, summary.mean + error);
+        else yValues.push(summary.mean - error, summary.mean + error);
       }
     }
   } else if (definition.id === "ma") {

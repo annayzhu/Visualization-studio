@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode, RefObject } from "react";
+import { ScientificGenomicPlot, isGenomicPlotType } from "@/components/ScientificGenomicChartPreview";
+import { genomicFrameMetrics } from "@/lib/visualization-genomics";
 import {
   buildSetMemberships,
   correlation,
@@ -69,11 +71,12 @@ type LegendEntry = { label: string; color: string };
 const TEXT = "#23242A";
 
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
-  const noAxes = ["venn", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
+  if (isGenomicPlotType(type)) return genomicFrameMetrics(type, settings);
+  const noAxes = ["venn", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density"].includes(type);
   const heatmapType = ["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(type);
   const hasHeatmapAnnotationLegend = heatmapType && Boolean(settings.heatmapRowAnnotationData.trim() || settings.heatmapColumnAnnotationData.trim());
-  const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset"].includes(type);
-  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"].includes(type);
+  const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset", "genome-tracks", "oncoplot"].includes(type);
+  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo"].includes(type);
   const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
   if (heatmapType) return heatmapLayoutMetrics(settings, { hasAnnotationLegend: hasHeatmapAnnotationLegend, rowAnnotationTracks: 0, columnAnnotationTracks: 0, showRowCut: false, showColumnCut: false, showRowDendrogram: false, showColumnDendrogram: false, showSidePlot: false, rowCount: 1, columnCount: 1, maxColumnLabelCharacters: 0, maxCutClusters: 0 }).frame;
@@ -1105,6 +1108,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "chord") content = <ChordPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "circos") content = <CircosPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (isGenomicPlotType(type)) content = <ScientificGenomicPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "pie" || type === "donut" || type === "rose") content = <CompositionPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "waffle") content = <WafflePlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "treemap") content = <TreemapPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;

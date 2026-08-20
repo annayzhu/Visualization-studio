@@ -1,6 +1,6 @@
 export type PlotRendererId = "standard" | "advanced";
 
-export type PlotDataShape = "long" | "matrix" | "coordinates" | "sets" | "network" | "hierarchy" | "genomic-links";
+export type PlotDataShape = "long" | "matrix" | "coordinates" | "sets" | "network" | "hierarchy" | "genomic-links" | "genomic-coordinates" | "alterations" | "motif-matrix";
 
 type PlotRoleLike = { key: string; label: string; kind: "category" | "number" | "label"; required: boolean };
 type PlotExampleLike = { label: string; description: string; data: string; metadata?: string; mapping?: Record<string, string> };
@@ -49,7 +49,7 @@ export type PlotModuleRegistry<PlotId extends string = string, SettingKey extend
 }>;
 
 const rendererIds = new Set<PlotRendererId>(["standard", "advanced"]);
-const dataShapes = new Set<PlotDataShape>(["long", "matrix", "coordinates", "sets", "network", "hierarchy", "genomic-links"]);
+const dataShapes = new Set<PlotDataShape>(["long", "matrix", "coordinates", "sets", "network", "hierarchy", "genomic-links", "genomic-coordinates", "alterations", "motif-matrix"]);
 
 function normalizedExamples<PlotId extends string>(definition: PlotDefinitionLike<PlotId>) {
   const examples = definition.examples?.length

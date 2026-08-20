@@ -77,7 +77,7 @@ describe("plot-module registry interface", () => {
   });
 
   it("adapts all existing plots to the shared module contract", () => {
-    expect(plotModuleRegistry.list()).toHaveLength(45);
+    expect(plotModuleRegistry.list()).toHaveLength(53);
     plotModuleRegistry.list().forEach((plotModule) => {
       expect(plotModule.definition.id).toBeTruthy();
       expect(plotModule.examples.length).toBeGreaterThan(0);
@@ -101,6 +101,13 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("nmds").capabilities.settingKeys).toContain("ordinationStress");
     expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");
+    expect(getPlotModule("manhattan").capabilities.dataShape).toBe("genomic-coordinates");
+    expect(getPlotModule("manhattan").capabilities.settingKeys).toContain("genomicSignificanceLog10");
+    expect(getPlotModule("genome-tracks").capabilities.settingKeys).toContain("genomicTrackGap");
+    expect(getPlotModule("oncoplot").capabilities.dataShape).toBe("alterations");
+    expect(getPlotModule("oncoplot").capabilities.settingKeys).toContain("oncoplotShowMargins");
+    expect(getPlotModule("motif-logo").capabilities.dataShape).toBe("motif-matrix");
+    expect(getPlotModule("motif-logo").capabilities.settingKeys).toContain("motifDisplayMode");
     expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("xLabel");
     expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("grid");
     expect(getPlotModule("pie").capabilities.settingKeys).not.toContain("pointSize");

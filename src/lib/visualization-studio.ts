@@ -3,6 +3,18 @@ import {
   type PlotDataShape,
   type PlotModuleSeed,
 } from "./plot-module-registry";
+import {
+  chromosomeLaneLayout,
+  canonicalAlteration,
+  genomeAxisSpanMetrics,
+  genomeTrackLayout,
+  isValidChromosome,
+  motifLayoutMetrics,
+  normalizeChromosome,
+  oncoplotLayoutMetrics,
+  supportedCytobandStains,
+  waterfallLayoutMetrics,
+} from "./visualization-genomics";
 
 export type PlotType =
   | "bar"
@@ -41,6 +53,14 @@ export type PlotType =
   | "sankey"
   | "chord"
   | "circos"
+  | "manhattan"
+  | "qq"
+  | "chromosome-ideogram"
+  | "snp-density"
+  | "genome-tracks"
+  | "waterfall"
+  | "oncoplot"
+  | "motif-logo"
   | "pie"
   | "donut"
   | "rose"
@@ -280,6 +300,11 @@ export type VisualizationSettings = {
   ordinationPermanovaPermutations: number | null;
   ordinationStress: number | null;
   ordinationMethodNote: string;
+  genomicSignificanceLog10: number;
+  genomicTrackGap: number;
+  genomicSortSamples: boolean;
+  oncoplotShowMargins: boolean;
+  motifDisplayMode: "information" | "probability";
   correlationMethod: "pearson" | "spearman";
   xThreshold: number;
   yThreshold: number;
@@ -399,6 +424,11 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   ordinationPermanovaPermutations: null,
   ordinationStress: null,
   ordinationMethodNote: "",
+  genomicSignificanceLog10: 7.3,
+  genomicTrackGap: 4,
+  genomicSortSamples: true,
+  oncoplotShowMargins: true,
+  motifDisplayMode: "information",
   correlationMethod: "pearson",
   xThreshold: 0,
   yThreshold: 0,
@@ -939,6 +969,67 @@ function buildRocExample() {
   return `truth\tscore\tmodel\n${rows.join("\n")}`;
 }
 
+const demoChromosomeLengths = [249_250_621, 243_199_373, 198_022_430, 191_154_276, 180_915_260, 171_115_067, 159_138_663, 146_364_022, 141_213_431, 135_534_747, 135_006_516, 133_851_895];
+
+function buildManhattanExample() {
+  const peaks = new Map([["2-7", 2.1e-10], ["6-11", 7.4e-9], ["10-4", 4.8e-12]]);
+  const rows = demoChromosomeLengths.flatMap((length, chromosomeIndex) => Array.from({ length: 18 }, (_, index) => {
+    const chromosome = chromosomeIndex + 1;
+    const position = Math.round(length * (index + 1) / 19);
+    const key = `${chromosome}-${index}`;
+    const background = Math.max(1e-6, Math.min(0.98, 0.012 + Math.abs(Math.sin((chromosomeIndex + 1) * 1.31 + index * 0.77)) * 0.82));
+    const pValue = peaks.get(key) ?? background;
+    const label = peaks.has(key) ? ["LINC01234", "HLA-DQA1", "TERT"][key === "2-7" ? 0 : key === "6-11" ? 1 : 2] : `rs${chromosome}${String(index + 1).padStart(3, "0")}`;
+    return `chr${chromosome}\t${position}\t${pValue}\t${label}`;
+  }));
+  return `chromosome\tposition\tp_value\tvariant\n${rows.join("\n")}`;
+}
+
+function buildQqExample() {
+  const rows = Array.from({ length: 120 }, (_, index) => {
+    const expected = (index + 0.5) / 120;
+    const tail = index < 7 ? expected ** 2.25 : expected * (0.92 + 0.08 * Math.sin(index * 1.7) ** 2);
+    return `${Math.max(1e-12, Math.min(0.999, tail)).toPrecision(6)}\trs${String(index + 1).padStart(5, "0")}`;
+  });
+  return `p_value\tvariant\n${rows.join("\n")}`;
+}
+
+function buildIdeogramExample() {
+  const stains = ["gneg", "gpos25", "gpos50", "gpos75", "gpos100"];
+  const rows = demoChromosomeLengths.flatMap((length, index) => Array.from({ length: 5 }, (_, band) => {
+    const start = Math.round(length * band / 5);
+    const end = band === 4 ? length : Math.round(length * (band + 1) / 5);
+    return `chr${index + 1}\t${start}\t${end}\t${stains[(band + index) % stains.length]}\t${index + 1}${band < 2 ? "p" : "q"}${band + 1}`;
+  }));
+  return `chromosome\tstart\tend\tstain\tband\n${rows.join("\n")}`;
+}
+
+function buildSnpDensityExample() {
+  const rows = demoChromosomeLengths.flatMap((length, index) => Array.from({ length: 10 }, (_, bin) => {
+    const start = Math.round(length * bin / 10);
+    const end = bin === 9 ? length : Math.round(length * (bin + 1) / 10);
+    const count = Math.round(18 + 62 * Math.abs(Math.sin((index + 1) * 0.83 + bin * 0.57)));
+    return `chr${index + 1}\t${start}\t${end}\t${count}`;
+  }));
+  return `chromosome\tstart\tend\tvariant_count\n${rows.join("\n")}`;
+}
+
+function buildAlterationExample() {
+  const genes = ["TP53", "PIK3CA", "KRAS", "EGFR", "PTEN", "RB1", "KEAP1", "STK11", "ERBB2", "BRAF"];
+  const types = ["Missense", "Nonsense", "Frameshift", "Amplification", "Deletion", "Splice", "Fusion"];
+  const rows: string[] = [];
+  Array.from({ length: 24 }, (_, sampleIndex) => {
+    const sample = `P${String(sampleIndex + 1).padStart(2, "0")}`;
+    genes.forEach((gene, geneIndex) => {
+      const enriched = geneIndex === 0 ? sampleIndex % 3 !== 1 : geneIndex === 1 ? sampleIndex % 4 === 0 : (sampleIndex * 3 + geneIndex * 5) % 17 < 2;
+      if (!enriched) return;
+      rows.push(`${sample}\t${gene}\t${types[(sampleIndex + geneIndex * 2) % types.length]}`);
+      if ((sampleIndex + geneIndex) % 19 === 0) rows.push(`${sample}\t${gene}\tAmplification`);
+    });
+  });
+  return `sample\tgene\talteration\n${rows.join("\n")}`;
+}
+
 const samples = {
   bar: `category\tvalue\tsd\tsem\tgroup
 Control\t4.2\t0.45\t0.20\tControl
@@ -1215,6 +1306,32 @@ ZT20\t1.2\tTreatment`,
 40-59\t25\tMale
 60-79\t15\tMale
 80+\t5\tMale`,
+  manhattan: buildManhattanExample(),
+  qq: buildQqExample(),
+  chromosomeIdeogram: buildIdeogramExample(),
+  snpDensity: buildSnpDensityExample(),
+  genomeTracks: `chromosome\tstart\tend\tvalue\ttrack\tfeature
+chr7\t55019017\t55211628\t1\tGenes\tEGFR
+chr7\t55086714\t55087058\t8.4\tATAC peaks\tEnhancer A
+chr7\t55109002\t55109488\t6.7\tATAC peaks\tEnhancer B
+chr7\t55142050\t55143180\t9.1\tH3K27ac\tPeak 1
+chr7\t55178010\t55179220\t7.5\tH3K27ac\tPeak 2
+chr7\t55000000\t55130000\t2.2\tCopy number\tGain
+chr7\t55130000\t55240000\t1.0\tCopy number\tNeutral
+chr7\t55034000\t55034100\t4.6\tVariants\tEGFR p.L858R
+chr7\t55202000\t55202100\t3.8\tVariants\tVariant B`,
+  alterations: buildAlterationExample(),
+  motifLogo: `position\tA\tC\tG\tT
+1\t0.88\t0.04\t0.04\t0.04
+2\t0.05\t0.08\t0.82\t0.05
+3\t0.07\t0.78\t0.08\t0.07
+4\t0.05\t0.04\t0.06\t0.85
+5\t0.42\t0.08\t0.44\t0.06
+6\t0.08\t0.76\t0.09\t0.07
+7\t0.06\t0.07\t0.81\t0.06
+8\t0.84\t0.05\t0.06\t0.05
+9\t0.10\t0.38\t0.41\t0.11
+10\t0.06\t0.05\t0.08\t0.81`,
   circos: `sourceChr\tsourceStart\tsourceEnd\ttargetChr\ttargetStart\ttargetEnd\tvalue
 chr1\t12000000\t18000000\tchr5\t42000000\t47000000\t8
 chr2\t35000000\t39000000\tchr8\t76000000\t80000000\t5
@@ -1659,6 +1776,112 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     defaultMapping: { sourceChr: "sourceChr", sourceStart: "sourceStart", sourceEnd: "sourceEnd", targetChr: "targetChr", targetStart: "targetStart", targetEnd: "targetEnd", value: "value" },
     sampleData: samples.circos,
   },
+  {
+    id: "manhattan",
+    name: "Manhattan",
+    family: "Genomic association",
+    summary: "Genome-wide association significance across naturally ordered chromosomes.",
+    inputHint: "One row per tested variant with a chromosome, positive base-pair position, P value in (0, 1], and optional label.",
+    roles: [
+      { key: "chromosome", label: "Chromosome", kind: "category", required: true },
+      { key: "position", label: "Position (bp)", kind: "number", required: true },
+      { key: "pValue", label: "P value", kind: "number", required: true },
+      { key: "label", label: "Variant / locus label", kind: "label", required: false },
+    ],
+    defaultMapping: { chromosome: "chromosome", position: "position", pValue: "p_value", label: "variant" },
+    sampleData: samples.manhattan,
+  },
+  {
+    id: "qq",
+    name: "QQ",
+    family: "Genomic association",
+    summary: "Observed versus expected −log10 P values for association-calibration assessment.",
+    inputHint: "One row per test with a P value in (0, 1]; expected quantiles are calculated from rank using (i − 0.5) / n.",
+    roles: [
+      { key: "pValue", label: "P value", kind: "number", required: true },
+      { key: "label", label: "Variant label", kind: "label", required: false },
+    ],
+    defaultMapping: { pValue: "p_value", label: "variant" },
+    sampleData: samples.qq,
+  },
+  {
+    id: "chromosome-ideogram",
+    name: "Chromosome ideogram",
+    family: "Genomic context",
+    summary: "Naturally ordered chromosome bars partitioned into supplied cytoband intervals.",
+    inputHint: "One row per non-overlapping band with chromosome, zero-based start, end greater than start, optional stain, and band label.",
+    roles: [
+      { key: "chromosome", label: "Chromosome", kind: "category", required: true },
+      { key: "start", label: "Start (bp)", kind: "number", required: true },
+      { key: "end", label: "End (bp)", kind: "number", required: true },
+      { key: "stain", label: "Cytoband stain", kind: "category", required: false },
+      { key: "label", label: "Band label", kind: "label", required: false },
+    ],
+    defaultMapping: { chromosome: "chromosome", start: "start", end: "end", stain: "stain", label: "band" },
+    sampleData: samples.chromosomeIdeogram,
+  },
+  {
+    id: "snp-density",
+    name: "SNP density",
+    family: "Genomic context",
+    summary: "Binned variant density along naturally ordered chromosome ideograms.",
+    inputHint: "One row per genomic bin with chromosome, zero-based start, end greater than start, and a non-negative variant count or density.",
+    roles: [
+      { key: "chromosome", label: "Chromosome", kind: "category", required: true },
+      { key: "start", label: "Bin start (bp)", kind: "number", required: true },
+      { key: "end", label: "Bin end (bp)", kind: "number", required: true },
+      { key: "value", label: "Variant count / density", kind: "number", required: true },
+    ],
+    defaultMapping: { chromosome: "chromosome", start: "start", end: "end", value: "variant_count" },
+    sampleData: samples.snpDensity,
+  },
+  {
+    id: "genome-tracks",
+    name: "Genome tracks",
+    family: "Genomic context",
+    summary: "Aligned interval tracks on one shared naturally ordered genomic coordinate system.",
+    inputHint: "One row per feature interval with chromosome, zero-based start, end greater than start, track, optional numeric value, and optional label.",
+    roles: [
+      { key: "chromosome", label: "Chromosome", kind: "category", required: true },
+      { key: "start", label: "Start (bp)", kind: "number", required: true },
+      { key: "end", label: "End (bp)", kind: "number", required: true },
+      { key: "value", label: "Track value", kind: "number", required: false },
+      { key: "track", label: "Track", kind: "category", required: true },
+      { key: "label", label: "Feature label", kind: "label", required: false },
+    ],
+    defaultMapping: { chromosome: "chromosome", start: "start", end: "end", value: "value", track: "track", label: "feature" },
+    sampleData: samples.genomeTracks,
+  },
+  ...(["waterfall", "oncoplot"] as const).map((id) => ({
+    id,
+    name: id === "waterfall" ? "Mutation waterfall" : "Oncoplot",
+    family: "Cancer genomics",
+    summary: id === "waterfall" ? "Samples ranked by total alteration burden with stacked alteration classes." : "Gene-by-sample alteration matrix with optional sample burden and gene-frequency margins.",
+    inputHint: "Long format: one row per sample–gene alteration event. Repeated sample–gene rows are retained as multiple alteration classes.",
+    roles: [
+      { key: "sample", label: "Sample", kind: "category" as const, required: true },
+      { key: "gene", label: "Gene", kind: "category" as const, required: true },
+      { key: "alteration", label: "Alteration class", kind: "category" as const, required: true },
+    ],
+    defaultMapping: { sample: "sample", gene: "gene", alteration: "alteration" },
+    sampleData: samples.alterations,
+  })),
+  {
+    id: "motif-logo",
+    name: "Motif logo",
+    family: "Sequence motif",
+    summary: "DNA sequence logo from position-specific A/C/G/T probabilities.",
+    inputHint: "One row per unique positive integer position. A, C, G, and T must be probabilities in [0, 1] that sum to 1; no small-sample correction is inferred.",
+    roles: [
+      { key: "position", label: "Position", kind: "number", required: true },
+      { key: "A", label: "A probability", kind: "number", required: true },
+      { key: "C", label: "C probability", kind: "number", required: true },
+      { key: "G", label: "G probability", kind: "number", required: true },
+      { key: "T", label: "T probability", kind: "number", required: true },
+    ],
+    defaultMapping: { position: "position", A: "A", C: "C", G: "G", T: "T" },
+    sampleData: samples.motifLogo,
+  },
   ...(["pie", "donut", "waffle"] as const).map((id) => ({
     id,
     name: id === "pie" ? "Pie" : id === "donut" ? "Donut" : "Waffle",
@@ -1783,6 +2006,13 @@ export const plotReferences = {
   sankey: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00015.x" },
   chord: { citation: "Gu et al., 2014. circlize Implements and Enhances Circular Visualization in R. Bioinformatics.", href: "https://doi.org/10.1093/bioinformatics/btu393" },
   circos: { citation: "Krzywinski et al., 2009. Circos: An information aesthetic for comparative genomics. Genome Res.", href: "https://doi.org/10.1101/gr.092759.109" },
+  manhattan: { citation: "Turner, 2014. qqman: an R package for visualizing GWAS results using Q-Q and Manhattan plots. bioRxiv.", href: "https://doi.org/10.1101/005165" },
+  qq: { citation: "Wilk & Gnanadesikan, 1968. Probability plotting methods for the analysis of data. Biometrika.", href: "https://doi.org/10.1093/biomet/55.1.1" },
+  genomeBrowser: { citation: "Kent et al., 2002. The Human Genome Browser at UCSC. Genome Research.", href: "https://doi.org/10.1101/gr.229102" },
+  snpDensity: { citation: "Yin et al., 2021. CMplot: Circle Manhattan Plot. Genomics Proteomics Bioinformatics.", href: "https://doi.org/10.1016/j.gpb.2020.10.005" },
+  genomeTracks: { citation: "Hahne & Ivanek, 2016. Visualizing Genomic Data Using Gviz and Bioconductor. Methods Mol Biol.", href: "https://doi.org/10.1007/978-1-4939-3578-9_16" },
+  cbioportal: { citation: "Cerami et al., 2012. The cBio Cancer Genomics Portal. Cancer Discovery.", href: "https://doi.org/10.1158/2159-8290.CD-12-0095" },
+  sequenceLogo: { citation: "Schneider & Stephens, 1990. Sequence logos: a new way to display consensus sequences. Nucleic Acids Research.", href: "https://doi.org/10.1093/nar/18.20.6097" },
   pie: { citation: "Spence, 2005. No Humble Pie: The Origins and Usage of a Statistical Chart. Journal of Educational and Behavioral Statistics.", href: "https://doi.org/10.3102/10769986030004353" },
   nightingale: { citation: "Magnello, 2012. Victorian statistical graphics and the iconography of Florence Nightingale's polar area graph. BSHM Bulletin.", href: "https://doi.org/10.1080/17498430.2012.618102" },
   treemap: { citation: "Shneiderman, 1992. Tree visualization with tree-maps: 2-d space-filling approach. ACM Transactions on Graphics.", href: "https://doi.org/10.1145/102377.115768" },
@@ -2039,6 +2269,57 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     origin: "Krzywinski 等人在 2009 年创建 Circos 来展示比较基因组和结构变异；圆内连带只是它众多轨道中的一种。",
     references: [plotReferences.circos],
   },
+  manhattan: {
+    definition: "把每个遗传变异按染色体与碱基位置排列在连续基因组轴上，纵轴为 −log10(P)；交替颜色只帮助区分相邻染色体。",
+    suitableData: "GWAS、QTL 或其他全基因组关联检验结果；每行需包含染色体、正整数位置和 (0,1] 内的 P 值。不同基因组版本不可混用；浏览器预览最多 20,000 个位点。",
+    answers: "哪些基因组区域出现超出预设阈值的关联信号，以及信号是否聚集成区域。它不单独证明因果变异，也不替代群体结构、批次和多重检验控制。",
+    origin: "这类图因高信号形成类似城市天际线的峰群而得名 Manhattan plot，后成为 GWAS 的标准总览。",
+    references: [plotReferences.manhattan],
+  },
+  qq: {
+    definition: "将排序后的观测 P 值与均匀零假设下的期望分位数比较，两个轴都显示 −log10(P)。对角线表示整体校准一致。",
+    suitableData: "同一分析框架产生的一组有效 P 值；应保留全部检验而非只输入显著结果。浏览器预览上限为 20,000 个 P 值，更大分析应使用有记录的确定性子集或上游栅格化流程。",
+    answers: "P 值整体是否接近期望分布，是否存在系统性膨胀、保守性或仅在尾部偏离。偏离可能来自真实多基因信号，也可能来自混杂或模型失配。",
+    origin: "Q–Q plot 源自概率绘图：把样本分位数与理论分位数逐点比较，而不是先汇总为单一统计量。",
+    references: [plotReferences.qq, plotReferences.manhattan],
+  },
+  "chromosome-ideogram": {
+    definition: "按自然染色体顺序排列长度成比例的染色体条，并用输入的细胞遗传学区带区间分割条带。",
+    suitableData: "与同一参考基因组版本一致的 chromosome/start/end 区带表；stain 可留空，或使用 gneg、gpos25/50/75/100、acen、gvar、stalk，并可附 band 名称。",
+    answers: "染色体的相对长度、区带边界与目标区域的大体基因组位置。该图不会从坐标自动推断真实着丝粒或细胞遗传学带。",
+    references: [plotReferences.genomeBrowser],
+  },
+  "snp-density": {
+    definition: "把预先划分的基因组窗口沿染色体排列，以颜色强度编码每个窗口的变异计数或密度。",
+    suitableData: "不重叠或有明确含义的 chromosome/start/end 窗口及非负计数/密度；不同窗口宽度时应优先输入密度而非原始计数。",
+    answers: "变异在基因组上的疏密是否均匀，哪些染色体区段形成高密度或低密度区域。",
+    references: [plotReferences.snpDensity, plotReferences.genomeBrowser],
+  },
+  "genome-tracks": {
+    definition: "把多个区间型数据轨道对齐到同一基因组坐标轴；每个轨道保持独立行，位置与宽度都由真实区间决定。",
+    suitableData: "基因、峰、拷贝数区段、变异或注释等 chromosome/start/end 区间，附 track、可选数值和标签；所有轨道必须使用同一参考版本。",
+    answers: "不同类型的基因组事件是否在同一位置重叠或邻近，以及一个区域内的多层证据如何对齐。",
+    references: [plotReferences.genomeTracks, plotReferences.genomeBrowser],
+  },
+  waterfall: {
+    definition: "按每个样本的事件总数排序，用堆叠柱显示不同 alteration class 对样本总突变/变异负荷的贡献。",
+    suitableData: "长表 sample–gene–alteration 事件，可包含 SNV、indel、融合和拷贝数类别，预览最多 10,000 个事件。这里的柱高是输入事件数，不是标准化 TMB；无事件样本不会出现在纯事件长表中。",
+    answers: "队列中哪些样本事件负荷较高，负荷由哪些 alteration class 构成。它不显示每个基因在每个样本中的完整矩阵。",
+    references: [plotReferences.cbioportal, plotReferences.complexHeatmap],
+  },
+  oncoplot: {
+    definition: "以基因为行、样本为列显示 alteration class；上方可给出样本事件数，右侧给出受影响样本比例。一个格可保留多种事件。",
+    suitableData: "长表 sample–gene–alteration 队列结果，预览最多 10,000 个事件；样本和基因标识必须非空，alteration 类别应定义清楚。纯事件长表不能表示所选基因中完全无事件的样本。",
+    answers: "常见驱动基因是否互斥或共现，队列的分子异质性与基因频率格局如何。可视共现不等于统计学互斥/共现检验。",
+    references: [plotReferences.complexHeatmap, plotReferences.cbioportal],
+  },
+  "motif-logo": {
+    definition: "在每个位置堆叠 A/C/G/T 字母；information 模式中总高度为 2−H bits，各字母高度等于其概率乘以该信息量。",
+    suitableData: "DNA position probability matrix：每个正整数位置唯一，A/C/G/T 均在 [0,1] 且和为 1，最多 60 个位置且还需满足当前画幅的最小字母宽度。输入应已处理 pseudocount；工具不会反推样本量或加入小样本校正。",
+    answers: "序列 motif 在哪些位置最保守、偏好哪些碱基，以及各位置的不确定性有多大。Probability 模式显示频率而非信息量。",
+    origin: "Schneider 与 Stephens 在 1990 年提出 sequence logo，用堆叠字母同时表达碱基偏好和每个位点的信息含量。",
+    references: [plotReferences.sequenceLogo],
+  },
   pie: {
     definition: "把互斥类别占总量的比例映射为圆形扇区的角度与面积。所有扇区共同构成一个整体。",
     suitableData: "单一总体中的非负计数、构成比或资源份额，类别应互斥且数量较少。",
@@ -2105,6 +2386,7 @@ const advancedRendererIds = new Set<PlotType>([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
+  "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
 const commonSettingKeys: Array<keyof VisualizationSettings> = [
@@ -2112,7 +2394,7 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
   "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ];
-const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap"]);
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
@@ -2142,9 +2424,25 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   rose: ["compositionLabelMode", "radialMaximum"], treemap: ["compositionLabelMode", "hierarchyGap"], sunburst: ["compositionLabelMode", "hierarchyGap"],
   radar: ["radarFillOpacity", "radialMaximum"], "polar-profile": ["radarFillOpacity", "radialMaximum"],
   "population-pyramid": ["pyramidDisplayMode"],
+  manhattan: ["showLabels", "labelLimit", "genomicSignificanceLog10"],
+  qq: ["showLabels", "labelLimit"],
+  "chromosome-ideogram": ["showLabels"],
+  "snp-density": ["continuousLow", "continuousHigh"],
+  "genome-tracks": ["showLabels", "genomicTrackGap", "continuousLow", "continuousHigh"],
+  waterfall: ["genomicSortSamples"],
+  oncoplot: ["genomicSortSamples", "oncoplotShowMargins"],
+  "motif-logo": ["motifDisplayMode"],
 };
 
 const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof VisualizationSettings>>> = {
+  manhattan: new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid", "categoricalColors", "showLabels", "labelLimit", "genomicSignificanceLog10"]),
+  qq: new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid", "categoricalColors", "showLabels", "labelLimit"]),
+  "chromosome-ideogram": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "axisLineWidth", "showLabels"]),
+  "snp-density": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "continuousLow", "continuousHigh"]),
+  "genome-tracks": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "axisLineWidth", "opacity", "categoricalColors", "continuousLow", "continuousHigh", "showLabels", "genomicTrackGap"]),
+  waterfall: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "grid", "categoricalColors", "genomicSortSamples"]),
+  oncoplot: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "categoricalColors", "genomicSortSamples", "oncoplotShowMargins"]),
+  "motif-logo": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "grid", "motifDisplayMode"]),
   pie: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode"]),
   donut: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "donutHole"]),
   waffle: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "waffleCells"]),
@@ -2163,11 +2461,14 @@ function dataShapeFor(type: PlotType): PlotDataShape {
   if (["sankey", "chord"].includes(type)) return "network";
   if (["treemap", "sunburst"].includes(type)) return "hierarchy";
   if (type === "circos") return "genomic-links";
+  if (["manhattan", "chromosome-ideogram", "snp-density", "genome-tracks"].includes(type)) return "genomic-coordinates";
+  if (["waterfall", "oncoplot"].includes(type)) return "alterations";
+  if (type === "motif-logo") return "motif-matrix";
   return "long";
 }
 
 function numericAxesFor(type: PlotType): Array<"x" | "y"> {
-  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
+  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "manhattan", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
   if (["enrichment", "enrichment-bar", "survival-forest"].includes(type)) return ["x"];
   if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return ["x", "y"];
   if (["errorbar", "lollipop"].includes(type)) return ["y"];
@@ -2476,7 +2777,7 @@ export function parseRatioValue(value: string | undefined) {
 
 const mappingAliases: Record<string, string[]> = {
   category: ["category", "condition", "sample", "name", "term"],
-  value: ["value", "mean", "expression", "score", "abundance", "count"],
+  value: ["value", "mean", "expression", "score", "abundance", "count", "variantcount", "density"],
   secondary: ["secondary", "secondaryvalue", "comparison", "overlay", "value2"],
   target: ["target", "reference", "goal", "benchmark", "to", "receiver"],
   facet: ["facet", "panel", "stratum", "cohort"],
@@ -2517,6 +2818,15 @@ const mappingAliases: Record<string, string[]> = {
   parent: ["parent", "parentnode", "parentid"],
   feature: ["feature", "metric", "dimension", "axis"],
   angle: ["angle", "phase", "time", "direction", "category"],
+  chromosome: ["chromosome", "chr", "chrom", "seqname", "contig"],
+  position: ["position", "pos", "bp", "basepair"],
+  start: ["start", "begin", "chromstart"],
+  end: ["end", "stop", "chromend"],
+  stain: ["stain", "gieStain", "cytoband"],
+  track: ["track", "trackname", "assay", "layer"],
+  sample: ["sample", "sampleid", "tumor", "case"],
+  gene: ["gene", "symbol", "hugo", "feature"],
+  alteration: ["alteration", "variantclass", "mutationtype", "eventtype"],
 };
 
 function normalizeMappingName(value: string) {
@@ -2705,6 +3015,136 @@ export function validatePlotDataset(
       if (blankCount > 0) errors.push(`${role.label} contains ${blankCount} blank value${blankCount === 1 ? "" : "s"}.`);
     }
   });
+
+  const pointCoordinateTypes: PlotType[] = ["manhattan"];
+  const intervalCoordinateTypes: PlotType[] = ["chromosome-ideogram", "snp-density", "genome-tracks"];
+  if ([...pointCoordinateTypes, ...intervalCoordinateTypes].includes(definition.id)) {
+    const chromosomeColumn = mapping.chromosome;
+    if (chromosomeColumn && dataset.headers.includes(chromosomeColumn)) {
+      const invalidChromosomes = dataset.rows.filter((row) => !isValidChromosome(row[chromosomeColumn] ?? ""));
+      if (invalidChromosomes.length > 0) errors.push(`Chromosome contains ${invalidChromosomes.length} invalid label${invalidChromosomes.length === 1 ? "" : "s"}; use labels such as 1, chr1, X, MT, or a non-blank contig identifier without spaces.`);
+      const rawByNormalized = new Map<string, Set<string>>();
+      dataset.rows.forEach((row) => {
+        const raw = row[chromosomeColumn]?.trim();
+        if (!raw) return;
+        const normalized = normalizeChromosome(raw);
+        const labels = rawByNormalized.get(normalized) ?? new Set<string>();
+        labels.add(raw);
+        rawByNormalized.set(normalized, labels);
+      });
+      const mixed = [...rawByNormalized].filter(([, labels]) => labels.size > 1).map(([chromosome]) => chromosome);
+      if (mixed.length > 0) warnings.push(`Equivalent chromosome labels use mixed prefixes/case (${mixed.slice(0, 6).join(", ")}); they are merged for natural ordering.`);
+      if (settings && (definition.id === "chromosome-ideogram" || definition.id === "snp-density")) {
+        const chromosomeCount = rawByNormalized.size;
+        const laneLayout = chromosomeLaneLayout(definition.id, settings, chromosomeCount);
+        if (!laneLayout.fits) errors.push(`${definition.name} needs at least ${laneLayout.minimumLaneHeight.toFixed(1)} px per chromosome label, but ${chromosomeCount} chromosomes provide only ${laneLayout.laneHeight.toFixed(1)} px each; increase height or filter chromosomes.`);
+      }
+    }
+    if (pointCoordinateTypes.includes(definition.id) && mapping.position && dataset.headers.includes(mapping.position)) {
+      const invalidPositions = dataset.rows.filter((row) => {
+        const value = parseNumericValue(row[mapping.position]);
+        return value === null || !Number.isSafeInteger(value) || value <= 0;
+      });
+      if (invalidPositions.length > 0) errors.push(`Genomic position contains ${invalidPositions.length} invalid value${invalidPositions.length === 1 ? "" : "s"}; positions must be positive safe integers in base pairs.`);
+    }
+    if (intervalCoordinateTypes.includes(definition.id) && mapping.start && mapping.end && dataset.headers.includes(mapping.start) && dataset.headers.includes(mapping.end)) {
+      const invalidRanges = dataset.rows.filter((row) => {
+        const start = parseNumericValue(row[mapping.start]);
+        const end = parseNumericValue(row[mapping.end]);
+        return start === null || end === null || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start;
+      });
+      if (invalidRanges.length > 0) errors.push(`Genomic ranges contain ${invalidRanges.length} invalid interval${invalidRanges.length === 1 ? "" : "s"}; start/end must be safe integers with 0 ≤ start < end.`);
+      if (invalidRanges.length === 0 && (definition.id === "chromosome-ideogram" || definition.id === "snp-density") && chromosomeColumn) {
+        const overlaps: string[] = [];
+        const chromosomes = [...new Set(dataset.rows.map((row) => normalizeChromosome(row[chromosomeColumn])))];
+        chromosomes.forEach((chromosome) => {
+          const intervals = dataset.rows.filter((row) => normalizeChromosome(row[chromosomeColumn]) === chromosome).map((row) => ({ start: parseNumericValue(row[mapping.start]) ?? 0, end: parseNumericValue(row[mapping.end]) ?? 0 })).sort((left, right) => left.start - right.start || left.end - right.end);
+          if (intervals.some((interval, index) => index > 0 && interval.start < intervals[index - 1].end)) overlaps.push(chromosome);
+        });
+        if (overlaps.length > 0) errors.push(`${definition.name} bins/bands must not overlap within a chromosome; affected: ${overlaps.slice(0, 8).join(", ")}.`);
+      }
+    }
+    if (chromosomeColumn) {
+      const endColumn = pointCoordinateTypes.includes(definition.id) ? mapping.position : mapping.end;
+      if (endColumn && dataset.headers.includes(endColumn)) {
+        const axisIntervals = dataset.rows.flatMap((row) => {
+          const end = parseNumericValue(row[endColumn]);
+          return end !== null && Number.isSafeInteger(end) && end >= 0 ? [{ chromosome: row[chromosomeColumn], start: end, end }] : [];
+        });
+        if (axisIntervals.length === dataset.rows.length) {
+          const span = genomeAxisSpanMetrics(axisIntervals);
+          if (!span.fits) errors.push(`The cumulative genomic axis spans ${Number.isFinite(span.totalSpan) ? span.totalSpan.toExponential(3) : "an invalid number of"} bp across ${span.chromosomeCount} chromosomes, exceeding the safe browser limit of ${span.maximumSpan.toExponential(0)} bp; split the view or use a documented rescaled coordinate system.`);
+        }
+      }
+    }
+    if (definition.id === "snp-density" && mapping.value) {
+      const negative = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? -1) < 0).length;
+      if (negative > 0) errors.push("SNP density/count values must be non-negative.");
+    }
+    if (definition.id === "chromosome-ideogram" && mapping.stain && dataset.headers.includes(mapping.stain)) {
+      const supported = new Set<string>(supportedCytobandStains);
+      const invalidStains = [...new Set(dataset.rows.map((row) => row[mapping.stain]?.trim().toLowerCase()).filter((value) => value && !supported.has(value)))];
+      if (invalidStains.length > 0) errors.push(`Unsupported cytoband stain value${invalidStains.length === 1 ? "" : "s"}: ${invalidStains.slice(0, 8).join(", ")}. Supported values are ${supportedCytobandStains.join(", ")}; leave the optional stain blank for a neutral band.`);
+    }
+    if (dataset.rows.length > 20_000) errors.push("Coordinate-based browser previews are limited to 20,000 rows; pre-filter or aggregate with a documented genomic window.");
+  }
+
+  if ((definition.id === "manhattan" || definition.id === "qq") && mapping.pValue && dataset.headers.includes(mapping.pValue)) {
+    const invalidPValues = dataset.rows.filter((row) => {
+      const value = parseNumericValue(row[mapping.pValue]);
+      return value === null || value <= 0 || value > 1;
+    });
+    if (invalidPValues.length > 0) errors.push(`${definition.name} P values must lie in (0, 1]; ${invalidPValues.length} invalid row${invalidPValues.length === 1 ? "" : "s"} found.`);
+    if (definition.id === "qq" && dataset.rows.length < 2) errors.push("QQ plots require at least two P values to define observed and expected quantiles.");
+    if (definition.id === "qq" && dataset.rows.length > 20_000) errors.push("QQ browser previews are limited to 20,000 P values; use a documented deterministic subset or an upstream rasterized workflow for larger analyses.");
+  }
+
+  if ((definition.id === "waterfall" || definition.id === "oncoplot") && mapping.sample && mapping.gene && mapping.alteration) {
+    const sampleCount = new Set(dataset.rows.map((row) => row[mapping.sample])).size;
+    const geneCount = new Set(dataset.rows.map((row) => row[mapping.gene])).size;
+    if (sampleCount > 200) errors.push(`${definition.name} compact previews support at most 200 samples; filter to a documented cohort or increase aggregation.`);
+    if (geneCount > 100) errors.push(`${definition.name} compact previews support at most 100 genes; select a justified gene panel before plotting.`);
+    if (dataset.rows.length > 10_000) errors.push(`${definition.name} browser previews support at most 10,000 alteration events; filter to a documented cohort/gene panel or pre-aggregate events.`);
+    if (sampleCount < 2) warnings.push(`${definition.name} is most informative for a cohort with at least two samples.`);
+    if (settings) {
+      const alterationCount = new Set(dataset.rows.map((row) => canonicalAlteration(row[mapping.alteration] ?? ""))).size;
+      if (definition.id === "oncoplot") {
+        const layout = oncoplotLayoutMetrics(settings, geneCount, sampleCount, alterationCount);
+        if (!layout.fits) errors.push(`Oncoplot cells are only ${layout.cellWidth.toFixed(1)} × ${layout.cellHeight.toFixed(1)} px in the selected canvas; need ≥${layout.minimumSampleWidth.toFixed(0)} px per sample and ≥${layout.minimumGeneHeight.toFixed(1)} px per gene with at least 70 px matrix height. Increase width/height or filter samples/genes.`);
+      } else {
+        const layout = waterfallLayoutMetrics(settings, sampleCount, alterationCount);
+        if (!layout.fits) errors.push(`Mutation waterfall bars are only ${layout.bandWidth.toFixed(1)} px wide with ${layout.availableChartHeight.toFixed(1)} px chart height; need ≥${layout.minimumBandWidth.toFixed(0)} px per sample and at least 70 px chart height. Increase width/height or filter samples.`);
+      }
+    }
+  }
+
+  if (definition.id === "genome-tracks" && settings && mapping.track && dataset.headers.includes(mapping.track)) {
+    const trackCount = new Set(dataset.rows.map((row) => row[mapping.track])).size;
+    const layout = genomeTrackLayout(settings, trackCount);
+    if (!layout.fits) errors.push(`Genome tracks need at least ${layout.requestedHeight.toFixed(0)} px for ${trackCount} labeled tracks at the selected gap, but the plot area has ${layout.frame.plotHeight.toFixed(0)} px; increase height, reduce the gap, or filter tracks.`);
+  }
+
+  if (definition.id === "motif-logo" && [mapping.position, mapping.A, mapping.C, mapping.G, mapping.T].every((column) => column && dataset.headers.includes(column))) {
+    const positions = dataset.rows.map((row) => parseNumericValue(row[mapping.position]) ?? Number.NaN);
+    const invalidPositions = positions.filter((position) => !Number.isSafeInteger(position) || position <= 0);
+    if (invalidPositions.length > 0) errors.push("Motif positions must be unique positive safe integers.");
+    if (new Set(positions).size !== positions.length) errors.push("Motif positions must be unique positive safe integers.");
+    const invalidProbabilityRows = dataset.rows.filter((row) => {
+      const values = (["A", "C", "G", "T"] as const).map((base) => parseNumericValue(row[mapping[base]]));
+      const containsInvalidValue = values.some((value) => value === null || (value !== null && (value < 0 || value > 1)));
+      const probabilitySum = values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+      return containsInvalidValue || Math.abs(probabilitySum - 1) > 0.005;
+    });
+    if (invalidProbabilityRows.length > 0) errors.push(`Motif A/C/G/T values must be probabilities in [0, 1] summing to 1 (±0.005); ${invalidProbabilityRows.length} invalid position${invalidProbabilityRows.length === 1 ? "" : "s"} found.`);
+    if (dataset.rows.length > 60) errors.push("Motif logo previews are limited to 60 positions to keep letters legible.");
+    if (settings) {
+      const layout = motifLayoutMetrics(settings, dataset.rows.length);
+      if (!layout.fits) errors.push(`Motif positions are only ${layout.bandWidth.toFixed(1)} px wide in the selected canvas; need ≥${layout.minimumBandWidth.toFixed(1)} px per position. Increase width or filter positions.`);
+    }
+  }
+
+  if (settings && definition.id === "manhattan" && settings.genomicSignificanceLog10 <= 0) errors.push("The Manhattan −log10 significance threshold must be positive.");
+  if (settings && definition.id === "genome-tracks" && settings.genomicTrackGap < 0) errors.push("Genome track gap must be non-negative.");
 
   if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(definition.id) && settings) {
     const ordinationName = definition.name;

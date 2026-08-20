@@ -16,6 +16,7 @@ const expectedAdvancedRenderers = new Set([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
+  "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
 
@@ -379,5 +380,100 @@ describe("registered plot-module examples", () => {
     expect(circular).toContain('data-plot-family="circular-heatmap"');
     expect(circular).toContain('data-plot-element="heatmap-cell"');
     expect(circular).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
+
+  it("renders all genomic, alteration, and motif modules with their defining marks", () => {
+    const expectations: Array<{ id: "manhattan" | "qq" | "chromosome-ideogram" | "snp-density" | "genome-tracks" | "waterfall" | "oncoplot" | "motif-logo"; element: string }> = [
+      { id: "manhattan", element: "manhattan-point" },
+      { id: "qq", element: "qq-point" },
+      { id: "chromosome-ideogram", element: "cytoband" },
+      { id: "snp-density", element: "snp-density-bin" },
+      { id: "genome-tracks", element: "genome-track-interval" },
+      { id: "waterfall", element: "waterfall-segment" },
+      { id: "oncoplot", element: "oncoplot-cell" },
+      { id: "motif-logo", element: "motif-letter" },
+    ];
+    expectations.forEach(({ id, element }) => {
+      const plotModule = plotModuleRegistry.get(id);
+      const dataset = parseDelimitedData(plotModule.definition.sampleData);
+      const mapping = plotModule.definition.defaultMapping;
+      expect(validatePlotDataset(plotModule.definition, dataset, mapping, defaultVisualizationSettings).errors, id).toEqual([]);
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type={id} dataset={dataset} mapping={mapping} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+      expect(markup, id).toContain(`data-plot-family="${id}"`);
+      expect(markup, id).toContain(`data-plot-element="${element}"`);
+      expect(markup, id).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+      if (id === "manhattan" || id === "qq" || id === "chromosome-ideogram" || id === "snp-density" || id === "genome-tracks") {
+        expect((markup.match(new RegExp(`data-plot-element="${element}"`, "g")) ?? [])).toHaveLength(dataset.rows.length);
+      }
+    });
+  });
+
+  it("switches motif logos between information-content and probability scales", () => {
+    const plotModule = plotModuleRegistry.get("motif-logo");
+    const dataset = parseDelimitedData(plotModule.definition.sampleData);
+    const render = (motifDisplayMode: "information" | "probability") => renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="motif-logo" dataset={dataset} mapping={plotModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, motifDisplayMode }} themeId={defaultVisualizationThemeId} />);
+    const information = render("information");
+    const probability = render("probability");
+    expect(information).toContain("Information (bits)");
+    expect(probability).toContain("Probability");
+    expect(information.match(/data-letter-height="([^"]+)"/)?.[1]).not.toBe(probability.match(/data-letter-height="([^"]+)"/)?.[1]);
+  });
+
+  it("merges equivalent chromosome spellings into one rendered lane", () => {
+    const cases = [
+      { id: "chromosome-ideogram" as const, data: "chromosome\tstart\tend\tstain\tband\nchr1\t0\t10\tgneg\tp1\n1\t10\t20\tgpos50\tq1", element: "cytoband" },
+      { id: "snp-density" as const, data: "chromosome\tstart\tend\tvariant_count\nchr1\t0\t10\t2\n1\t10\t20\t4", element: "snp-density-bin" },
+    ];
+    cases.forEach(({ id, data, element }) => {
+      const plotModule = plotModuleRegistry.get(id);
+      const dataset = parseDelimitedData(data);
+      const validation = validatePlotDataset(plotModule.definition, dataset, plotModule.definition.defaultMapping, defaultVisualizationSettings);
+      expect(validation.errors, id).toEqual([]);
+      expect(validation.warnings.join(" "), id).toMatch(/merged for natural ordering/i);
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type={id} dataset={dataset} mapping={plotModule.definition.defaultMapping} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+      expect((markup.match(new RegExp(`data-plot-element="${element}"`, "g")) ?? [])).toHaveLength(2);
+      expect((markup.match(/data-full-label="1"/g) ?? [])).toHaveLength(1);
+    });
+  });
+
+  it("honors genomic grid and axis controls and thins dense motif position labels", () => {
+    const waterfall = plotModuleRegistry.get("waterfall");
+    const waterfallData = parseDelimitedData(waterfall.definition.sampleData);
+    const hiddenGrid = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="waterfall" dataset={waterfallData} mapping={waterfall.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, grid: "none" }} themeId={defaultVisualizationThemeId} />);
+    expect(hiddenGrid).not.toContain("data-grid-axis=");
+    const bothGrid = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="waterfall" dataset={waterfallData} mapping={waterfall.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, grid: "both" }} themeId={defaultVisualizationThemeId} />);
+    expect(bothGrid).toContain('data-grid-axis="x"');
+
+    const ideogram = plotModuleRegistry.get("chromosome-ideogram");
+    const ideogramMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="chromosome-ideogram" dataset={parseDelimitedData(ideogram.definition.sampleData)} mapping={ideogram.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, axisLineWidth: 2.3 }} themeId={defaultVisualizationThemeId} />);
+    expect(ideogramMarkup).toMatch(/rx="[^"]+" fill="#F4F1EC" stroke="#23242A" stroke-width="2.3"/);
+
+    const motifRows = ["position\tA\tC\tG\tT", ...Array.from({ length: 60 }, (_, index) => `${index + 1}\t0.4\t0.3\t0.2\t0.1`)].join("\n");
+    const motif = plotModuleRegistry.get("motif-logo");
+    const motifData = parseDelimitedData(motifRows);
+    const motifSettings = { ...defaultVisualizationSettings, width: 520 };
+    expect(validatePlotDataset(motif.definition, motifData, motif.definition.defaultMapping, motifSettings).errors).toEqual([]);
+    const motifMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="motif-logo" dataset={motifData} mapping={motif.definition.defaultMapping} settings={motifSettings} themeId={defaultVisualizationThemeId} />);
+    const positionLabels = motifMarkup.match(/data-plot-element="motif-position-label"/g) ?? [];
+    expect(positionLabels.length).toBeGreaterThan(1);
+    expect(positionLabels.length).toBeLessThan(60);
+  });
+
+  it("keeps cumulative-axis labels compact and renders a numeric genome-track legend only when values are mapped", () => {
+    const trackModule = plotModuleRegistry.get("genome-tracks");
+    const trackData = parseDelimitedData([
+      "chromosome\tstart\tend\tvalue\ttrack\tfeature",
+      "VeryLongReferenceContigIdentifier_000001\t0\t100\t1.25\tAccessibility\tPeak_A",
+      "VeryLongReferenceContigIdentifier_000002\t0\t120\t3.75\tAccessibility\tPeak_B",
+      "chr23\t0\t80\t2.50\tAccessibility\tPeak_C",
+    ].join("\n"));
+    const withValues = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="genome-tracks" dataset={trackData} mapping={trackModule.definition.defaultMapping} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+    expect(withValues).toContain('data-plot-element="genome-track-color-legend"');
+    expect(withValues).toContain('data-plot-element="genome-axis-label"');
+    expect(withValues).toContain('data-full-label="VERYLONGREFERENCECONTIGIDENTIFIER_000001"');
+    expect(withValues).toContain("Track value from");
+
+    const withoutValues = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="genome-tracks" dataset={trackData} mapping={{ ...trackModule.definition.defaultMapping, value: "" }} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+    expect(withoutValues).not.toContain('data-plot-element="genome-track-color-legend"');
   });
 });

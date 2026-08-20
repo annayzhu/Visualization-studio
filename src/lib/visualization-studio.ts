@@ -15,6 +15,15 @@ import {
   supportedCytobandStains,
   waterfallLayoutMetrics,
 } from "./visualization-genomics";
+import {
+  hierarchyLayoutMetrics,
+  networkEncodingLegendEntries,
+  networkLegendMetrics,
+  networkLayoutMetrics,
+  parseHierarchyRecords,
+  parseNetworkRecords,
+  type NetworkPlotType,
+} from "./visualization-network";
 
 export type PlotType =
   | "bar"
@@ -61,6 +70,14 @@ export type PlotType =
   | "waterfall"
   | "oncoplot"
   | "motif-logo"
+  | "network"
+  | "ppi"
+  | "cerna"
+  | "mirna-target"
+  | "cnet"
+  | "enrichment-map"
+  | "tree"
+  | "dendrogram"
   | "pie"
   | "donut"
   | "rose"
@@ -305,6 +322,11 @@ export type VisualizationSettings = {
   genomicSortSamples: boolean;
   oncoplotShowMargins: boolean;
   motifDisplayMode: "information" | "probability";
+  networkLayout: "circular" | "layered" | "radial";
+  networkSeed: number;
+  networkShowIsolates: boolean;
+  networkEdgeOpacity: number;
+  treeOrientation: "vertical" | "horizontal";
   correlationMethod: "pearson" | "spearman";
   xThreshold: number;
   yThreshold: number;
@@ -429,6 +451,11 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   genomicSortSamples: true,
   oncoplotShowMargins: true,
   motifDisplayMode: "information",
+  networkLayout: "circular",
+  networkSeed: 42,
+  networkShowIsolates: true,
+  networkEdgeOpacity: 0.62,
+  treeOrientation: "vertical",
   correlationMethod: "pearson",
   xThreshold: 0,
   yThreshold: 0,
@@ -1244,6 +1271,97 @@ Tumor\tMacrophage\t12\tImmune
 Fibroblast\tTumor\t10\tStroma
 Macrophage\tT cell\t7\tImmune
 Endothelial\tTumor\t6\tStroma`,
+  generalNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
+node\tTumor cell\t\t\t\t\t\t\tMalignant\tCell type\t18
+node\tCD8 T cell\t\t\t\t\t\t\tImmune\tCell type\t14
+node\tMacrophage\t\t\t\t\t\t\tImmune\tCell type\t11
+node\tFibroblast\t\t\t\t\t\t\tStroma\tCell type\t8
+node\tEndothelial\t\t\t\t\t\t\tStroma\tCell type\t6
+node\tDendritic cell\t\t\t\t\t\t\tImmune\tCell type\t4
+edge\t\tTumor cell\tCD8 T cell\t0.82\tdirected\tnegative\timmune suppression\tCommunication\t\t
+edge\t\tMacrophage\tCD8 T cell\t0.65\tdirected\tnegative\timmune suppression\tCommunication\t\t
+edge\t\tFibroblast\tTumor cell\t0.58\tdirected\tpositive\tgrowth support\tCommunication\t\t
+edge\t\tEndothelial\tTumor cell\t0.41\tdirected\tpositive\tvascular support\tCommunication\t\t
+edge\t\tDendritic cell\tCD8 T cell\t0.74\tdirected\tpositive\tantigen presentation\tCommunication\t\t`,
+  ppiNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
+node\tTP53\t\t\t\t\t\t\tDNA damage\tProtein\t18
+node\tMDM2\t\t\t\t\t\t\tDNA damage\tProtein\t12
+node\tCDKN1A\t\t\t\t\t\t\tCell cycle\tProtein\t10
+node\tATM\t\t\t\t\t\t\tDNA damage\tProtein\t11
+node\tCHEK2\t\t\t\t\t\t\tDNA damage\tProtein\t8
+node\tRB1\t\t\t\t\t\t\tCell cycle\tProtein\t9
+node\tE2F1\t\t\t\t\t\t\tCell cycle\tProtein\t7
+node\tIsolated_candidate\t\t\t\t\t\t\tCandidate\tProtein\t3
+edge\t\tTP53\tMDM2\t0.92\tundirected\tneutral\tphysical\tPPI\t\t
+edge\t\tATM\tTP53\t0.88\tundirected\tneutral\tphosphorylation\tPPI\t\t
+edge\t\tCHEK2\tTP53\t0.81\tundirected\tneutral\tphosphorylation\tPPI\t\t
+edge\t\tTP53\tCDKN1A\t0.84\tundirected\tneutral\tfunctional\tPPI\t\t
+edge\t\tCDKN1A\tRB1\t0.69\tundirected\tneutral\tfunctional\tPPI\t\t
+edge\t\tRB1\tE2F1\t0.90\tundirected\tneutral\tphysical\tPPI\t\t`,
+  cernaNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
+node\tMALAT1\t\t\t\t\t\t\tlncRNA\tlncRNA\t9
+node\tNEAT1\t\t\t\t\t\t\tlncRNA\tlncRNA\t8
+node\tmiR-34a-5p\t\t\t\t\t\t\tmiRNA\tmiRNA\t12
+node\tmiR-200c-3p\t\t\t\t\t\t\tmiRNA\tmiRNA\t10
+node\tMET\t\t\t\t\t\t\tmRNA\tmRNA\t11
+node\tZEB1\t\t\t\t\t\t\tmRNA\tmRNA\t13
+edge\t\tMALAT1\tmiR-34a-5p\t0.71\tdirected\tnegative\tputative binding\tceRNA\t\t
+edge\t\tmiR-34a-5p\tMET\t0.83\tdirected\tnegative\ttarget repression\tceRNA\t\t
+edge\t\tNEAT1\tmiR-200c-3p\t0.66\tdirected\tnegative\tputative binding\tceRNA\t\t
+edge\t\tmiR-200c-3p\tZEB1\t0.88\tdirected\tnegative\ttarget repression\tceRNA\t\t`,
+  mirnaNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
+node\tmiR-34a-5p\t\t\t\t\t\t\tmiRNA\tmiRNA\t14
+node\tmiR-200c-3p\t\t\t\t\t\t\tmiRNA\tmiRNA\t12
+node\tMET\t\t\t\t\t\t\tTarget gene\tmRNA\t10
+node\tBCL2\t\t\t\t\t\t\tTarget gene\tmRNA\t8
+node\tZEB1\t\t\t\t\t\t\tTarget gene\tmRNA\t11
+node\tBMI1\t\t\t\t\t\t\tTarget gene\tmRNA\t7
+edge\t\tmiR-34a-5p\tMET\t0.87\tdirected\tnegative\tvalidated target\tmiRNA-target\t\t
+edge\t\tmiR-34a-5p\tBCL2\t0.79\tdirected\tnegative\tvalidated target\tmiRNA-target\t\t
+edge\t\tmiR-200c-3p\tZEB1\t0.91\tdirected\tnegative\tvalidated target\tmiRNA-target\t\t
+edge\t\tmiR-200c-3p\tBMI1\t0.68\tdirected\tnegative\tpredicted target\tmiRNA-target\t\t`,
+  cnetNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
+node\tDNA repair\t\t\t\t\t\t\tTerm\tEnriched term\t0.001
+node\tp53 signaling\t\t\t\t\t\t\tTerm\tEnriched term\t0.004
+node\tCell cycle\t\t\t\t\t\t\tTerm\tEnriched term\t0.0003
+node\tTP53\t\t\t\t\t\t\tGene\tGene\t2.4
+node\tATM\t\t\t\t\t\t\tGene\tGene\t1.8
+node\tCDKN1A\t\t\t\t\t\t\tGene\tGene\t2.1
+node\tRB1\t\t\t\t\t\t\tGene\tGene\t1.5
+edge\t\tDNA repair\tTP53\t1\tundirected\tneutral\tmembership\tCnet\t\t
+edge\t\tDNA repair\tATM\t1\tundirected\tneutral\tmembership\tCnet\t\t
+edge\t\tp53 signaling\tTP53\t1\tundirected\tneutral\tmembership\tCnet\t\t
+edge\t\tp53 signaling\tCDKN1A\t1\tundirected\tneutral\tmembership\tCnet\t\t
+edge\t\tCell cycle\tCDKN1A\t1\tundirected\tneutral\tmembership\tCnet\t\t
+edge\t\tCell cycle\tRB1\t1\tundirected\tneutral\tmembership\tCnet\t\t`,
+  enrichmentMapNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
+node\tDNA repair\t\t\t\t\t\t\tGenome stability\tTerm\t18
+node\tHomologous recombination\t\t\t\t\t\t\tGenome stability\tTerm\t12
+node\tp53 signaling\t\t\t\t\t\t\tStress response\tTerm\t14
+node\tCell cycle checkpoint\t\t\t\t\t\t\tStress response\tTerm\t16
+node\tApoptosis\t\t\t\t\t\t\tStress response\tTerm\t11
+edge\t\tDNA repair\tHomologous recombination\t0.62\tundirected\tneutral\tgene-set overlap\tSimilarity\t\t
+edge\t\tDNA repair\tp53 signaling\t0.34\tundirected\tneutral\tgene-set overlap\tSimilarity\t\t
+edge\t\tp53 signaling\tCell cycle checkpoint\t0.57\tundirected\tneutral\tgene-set overlap\tSimilarity\t\t
+edge\t\tp53 signaling\tApoptosis\t0.49\tundirected\tneutral\tgene-set overlap\tSimilarity\t\t`,
+  tree: `node\tparent\tlabel\tgroup\theight
+Root\t\tStudy cohort\tRoot\t0
+Responder\tRoot\tResponders\tClinical response\t0
+Nonresponder\tRoot\tNonresponders\tClinical response\t0
+R_TcellHigh\tResponder\tT-cell high\tImmune phenotype\t0
+R_TcellLow\tResponder\tT-cell low\tImmune phenotype\t0
+NR_MyeloidHigh\tNonresponder\tMyeloid high\tImmune phenotype\t0
+NR_Other\tNonresponder\tOther\tImmune phenotype\t0`,
+  dendrogram: `node\tparent\tlabel\tgroup\theight
+Root\t\tAll samples\tInternal\t1.00
+Cluster_A\tRoot\tCluster A\tInternal\t0.58
+Cluster_B\tRoot\tCluster B\tInternal\t0.66
+A1\tCluster_A\tControl_1\tControl\t0
+A2\tCluster_A\tControl_2\tControl\t0
+B_left\tCluster_B\tB left\tInternal\t0.31
+B1\tB_left\tTreatment_1\tTreatment\t0
+B2\tB_left\tTreatment_2\tTreatment\t0
+B3\tCluster_B\tTreatment_3\tTreatment\t0`,
   composition: `category\tvalue
 Immune\t34
 Stromal\t27
@@ -1758,6 +1876,54 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     defaultMapping: { source: "source", target: "target", value: "value", group: "group" },
     sampleData: samples.network,
   })),
+  ...(["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"] as const).map((id) => {
+    const metadata = {
+      network: { name: "Network", family: "Relationships", summary: "General node–edge network with explicit direction, weight, sign, type, grouping, and isolated-node records.", sample: samples.generalNetwork },
+      ppi: { name: "PPI network", family: "Molecular interactions", summary: "Protein–protein interaction network that keeps evidence type and interaction weight explicit.", sample: samples.ppiNetwork },
+      cerna: { name: "ceRNA network", family: "Regulatory relationships", summary: "Typed lncRNA/miRNA/mRNA relationship network for explicitly supplied putative ceRNA edges.", sample: samples.cernaNetwork },
+      "mirna-target": { name: "miRNA–target", family: "Regulatory relationships", summary: "Directed miRNA-to-target relationships with validation/evidence class retained as edge type.", sample: samples.mirnaNetwork },
+      cnet: { name: "Cnet", family: "Enrichment relationships", summary: "Bipartite enriched-term–gene membership network with term and gene nodes kept distinct.", sample: samples.cnetNetwork },
+      "enrichment-map": { name: "Enrichment map", family: "Enrichment relationships", summary: "Term similarity network whose edge weight represents an explicitly supplied overlap or similarity score.", sample: samples.enrichmentMapNetwork },
+    }[id];
+    return {
+      id,
+      name: metadata.name,
+      family: metadata.family,
+      summary: metadata.summary,
+      inputHint: "One row per record. Node rows require node and may declare group/type/value; edge rows require source/target and may declare non-negative weight, direction, sign, edge type, and group.",
+      roles: [
+        { key: "recordType", label: "Record type (node / edge)", kind: "category" as const, required: true },
+        { key: "node", label: "Node ID", kind: "label" as const, required: false },
+        { key: "source", label: "Edge source", kind: "label" as const, required: false },
+        { key: "target", label: "Edge target", kind: "label" as const, required: false },
+        { key: "weight", label: "Edge weight", kind: "number" as const, required: false },
+        { key: "direction", label: "Direction", kind: "category" as const, required: false },
+        { key: "sign", label: "Sign", kind: "category" as const, required: false },
+        { key: "edgeType", label: "Edge type / evidence", kind: "category" as const, required: false },
+        { key: "group", label: "Node / edge group", kind: "category" as const, required: false },
+        { key: "nodeType", label: "Node type", kind: "category" as const, required: false },
+        { key: "nodeValue", label: "Node value / size", kind: "number" as const, required: false },
+      ],
+      defaultMapping: { recordType: "record_type", node: "node", source: "source", target: "target", weight: "weight", direction: "direction", sign: "sign", edgeType: "edge_type", group: "group", nodeType: "node_type", nodeValue: "node_value" },
+      sampleData: metadata.sample,
+    };
+  }),
+  ...(["tree", "dendrogram"] as const).map((id) => ({
+    id,
+    name: id === "tree" ? "Tree" : "Dendrogram",
+    family: id === "tree" ? "Hierarchy" : "Hierarchical clustering",
+    summary: id === "tree" ? "Parent–child hierarchy drawn as a rooted tree without converting branches into a generic network." : "Rooted hierarchy whose internal merge heights determine dendrogram branch positions.",
+    inputHint: id === "tree" ? "One row per unique node with exactly one blank-parent root. Input child order is preserved." : "One row per unique node with one root; leaf heights are zero and every parent height must be at least each child height.",
+    roles: [
+      { key: "node", label: "Node ID", kind: "label" as const, required: true },
+      { key: "parent", label: "Parent ID", kind: "label" as const, required: false },
+      { key: "label", label: "Display label", kind: "label" as const, required: false },
+      { key: "group", label: "Leaf group", kind: "category" as const, required: false },
+      { key: "height", label: "Merge height", kind: "number" as const, required: id === "dendrogram" },
+    ],
+    defaultMapping: { node: "node", parent: "parent", label: "label", group: "group", height: "height" },
+    sampleData: id === "tree" ? samples.tree : samples.dendrogram,
+  })),
   {
     id: "circos",
     name: "Circos",
@@ -2005,6 +2171,13 @@ export const plotReferences = {
   sankeyHistory: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management: Part I. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00004.x" },
   sankey: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00015.x" },
   chord: { citation: "Gu et al., 2014. circlize Implements and Enhances Circular Visualization in R. Bioinformatics.", href: "https://doi.org/10.1093/bioinformatics/btu393" },
+  networkLayout: { citation: "Fruchterman & Reingold, 1991. Graph drawing by force-directed placement. Software: Practice and Experience.", href: "https://doi.org/10.1002/spe.4380211102" },
+  cytoscape: { citation: "Shannon et al., 2003. Cytoscape: a software environment for integrated models of biomolecular interaction networks. Genome Research.", href: "https://doi.org/10.1101/gr.1239303" },
+  cerna: { citation: "Salmena et al., 2011. A ceRNA hypothesis: the Rosetta Stone of a hidden RNA language? Cell.", href: "https://doi.org/10.1016/j.cell.2011.07.014" },
+  mirna: { citation: "Bartel, 2009. MicroRNAs: target recognition and regulatory functions. Cell.", href: "https://doi.org/10.1016/j.cell.2009.01.002" },
+  enrichmentMap: { citation: "Merico et al., 2010. Enrichment Map: a network-based method for gene-set enrichment visualization and interpretation. PLoS ONE.", href: "https://doi.org/10.1371/journal.pone.0013984" },
+  tidyTree: { citation: "Reingold & Tilford, 1981. Tidier drawings of trees. IEEE Transactions on Software Engineering.", href: "https://doi.org/10.1109/TSE.1981.234519" },
+  dendrogram: { citation: "Murtagh & Contreras, 2012. Algorithms for hierarchical clustering: an overview. Wiley Interdisciplinary Reviews: Data Mining and Knowledge Discovery.", href: "https://doi.org/10.1002/widm.53" },
   circos: { citation: "Krzywinski et al., 2009. Circos: An information aesthetic for comparative genomics. Genome Res.", href: "https://doi.org/10.1101/gr.092759.109" },
   manhattan: { citation: "Turner, 2014. qqman: an R package for visualizing GWAS results using Q-Q and Manhattan plots. bioRxiv.", href: "https://doi.org/10.1101/005165" },
   qq: { citation: "Wilk & Gnanadesikan, 1968. Probability plotting methods for the analysis of data. Biometrika.", href: "https://doi.org/10.1093/biomet/55.1.1" },
@@ -2262,6 +2435,55 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     origin: "现代 Chord diagram 常由邻接矩阵或 from–to 表生成；circlize 等工具把这种通用圆形关系图推广到迁移、通信和生物网络。",
     references: [plotReferences.chord],
   },
+  network: {
+    definition: "通用 network 由节点与边构成：节点颜色编码分组，大小编码可选节点值；边宽编码非负权重，箭头编码方向，颜色编码正/负/中性符号，线型编码关系类型。孤立节点必须用独立 node 记录声明。",
+    suitableData: "明确区分 node 与 edge 的关系数据。Edge 记录可给 direction、weight、sign、edge type；node 记录可给 group、type、value。布局由所选算法和整数 seed 确定，但几何距离不等于统计距离。",
+    answers: "哪些对象相连、关系方向与符号是什么、哪些节点具有较高连接度或形成模块。网络中心性外观不证明因果、调控或生物学重要性。",
+    origin: "图论把对象抽象为顶点和边；现代网络图借助确定性或带随机种子的布局把拓扑结构映射到二维平面。",
+    references: [plotReferences.networkLayout, plotReferences.cytoscape],
+  },
+  ppi: {
+    definition: "PPI network 专门表示蛋白质之间的物理或功能相互作用；边默认无向，但仍保留输入的证据类型、权重和方向声明。",
+    suitableData: "来自明确数据库、实验或评分流程的蛋白–蛋白关系，并应保留物种、数据库版本、证据类型和评分含义。不同来源的分数不可在没有校准时直接比较。",
+    answers: "候选蛋白是否处于同一相互作用模块、哪些连接由何种证据支持。数据库共现或预测边不等于体内直接结合。",
+    references: [plotReferences.cytoscape, plotReferences.networkLayout],
+  },
+  cerna: {
+    definition: "ceRNA network 用带类型的 lncRNA/miRNA/mRNA 节点和有向边表达上游给定的竞争性内源 RNA 假设关系；图形不会从相关性自动建立 ceRNA 机制。",
+    suitableData: "具有 miRNA 靶向证据、表达方向、位点或其他验证依据的候选 ceRNA 关系。应分别保存预测、数据库支持和实验验证等 edge type。",
+    answers: "哪些 RNA 通过共享 miRNA 形成候选调控结构，以及证据链在何处中断。它是机制假设图，不是因果证明。",
+    references: [plotReferences.cerna, plotReferences.mirna],
+  },
+  "mirna-target": {
+    definition: "从 miRNA 指向靶基因的有向二部网络；箭头表示声明的调控方向，负号通常表示抑制，但必须来自输入而非图形默认推断。",
+    suitableData: "miRNA–target 配对及预测或验证类别、非负权重和可选效应符号。建议保留物种、3′UTR/位点上下文、数据库版本与验证来源。",
+    answers: "一个 miRNA 可能影响哪些靶点、多个 miRNA 是否汇聚于共同靶基因，以及哪些边具有更强或更直接的证据。",
+    references: [plotReferences.mirna, plotReferences.cytoscape],
+  },
+  cnet: {
+    definition: "cnet 是富集 term 与 gene 的二部成员网络：term–gene 边表示基因属于对应富集集合，不等同于基因之间存在调控或蛋白互作。",
+    suitableData: "富集结果中选定的 term–gene membership，可在 node value 中放入基因效应量或 term 显著性，但必须在图注说明尺度。",
+    answers: "哪些富集条目共享驱动基因，哪些基因连接多个生物学主题。共享成员不会自动证明通路间调控。",
+    references: [plotReferences.enrichment, plotReferences.cytoscape],
+  },
+  "enrichment-map": {
+    definition: "把每个富集 term 作为节点，以基因集重叠或相似度作为无向加权边；节点分组可表示上游主题聚类。",
+    suitableData: "经过明确阈值筛选的富集条目，以及由 Jaccard、overlap coefficient 或其他已记录指标计算的非负 term–term similarity。不同指标不可混用。",
+    answers: "冗余富集条目如何聚成主题、哪些 term 共享大量成员。它概括 gene-set 重叠，不表示通路因果顺序。",
+    references: [plotReferences.enrichmentMap, plotReferences.enrichment],
+  },
+  tree: {
+    definition: "rooted tree 以唯一父节点关系保存层级；每个非根节点恰有一个 parent，分支位置表示层级与输入子节点顺序，而不是通用网络的力导向距离。",
+    suitableData: "分类体系、谱系、决策或其他单根无环 parent–child 结构。输入顺序会作为同一父节点下的显示顺序保留。",
+    answers: "对象如何从根分层展开、每条路径包含哪些父子关系。分支长度在普通 tree 中没有数值含义。",
+    references: [plotReferences.tidyTree],
+  },
+  dendrogram: {
+    definition: "dendrogram 是层次聚类结果的树形表示，内部节点的 merge height 决定分支高度；叶顺序与合并结构必须由上游聚类结果提供。",
+    suitableData: "单根无环层级及每个节点的非负 height；叶通常为 0，父节点 height 不得低于任一子节点。距离、链接方法、标准化和叶排序必须在方法中记录。",
+    answers: "哪些观察对象先合并、各簇在何种不相似度高度汇合。叶片间横向距离只用于排版，不是原始样本距离。",
+    references: [plotReferences.dendrogram, plotReferences.tidyTree],
+  },
   circos: {
     definition: "以染色体或 contig 的真实坐标为圆周骨架，叠加同心数据轨道，并把连接精确锚定到两个基因组区间。",
     suitableData: "带染色体和起止坐标的基因组区段及区段间连接，如融合、重排或染色质互作。",
@@ -2386,6 +2608,7 @@ const advancedRendererIds = new Set<PlotType>([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
+  "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
   "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
@@ -2432,6 +2655,14 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   waterfall: ["genomicSortSamples"],
   oncoplot: ["genomicSortSamples", "oncoplotShowMargins"],
   "motif-logo": ["motifDisplayMode"],
+  network: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
+  ppi: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
+  cerna: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
+  "mirna-target": ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
+  cnet: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
+  "enrichment-map": ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
+  tree: ["showLabels", "treeOrientation"],
+  dendrogram: ["showLabels", "treeOrientation"],
 };
 
 const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof VisualizationSettings>>> = {
@@ -2443,6 +2674,14 @@ const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof Visuali
   waterfall: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "grid", "categoricalColors", "genomicSortSamples"]),
   oncoplot: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "categoricalColors", "genomicSortSamples", "oncoplotShowMargins"]),
   "motif-logo": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "grid", "motifDisplayMode"]),
+  network: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"]),
+  ppi: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"]),
+  cerna: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"]),
+  "mirna-target": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"]),
+  cnet: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"]),
+  "enrichment-map": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "opacity", "legendPosition", "categoricalColors", "showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"]),
+  tree: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "legendPosition", "categoricalColors", "showLabels", "treeOrientation"]),
+  dendrogram: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "dataLineWidth", "pointSize", "legendPosition", "categoricalColors", "showLabels", "treeOrientation"]),
   pie: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode"]),
   donut: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "donutHole"]),
   waffle: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "legendSize", "opacity", "legendPosition", "categoricalColors", "compositionLabelMode", "waffleCells"]),
@@ -2458,8 +2697,8 @@ function dataShapeFor(type: PlotType): PlotDataShape {
   if (["heatmap", "clustered-heatmap", "correlation-heatmap", "pca"].includes(type)) return "matrix";
   if (["pcoa", "umap", "tsne", "nmds"].includes(type)) return "coordinates";
   if (["venn", "upset"].includes(type)) return "sets";
-  if (["sankey", "chord"].includes(type)) return "network";
-  if (["treemap", "sunburst"].includes(type)) return "hierarchy";
+  if (["sankey", "chord", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"].includes(type)) return "network";
+  if (["treemap", "sunburst", "tree", "dendrogram"].includes(type)) return "hierarchy";
   if (type === "circos") return "genomic-links";
   if (["manhattan", "chromosome-ideogram", "snp-density", "genome-tracks"].includes(type)) return "genomic-coordinates";
   if (["waterfall", "oncoplot"].includes(type)) return "alterations";
@@ -2468,7 +2707,7 @@ function dataShapeFor(type: PlotType): PlotDataShape {
 }
 
 function numericAxesFor(type: PlotType): Array<"x" | "y"> {
-  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "manhattan", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
+  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "manhattan", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
   if (["enrichment", "enrichment-bar", "survival-forest"].includes(type)) return ["x"];
   if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return ["x", "y"];
   if (["errorbar", "lollipop"].includes(type)) return ["y"];
@@ -3003,6 +3242,7 @@ export function validatePlotDataset(
     if (column && !dataset.headers.includes(column)) errors.push(`${role.label} references a missing column (${column}).`);
     if (column && role.kind === "number") {
       const invalidCount = dataset.rows.filter((row) => {
+        if (["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"].includes(definition.id) && !role.required && !row[column]?.trim()) return false;
         const value = (definition.id === "enrichment" || definition.id === "enrichment-bar") && role.key === "ratio"
           ? parseRatioValue(row[column])
           : parseNumericValue(row[column]);
@@ -3629,6 +3869,146 @@ export function validatePlotDataset(
   if (definition.id === "venn" && mapping.set) {
     const setCount = new Set(dataset.rows.map((row) => row[mapping.set]).filter(Boolean)).size;
     if (setCount < 2 || setCount > 3) errors.push(`Venn diagrams require 2–3 unique sets; detected ${setCount}. Use UpSet for more sets.`);
+  }
+
+  const explicitNetworkTypes: NetworkPlotType[] = ["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"];
+  if (explicitNetworkTypes.includes(definition.id as NetworkPlotType)) {
+    const type = definition.id as NetworkPlotType;
+    const parsed = parseNetworkRecords(type, dataset.rows, mapping);
+    if (parsed.invalidRecordTypes.length > 0) errors.push(`Record type must be node or edge; invalid rows: ${parsed.invalidRecordTypes.slice(0, 8).join(", ")}.`);
+    if (parsed.incompleteRows.length > 0) errors.push(`Node rows need a Node ID and edge rows need both Source and Target; incomplete rows: ${parsed.incompleteRows.slice(0, 8).join(", ")}.`);
+    if (parsed.invalidWeights.length > 0) errors.push(`Edge weight must be a non-negative number when supplied; invalid rows: ${parsed.invalidWeights.slice(0, 8).join(", ")}.`);
+    if (parsed.missingWeights.length > 0) errors.push(`Edge weight is mapped, so every edge row needs a numeric weight; missing rows: ${parsed.missingWeights.slice(0, 8).join(", ")}. Unmap Weight for a truly unweighted network.`);
+    if (parsed.invalidDirections.length > 0) errors.push(`Direction must be directed, undirected, or bidirectional; invalid rows: ${parsed.invalidDirections.slice(0, 8).join(", ")}.`);
+    if (parsed.invalidSigns.length > 0) errors.push(`Sign must be positive, negative, or neutral; invalid rows: ${parsed.invalidSigns.slice(0, 8).join(", ")}.`);
+    if (mapping.nodeValue) {
+      const negativeNodeValues = dataset.rows.filter((row) => row[mapping.recordType]?.trim().toLowerCase() === "node" && row[mapping.nodeValue]?.trim() && (parseNumericValue(row[mapping.nodeValue]) ?? -1) < 0).length;
+      if (negativeNodeValues > 0) errors.push(`Node value contains ${negativeNodeValues} negative value${negativeNodeValues === 1 ? "" : "s"}; node size requires a non-negative magnitude.`);
+      if (parsed.invalidNodeValues.length > 0) errors.push(`Node value is mapped but contains non-numeric values in rows: ${parsed.invalidNodeValues.slice(0, 8).join(", ")}.`);
+      if (parsed.missingNodeValues.length > 0) errors.push(`Node value is mapped, so every node row needs a numeric value; missing rows: ${parsed.missingNodeValues.slice(0, 8).join(", ")}. Unmap Node value to size nodes by degree.`);
+    }
+    const implicitNodes = parsed.nodes.filter((node) => !node.explicit).map((node) => node.id);
+    if (implicitNodes.length > 0) errors.push(`Every edge endpoint needs one explicit node record so node grouping/type and isolated nodes are reproducible; missing records: ${implicitNodes.slice(0, 8).join(", ")}.`);
+    const nodeRows = dataset.rows.filter((row) => row[mapping.recordType]?.trim().toLowerCase() === "node");
+    const nodeIds = nodeRows.map((row) => row[mapping.node]?.trim()).filter(Boolean);
+    const duplicateNodes = [...new Set(nodeIds.filter((id, index) => nodeIds.indexOf(id) !== index))];
+    if (duplicateNodes.length > 0) errors.push(`Node IDs must be unique; duplicates: ${duplicateNodes.slice(0, 8).join(", ")}.`);
+    if (parsed.nodes.length < 2) errors.push("A relationship view needs at least two explicit nodes.");
+    if (parsed.edges.length < 1) errors.push("A relationship view needs at least one valid edge; use a tree for parent–child hierarchy without relationship edges.");
+    const selfEdges = parsed.edges.filter((edge) => edge.source === edge.target).length;
+    if (selfEdges > 0) warnings.push(`${selfEdges} self-loop${selfEdges === 1 ? " is" : "s are"} retained; confirm that self-regulation/self-interaction is intended.`);
+    const normalizeNodeType = (value: string) => value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+    const nodeTypes = new Map(parsed.nodes.map((node) => [node.id, normalizeNodeType(node.nodeType)]));
+    const proteinTypes = new Set(["protein"]);
+    const miRnaTypes = new Set(["mirna", "micro rna", "microrna"]);
+    const nonMiRnaRnaTypes = new Set(["rna", "mrna", "lncrna", "circ rna", "circrna", "sncrna", "rrna", "trna"]);
+    const targetTypes = new Set(["mrna", "gene", "target gene", "protein coding gene"]);
+    const termTypes = new Set(["term", "enriched term", "pathway", "gene set", "ontology term", "biological process", "molecular function", "cellular component"]);
+    const geneTypes = new Set(["gene", "target gene", "protein coding gene"]);
+    const isMiRna = (value: string) => miRnaTypes.has(normalizeNodeType(value));
+    const isNonMiRnaRna = (value: string) => nonMiRnaRnaTypes.has(normalizeNodeType(value));
+    if (type === "ppi") {
+      const nonProteins = parsed.nodes.filter((node) => !proteinTypes.has(normalizeNodeType(node.nodeType)));
+      if (nonProteins.length > 0) errors.push(`PPI views require every endpoint node to be typed as Protein; invalid nodes: ${nonProteins.slice(0, 8).map((node) => node.id).join(", ")}. Use the general Network module for mixed molecular entities.`);
+    }
+    if (type === "mirna-target") {
+      const invalidEdges = parsed.edges.filter((edge) => {
+        const sourceType = nodeTypes.get(edge.source) ?? "";
+        const targetType = nodeTypes.get(edge.target) ?? "";
+        return edge.direction !== "directed" || !isMiRna(sourceType) || !targetTypes.has(normalizeNodeType(targetType));
+      });
+      if (invalidEdges.length > 0) errors.push(`${invalidEdges.length} miRNA–target edge${invalidEdges.length === 1 ? " does" : "s do"} not follow the directed miRNA → mRNA/gene target contract.`);
+    }
+    if (type === "cnet") {
+      const invalidMemberships = parsed.edges.filter((edge) => { const pair = [nodeTypes.get(edge.source) ?? "", nodeTypes.get(edge.target) ?? ""]; return edge.direction !== "undirected" || !(pair.some((value) => termTypes.has(value)) && pair.some((value) => geneTypes.has(value))); }).length;
+      if (invalidMemberships > 0) errors.push(`${invalidMemberships} Cnet edge${invalidMemberships === 1 ? " is" : "s are"} not a term–gene membership; type one endpoint as enriched term and the other as gene.`);
+    }
+    if (type === "enrichment-map") {
+      if (!mapping.weight) errors.push("Enrichment maps require a mapped Weight column containing an explicit overlap/similarity score for every edge.");
+      const invalidSimilarity = parsed.edges.filter((edge) => edge.weight > 1).length;
+      if (invalidSimilarity > 0) errors.push(`${invalidSimilarity} enrichment-map similarity weight${invalidSimilarity === 1 ? " is" : "s are"} above 1; use a documented overlap/similarity proportion in [0, 1].`);
+      const nonTerms = parsed.nodes.filter((node) => !termTypes.has(normalizeNodeType(node.nodeType)));
+      const directedEdges = parsed.edges.filter((edge) => edge.direction !== "undirected").length;
+      if (nonTerms.length > 0) errors.push(`Enrichment maps require term nodes only; invalid nodes: ${nonTerms.slice(0, 8).map((node) => node.id).join(", ")}.`);
+      if (directedEdges > 0) errors.push(`${directedEdges} enrichment-map edge${directedEdges === 1 ? " is" : "s are"} directed; term similarity/overlap edges must be undirected.`);
+    }
+    if (type === "cerna") {
+      const nonRnaNodes = parsed.nodes.filter((node) => !isMiRna(node.nodeType) && !isNonMiRnaRna(node.nodeType));
+      const invalidEdges = parsed.edges.filter((edge) => {
+        const sourceType = nodeTypes.get(edge.source) ?? "";
+        const targetType = nodeTypes.get(edge.target) ?? "";
+        return edge.direction !== "directed" || !((isMiRna(sourceType) && isNonMiRnaRna(targetType)) || (isNonMiRnaRna(sourceType) && isMiRna(targetType)));
+      });
+      if (nonRnaNodes.length > 0) errors.push(`ceRNA views accept typed RNA entities only; invalid nodes: ${nonRnaNodes.slice(0, 8).map((node) => node.id).join(", ")}.`);
+      if (invalidEdges.length > 0) errors.push(`${invalidEdges.length} ceRNA edge${invalidEdges.length === 1 ? " does" : "s do"} not follow a directed miRNA ↔ non-miRNA RNA binding/target step. Use the general Network module for other relationships.`);
+    }
+    if (settings) {
+      if (!Number.isInteger(settings.networkSeed) || settings.networkSeed < 0 || settings.networkSeed > 1_000_000_000) errors.push("Network layout seed must be an integer from 0 to 1,000,000,000.");
+      const visibleNodes = settings.networkShowIsolates ? parsed.nodes : parsed.nodes.filter((node) => parsed.edges.some((edge) => edge.source === node.id || edge.target === node.id));
+      const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
+      const visibleEdges = parsed.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
+      const visibleGroups = new Set(visibleNodes.map((node) => node.group));
+      const visibleEdgeTypes = new Set(visibleEdges.map((edge) => edge.edgeType));
+      const visibleSigns = new Set(visibleEdges.map((edge) => edge.sign));
+      const visibleDirections = new Set(visibleEdges.map((edge) => edge.direction));
+      if (visibleGroups.size > 8 && settings.legendPosition !== "none") errors.push(`The compact network legend supports at most eight visible node groups; detected ${visibleGroups.size}. Filter/facet groups or intentionally hide the legend.`);
+      if (visibleEdgeTypes.size > 4 && settings.legendPosition !== "none") errors.push(`The compact network legend supports at most four visible edge types; detected ${visibleEdgeTypes.size}. Filter edge types or intentionally hide the legend.`);
+      const layout = networkLayoutMetrics(settings, visibleNodes, visibleEdges, Boolean(mapping.nodeValue), Boolean(mapping.weight));
+      const labelIssues = layout.labelCollisionCount + layout.labelNodeCollisionCount + layout.labelsOutsidePlot;
+      const boundaryIssues = layout.nodesOutsidePlot + layout.edgeBoundaryIssues;
+      if (!layout.fits) errors.push(`The current ${settings.networkLayout} layout is not pixel-safe (${visibleNodes.length} nodes, ${visibleEdges.length} edges, ${layout.nodeCollisionCount} node collision${layout.nodeCollisionCount === 1 ? "" : "s"}, ${labelIssues} label issue${labelIssues === 1 ? "" : "s"}, ${boundaryIssues} node/edge boundary issue${boundaryIssues === 1 ? "" : "s"}, ${layout.duplicateEdgePaths} overlapping edge path${layout.duplicateEdgePaths === 1 ? "" : "s"}). Increase width/height, hide labels, change layout, or filter to at most 120 nodes and 400 edges.`);
+      const encodingEntries = networkEncodingLegendEntries(visibleNodes, visibleEdges, Boolean(mapping.nodeValue), Boolean(mapping.weight), settings);
+      const legendLabels = encodingEntries.map((entry) => entry.label);
+      const legend = networkLegendMetrics(settings, visibleGroups.size, visibleEdgeTypes.size, visibleSigns.size, visibleDirections.size, encodingEntries.length, legendLabels);
+      if (!legend.fits) errors.push(`The network legend needs ${legend.requiredHeight.toFixed(0)} px vertically (available ${legend.availableHeight.toFixed(0)} px) and ${legend.requiredCellWidth.toFixed(0)} px per complete entry (available ${legend.cellWidth.toFixed(0)} px). Increase width/height, shorten labels, move the legend, or intentionally hide it.`);
+      if (layout.density > 8) warnings.push(`The network averages ${layout.density.toFixed(1)} edges per node; even a valid export may be visually dense, so consider a biologically justified filter or module-level summary.`);
+    }
+  }
+
+  if (["tree", "dendrogram"].includes(definition.id)) {
+    const rows = parseHierarchyRecords(dataset.rows, mapping);
+    if (rows.length > 1_000) errors.push("Tree and dendrogram previews are limited to 1,000 hierarchy nodes; prune or aggregate the hierarchy before browser rendering.");
+    const ids = rows.map((row) => row.id).filter(Boolean);
+    const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+    if (ids.length !== rows.length) errors.push("Hierarchy node IDs must not be blank.");
+    if (duplicates.length > 0) errors.push(`Hierarchy node IDs must be unique; duplicates: ${duplicates.slice(0, 8).join(", ")}.`);
+    const idSet = new Set(ids);
+    const roots = rows.filter((row) => !row.parent);
+    if (roots.length !== 1) errors.push(`Hierarchy requires exactly one blank-parent root; detected ${roots.length}.`);
+    const missingParents = rows.filter((row) => row.parent && !idSet.has(row.parent));
+    if (missingParents.length > 0) errors.push(`${missingParents.length} hierarchy node${missingParents.length === 1 ? " references" : "s reference"} a missing parent.`);
+    const selfParents = rows.filter((row) => row.id && row.parent === row.id);
+    if (selfParents.length > 0) errors.push(`${selfParents.length} hierarchy node${selfParents.length === 1 ? " is" : "s are"} its own parent.`);
+    const children = new Map(rows.map((row) => [row.id, [] as string[]]));
+    rows.forEach((row) => { if (row.parent && children.has(row.parent)) children.get(row.parent)!.push(row.id); });
+    const state = new Map<string, 0 | 1 | 2>();
+    let cycle = false;
+    const visit = (id: string) => { if (state.get(id) === 1) { cycle = true; return; } if (state.get(id) === 2) return; state.set(id, 1); (children.get(id) ?? []).forEach(visit); state.set(id, 2); };
+    if (roots.length === 1 && rows.length <= 1_000) visit(roots[0].id);
+    if (cycle) errors.push("Hierarchy contains a cycle; tree and dendrogram inputs must be acyclic.");
+    if (roots.length === 1 && rows.length <= 1_000 && state.size < rows.length && missingParents.length === 0) errors.push(`${rows.length - state.size} hierarchy node${rows.length - state.size === 1 ? " is" : "s are"} disconnected from the root.`);
+    const leaves = rows.filter((row) => (children.get(row.id) ?? []).length === 0);
+    const depth = (id: string): number => (children.get(id) ?? []).length ? 1 + Math.max(...children.get(id)!.map(depth)) : 0;
+    const maximumDepth = roots.length === 1 && !cycle && rows.length <= 1_000 ? depth(roots[0].id) : 0;
+    if (definition.id === "dendrogram") {
+      const invalidHeights = rows.filter((row) => !Number.isFinite(row.height) || row.height < 0);
+      if (invalidHeights.length > 0) errors.push(`${invalidHeights.length} dendrogram height${invalidHeights.length === 1 ? " is" : "s are"} missing, non-numeric, or negative.`);
+      const elevatedLeaves = leaves.filter((leaf) => Number.isFinite(leaf.height) && Math.abs(leaf.height) > 1e-9);
+      if (elevatedLeaves.length > 0) errors.push(`Dendrogram leaf heights must be zero (tolerance 1e-9); elevated leaves: ${elevatedLeaves.slice(0, 8).map((leaf) => leaf.id).join(", ")}.`);
+      const descending = rows.filter((row) => row.parent && Number.isFinite(row.height) && Number.isFinite(rows.find((entry) => entry.id === row.parent)?.height) && (rows.find((entry) => entry.id === row.parent)?.height ?? 0) < row.height);
+      if (descending.length > 0) errors.push(`${descending.length} dendrogram branch${descending.length === 1 ? " has" : "es have"} a parent merge height below its child.`);
+      if (rows.every((row) => row.height === 0)) errors.push("Dendrogram merge heights cannot all be zero; supply the upstream clustering height/dissimilarity scale.");
+      const unary = rows.filter((row) => (children.get(row.id) ?? []).length === 1);
+      if (unary.length > 0) warnings.push(`${unary.length} dendrogram internal node${unary.length === 1 ? " has" : "s have"} one child; confirm this is an intentional retained hierarchy rather than an incomplete merge.`);
+    }
+    const groupCount = new Set(leaves.map((leaf) => leaf.group)).size;
+    if (groupCount > 8 && settings?.legendPosition !== "none") errors.push(`The compact hierarchy legend supports at most eight leaf groups; detected ${groupCount}.`);
+    if (settings && roots.length === 1 && !cycle) {
+      const layout = hierarchyLayoutMetrics(settings, leaves.length, maximumDepth, settings.showLabels);
+      if (!layout.fits) errors.push(`The hierarchy does not fit safely (${leaves.length} leaves, depth ${maximumDepth}, ${layout.leafSpacing.toFixed(1)} px/leaf). Increase width/height, hide leaf labels, or filter/prune the hierarchy.`);
+      const legend = networkLegendMetrics(settings, groupCount, 0);
+      if (!legend.fits) errors.push(`The hierarchy legend needs ${legend.requiredHeight.toFixed(0)} px but only ${legend.availableHeight.toFixed(0)} px are available.`);
+    }
   }
 
   if (["sankey", "chord"].includes(definition.id) && mapping.value) {

@@ -572,4 +572,120 @@ test.describe("Visualization Studio browser acceptance", () => {
       expect(await svg.innerHTML()).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
     }
   });
+
+  test("renders genomic association, cancer alterations, and motif logos with bounded geometry", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop genomic-family acceptance");
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /^Manhattan/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const manhattan = page.locator("svg[aria-label='Manhattan scientific figure preview']");
+    await expect(manhattan.locator("[data-plot-element='manhattan-point']")).toHaveCount(216);
+    await expect(manhattan.locator("[data-plot-element='genome-wide-threshold']")).toHaveCount(1);
+    await page.getByRole("checkbox", { name: "Label strongest loci" }).check({ force: true });
+    await expect(manhattan.locator("[data-plot-label]").first()).toBeVisible();
+    const escapedManhattanMarks = await manhattan.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='manhattan-point'], [data-plot-label]")].flatMap((mark) => {
+        const box = mark.getBoundingClientRect();
+        return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [mark.getAttribute("data-plot-element") ?? mark.textContent] : [];
+      });
+    });
+    expect(escapedManhattanMarks).toEqual([]);
+
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("chromosome\tposition\tp_value\tvariant\nchr 1\t1.5\t0\trsBad");
+    await expect(page.getByText(/invalid label/)).toBeVisible();
+    await expect(page.getByText(/positive safe integers/)).toBeVisible();
+    await expect(page.getByText(/must lie in \(0, 1\]/)).toBeVisible();
+    await page.getByRole("button", { name: "Example 1" }).click();
+
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill([
+      "chromosome\tposition\tp_value\tvariant",
+      "VeryLongReferenceContigIdentifier_000001\t100\t0.01\trsLong1",
+      "VeryLongReferenceContigIdentifier_000002\t120\t0.02\trsLong2",
+      "chr23\t80\t0.03\trs23",
+      "chrX\t90\t0.04\trsX",
+    ].join("\n"));
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(manhattan.locator("[data-plot-element='genome-axis-label'][data-full-label='VERYLONGREFERENCECONTIGIDENTIFIER_000001']")).toHaveCount(1);
+    const escapedManhattanAxisLabels = await manhattan.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='genome-axis-label']")].flatMap((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : []; });
+    });
+    expect(escapedManhattanAxisLabels).toEqual([]);
+
+    await page.getByRole("button", { name: /^Chromosome ideogram/ }).click();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("chromosome\tstart\tend\tstain\tband\nVeryLongReferenceContigIdentifier_000001\t0\t100\tgneg\tp1\nchr23\t0\t80\tgpos50\tq1");
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const ideogram = page.locator("svg[aria-label='Chromosome ideogram scientific figure preview']");
+    await expect(ideogram.locator("text[data-full-label='VERYLONGREFERENCECONTIGIDENTIFIER_000001']")).toHaveCount(1);
+    const escapedIdeogramText = await ideogram.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("text")].flatMap((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : []; });
+    });
+    expect(escapedIdeogramText).toEqual([]);
+
+    await page.getByRole("button", { name: /^Genome tracks/ }).click();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill([
+      "chromosome\tstart\tend\tvalue\ttrack\tfeature",
+      "VeryLongReferenceContigIdentifier_000001\t0\t100\t1.25\tAccessibility\tPeak_A",
+      "VeryLongReferenceContigIdentifier_000002\t0\t120\t3.75\tAccessibility\tPeak_B",
+      "chr23\t0\t80\t2.50\tAccessibility\tPeak_C",
+    ].join("\n"));
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const tracks = page.locator("svg[aria-label='Genome tracks scientific figure preview']");
+    await expect(tracks.locator("[data-plot-element='genome-track-color-legend']")).toHaveCount(1);
+    await expect(tracks.locator("[data-plot-element='genome-axis-label'][data-full-label='VERYLONGREFERENCECONTIGIDENTIFIER_000001']")).toHaveCount(1);
+    const escapedTrackAxisLabels = await tracks.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='genome-axis-label']")].flatMap((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : []; });
+    });
+    expect(escapedTrackAxisLabels).toEqual([]);
+
+    await page.getByRole("button", { name: /^Mutation waterfall/ }).click();
+    const longSampleRows = Array.from({ length: 8 }, (_, index) => `ExtremelyLongTumorSampleIdentifier_${index + 1}\tTP53\t${index % 2 ? "Missense" : "Nonsense"}`);
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`sample\tgene\talteration\n${longSampleRows.join("\n")}`);
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const waterfall = page.locator("svg[aria-label='Mutation waterfall scientific figure preview']");
+    await expect(waterfall.locator("[data-plot-element='waterfall-sample-label'][data-full-label^='ExtremelyLong']").first()).toContainText("…");
+    const escapedWaterfallLabels = await waterfall.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='waterfall-sample-label']")].flatMap((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : []; });
+    });
+    expect(escapedWaterfallLabels).toEqual([]);
+
+    await page.getByRole("button", { name: /^Oncoplot/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const oncoplot = page.locator("svg[aria-label='Oncoplot scientific figure preview']");
+    expect(await oncoplot.locator("[data-plot-element='oncoplot-cell']").count()).toBeGreaterThan(30);
+    expect(await oncoplot.locator("[data-plot-element='oncoplot-burden']").count()).toBeGreaterThanOrEqual(20);
+    expect(await oncoplot.locator("[data-plot-element='oncoplot-frequency']").count()).toBeGreaterThanOrEqual(8);
+    await page.getByRole("checkbox", { name: "Show burden and frequency margins" }).uncheck({ force: true });
+    await expect(oncoplot.locator("[data-plot-element='oncoplot-burden']")).toHaveCount(0);
+    await expect(oncoplot.locator("[data-plot-element='oncoplot-frequency']")).toHaveCount(0);
+
+    await page.getByRole("button", { name: /^Motif logo/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const motif = page.locator("svg[aria-label='Motif logo scientific figure preview']");
+    expect(await motif.locator("[data-plot-element='motif-letter']").count()).toBeGreaterThan(20);
+    await expect(motif).toContainText("Information (bits)");
+    const informationHeight = await motif.locator("[data-plot-element='motif-letter']").first().getAttribute("data-letter-height");
+    await page.getByRole("combobox", { name: "Letter height" }).selectOption("probability");
+    await expect(motif).toContainText("Probability");
+    const probabilityHeight = await motif.locator("[data-plot-element='motif-letter']").first().getAttribute("data-letter-height");
+    expect(probabilityHeight).not.toBe(informationHeight);
+
+    const downloadEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "SVG" }).click();
+    const path = await (await downloadEvent).path();
+    expect(path).not.toBeNull();
+    const source = await readFile(path!, "utf8");
+    expect(source).toContain('data-plot-family="motif-logo"');
+    expect(source).toContain('data-letter-height=');
+    expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+  });
 });

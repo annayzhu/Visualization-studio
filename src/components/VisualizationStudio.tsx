@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
 import { analyzeExpressionMatrix, defaultPcaOptions, type PcaDataLayer, type PcaOptions } from "@/lib/visualization-pca";
+import { analyzeSetIntersections, intersectionExportTsv } from "@/lib/visualization-sets";
 import {
   defaultVisualizationPaletteSeriesId,
   defaultVisualizationSettings,
@@ -435,6 +436,7 @@ export function VisualizationStudio() {
   const [loadedFileName, setLoadedFileName] = useState("");
   const [fileError, setFileError] = useState("");
   const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const [selectedIntersectionSignature, setSelectedIntersectionSignature] = useState("");
   const svgRef = useRef<SVGSVGElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
@@ -496,6 +498,11 @@ export function VisualizationStudio() {
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
   const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, rawData, pcaObservationMetadata, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
+  const setAnalysis = useMemo(
+    () => (plotType === "venn" || plotType === "upset") ? analyzeSetIntersections(dataset.rows, mapping, settings.setInputMode) : null,
+    [dataset.rows, mapping, plotType, settings.setInputMode],
+  );
+  const selectedSetIntersection = setAnalysis?.intersections.find((entry) => entry.signature === selectedIntersectionSignature) ?? setAnalysis?.intersections[0] ?? null;
   const barBreakRange = useMemo(() => {
     if (plotType !== "bar" || !mapping.value) return { minimum: -100, maximum: 100, step: 0.5 };
     const values = dataset.rows.flatMap((row) => {
@@ -561,8 +568,10 @@ export function VisualizationStudio() {
     setMapping(example.mapping ?? definition.defaultMapping);
     setLoadedFileName("");
     setFileError("");
+    setSelectedIntersectionSignature("");
     if (plotType === "pca") setPcaOptions(defaultPcaOptions);
     if (plotType === "bar") updateSetting("barInputMode", exampleIndex === 1 ? "long" : "summary");
+    if (plotType === "venn" || plotType === "upset") updateSetting("setInputMode", exampleIndex === 1 ? "peak-overlap" : "membership");
   };
 
   const selectPlot = (nextType: PlotType) => {
@@ -576,6 +585,7 @@ export function VisualizationStudio() {
     setMapping(nextExample.mapping ?? next.defaultMapping);
     setLoadedFileName("");
     setFileError("");
+    setSelectedIntersectionSignature("");
     if (nextType === "pca") setPcaOptions(defaultPcaOptions);
     setSettings((current) => settingsForDistributionPreset({
       ...current,
@@ -588,6 +598,7 @@ export function VisualizationStudio() {
       clusterColumns: nextType === "correlation-heatmap" ? current.clusterRows : current.clusterColumns,
       heatmapColumnClusters: nextType === "correlation-heatmap" ? current.heatmapRowClusters : current.heatmapColumnClusters,
       compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
+      setInputMode: (nextType === "venn" || nextType === "upset") ? "membership" : current.setInputMode,
       legendPosition: (["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment", "enrichment-bar", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos"] as PlotType[]).includes(nextType) && current.legendPosition === "bottom" ? "right" : current.legendPosition,
     }, nextType));
     window.requestAnimationFrame(() => {
@@ -725,6 +736,13 @@ export function VisualizationStudio() {
     const example = dataExamples[selectedExampleIndex >= 0 ? selectedExampleIndex : 0] ?? dataExamples[0];
     const metadata = example.metadata ?? "sample\tgroup\tbatch\tlabel\nSample_1\tControl\tBatch 1\tS1";
     downloadBlob(new Blob([metadata], { type: "text/tab-separated-values;charset=utf-8" }), `${slug(definition.name)}-observation-metadata-template.tsv`);
+  };
+
+  const downloadSelectedIntersection = () => {
+    if (!setAnalysis || !selectedSetIntersection) return;
+    const content = intersectionExportTsv(setAnalysis, selectedSetIntersection.signature);
+    const label = selectedSetIntersection.sets.join("-and-");
+    downloadBlob(new Blob([content], { type: "text/tab-separated-values;charset=utf-8" }), `${slug(definition.name)}-${slug(label)}-exact-members.tsv`);
   };
 
   const exportSvg = () => {
@@ -1022,6 +1040,13 @@ export function VisualizationStudio() {
               {(plotType === "line" || (plotType === "pca" && settings.ordinationView === "scores") || ((plotType === "scatter" || plotType === "correlation") && !["pair-matrix", "3d", "ternary"].includes(settings.associationVariant)) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant))) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
               {(plotType === "scatter" || plotType === "correlation") && ["points", "marginal", "ellipse", "hull"].includes(settings.associationVariant) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
               {(["pca", "pcoa", "umap", "tsne", "nmds", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
+            </ControlGroup> : null}
+
+            {(plotType === "venn" || plotType === "upset") ? <ControlGroup title="Set intersections">
+              <SelectControl label="Input structure" value={settings.setInputMode} onChange={(value) => { updateSetting("setInputMode", value as VisualizationSettings["setInputMode"]); setSelectedIntersectionSignature(""); }}><option value="auto">Auto detect</option><option value="membership">Item–set membership</option><option value="peak-overlap">Genomic peak overlap</option></SelectControl>
+              {plotType === "venn" ? <><SelectControl label="Diagram layout" value={settings.vennLayout} onChange={(value) => updateSetting("vennLayout", value as VisualizationSettings["vennLayout"])}><option value="auto">Auto · circles / radial index</option><option value="classic">Classic circles · 2–3 sets</option><option value="radial">Radial exact intersections · 2–7 sets</option></SelectControl><ToggleControl label="Size-weighted visual cue" checked={settings.vennProportional} onChange={(value) => updateSetting("vennProportional", value)} /></> : <RangeControl label="Displayed intersections" value={settings.upsetMaxIntersections} minimum={3} maximum={30} step={1} onChange={(value) => updateSetting("upsetMaxIntersections", value)} />}
+              {setAnalysis && setAnalysis.intersections.length > 0 ? <><SelectControl label="Exact intersection to download" value={selectedSetIntersection?.signature ?? ""} onChange={setSelectedIntersectionSignature}>{setAnalysis.intersections.map((entry) => <option key={entry.signature} value={entry.signature}>{entry.sets.join(" ∩ ")} · n={entry.size}</option>)}</SelectControl><Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={downloadSelectedIntersection}><Download className="h-3.5 w-3.5" aria-hidden />Download selected members</Button></> : null}
+              <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Counts are exact membership combinations. Peak mode splits half-open intervals [start, end) into disjoint atomic genomic segments wherever active set membership changes; counts are segments, not base pairs or original peaks. Size weighting is only a visual cue, never an area-proportional fit.</p>
             </ControlGroup> : null}
 
             {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} uncertainty`}>

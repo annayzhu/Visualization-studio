@@ -688,4 +688,104 @@ test.describe("Visualization Studio browser acceptance", () => {
     expect(source).toContain('data-letter-height=');
     expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
   });
+
+  test("renders typed reproducible networks and hierarchy-specific trees safely", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop relationship-family acceptance");
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /^PPI network/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const ppi = page.locator("svg[aria-label='PPI network scientific figure preview']");
+    await expect(ppi.locator("[data-plot-element='network-node']")).toHaveCount(8);
+    await expect(ppi.locator("[data-plot-element='network-edge']")).toHaveCount(6);
+    await expect(ppi.locator("[data-plot-element='network-edge'][data-direction='undirected']")).toHaveCount(6);
+    await expect(ppi.locator("[data-node-id='Isolated_candidate'][data-explicit-node='true']")).toHaveCount(1);
+    await page.getByRole("checkbox", { name: "Keep explicit isolated nodes" }).uncheck({ force: true });
+    await expect(ppi.locator("[data-node-id='Isolated_candidate']")).toHaveCount(0);
+
+    const firstNodeBefore = await ppi.locator("[data-plot-element='network-node'] circle").first().getAttribute("cx");
+    await page.getByRole("combobox", { name: "Layout" }).selectOption("layered");
+    const firstNodeAfter = await ppi.locator("[data-plot-element='network-node'] circle").first().getAttribute("cx");
+    expect(firstNodeAfter).not.toBe(firstNodeBefore);
+    const widthInput = page.getByRole("textbox", { name: "Width value", exact: true });
+    await widthInput.fill("300");
+    await widthInput.press("Enter");
+    const clippedNodes = await ppi.evaluate((element) => {
+      const clip = element.querySelector("clipPath rect")!;
+      const left = Number(clip.getAttribute("x")); const top = Number(clip.getAttribute("y")); const right = left + Number(clip.getAttribute("width")); const bottom = top + Number(clip.getAttribute("height"));
+      return [...element.querySelectorAll("[data-plot-element='network-node'] circle")].filter((circle) => { const cx = Number(circle.getAttribute("cx")); const cy = Number(circle.getAttribute("cy")); const r = Number(circle.getAttribute("r")); return cx - r < left || cx + r > right || cy - r < top || cy + r > bottom; }).length;
+    });
+    expect(clippedNodes).toBe(0);
+    await widthInput.fill("340");
+    await widthInput.press("Enter");
+    await page.getByRole("checkbox", { name: "Show node labels" }).check({ force: true });
+    const escapedNetworkLabels = await ppi.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-label]")].flatMap((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : []; });
+    });
+    expect(escapedNetworkLabels).toEqual([]);
+
+    await page.getByRole("button", { name: "Tree Hierarchy", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Show leaf labels" }).check({ force: true });
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const tree = page.locator("svg[aria-label='Tree scientific figure preview']");
+    await expect(tree.locator("[data-plot-element='tree-branch']")).toHaveCount(6);
+    await expect(tree.locator("[data-plot-element='tree-label']")).toHaveCount(4);
+    const escapedTreeLabels = await tree.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll("[data-plot-element='tree-label']")].flatMap((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1 ? [label.textContent] : []; });
+    });
+    expect(escapedTreeLabels).toEqual([]);
+    const clippedTreeNodes = await tree.evaluate((element) => {
+      const clip = element.querySelector("clipPath rect")!;
+      const left = Number(clip.getAttribute("x")); const top = Number(clip.getAttribute("y")); const right = left + Number(clip.getAttribute("width")); const bottom = top + Number(clip.getAttribute("height"));
+      return [...element.querySelectorAll("[data-plot-element='tree-node'] circle")].filter((circle) => { const cx = Number(circle.getAttribute("cx")); const cy = Number(circle.getAttribute("cy")); const r = Number(circle.getAttribute("r")) + Number(circle.getAttribute("stroke-width") ?? 0) / 2; return cx - r < left || cx + r > right || cy - r < top || cy + r > bottom; }).length;
+    });
+    expect(clippedTreeNodes).toBe(0);
+
+    await page.getByRole("button", { name: "Dendrogram Hierarchical clustering", exact: true }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const dendrogram = page.locator("svg[aria-label='Dendrogram scientific figure preview']");
+    await expect(dendrogram.locator("[data-plot-element='dendrogram-branch']")).toHaveCount(8);
+    await expect(dendrogram).toContainText("Merge height: 1");
+    await page.getByRole("combobox", { name: "Orientation" }).selectOption("horizontal");
+    await expect(dendrogram.locator("[data-plot-element='dendrogram-branch']")).toHaveCount(8);
+    const clippedHorizontalDendrogramNodes = await dendrogram.evaluate((element) => {
+      const clip = element.querySelector("clipPath rect")!;
+      const left = Number(clip.getAttribute("x")); const top = Number(clip.getAttribute("y")); const right = left + Number(clip.getAttribute("width")); const bottom = top + Number(clip.getAttribute("height"));
+      return [...element.querySelectorAll("[data-plot-element='dendrogram-node'] circle")].filter((circle) => { const cx = Number(circle.getAttribute("cx")); const cy = Number(circle.getAttribute("cy")); const r = Number(circle.getAttribute("r")) + Number(circle.getAttribute("stroke-width") ?? 0) / 2; return cx - r < left || cx + r > right || cy - r < top || cy + r > bottom; }).length;
+    });
+    expect(clippedHorizontalDendrogramNodes).toBe(0);
+    expect(await dendrogram.innerHTML()).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+
+    await page.getByRole("button", { name: /^Network Relationships/ }).click();
+    const curvedRows = [
+      "record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value",
+      "node\tA\t\t\t\t\t\t\tG\tCell\t1",
+      "node\tB\t\t\t\t\t\t\tG\tCell\t2",
+      "edge\t\tA\tA\t0.5\tundirected\tpositive\tself\tEvidence_A\t\t",
+      "edge\t\tA\tB\t0.7\tdirected\tpositive\tpathway\tEvidence_B\t\t",
+      "edge\t\tB\tA\t0.9\tbidirectional\tnegative\tphysical\tEvidence_C\t\t",
+    ].join("\n");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(curvedRows);
+    const dataLineInput = page.getByRole("textbox", { name: "Data line value", exact: true });
+    await dataLineInput.fill("5");
+    await dataLineInput.press("Enter");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const network = page.locator("svg[aria-label='Network scientific figure preview']");
+    const curvedBounds = await network.evaluate((element) => {
+      const clip = element.querySelector("clipPath rect")!;
+      const left = Number(clip.getAttribute("x")); const top = Number(clip.getAttribute("y")); const right = left + Number(clip.getAttribute("width")); const bottom = top + Number(clip.getAttribute("height"));
+      const paths = [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element='network-edge'] path")];
+      return { uniquePaths: new Set(paths.map((path) => path.getAttribute("d"))).size, outside: paths.filter((path) => { const box = path.getBBox(); const direction = path.parentElement?.getAttribute("data-direction"); const margin = Math.max(Number(path.getAttribute("stroke-width")) / 2, direction === "undirected" ? 0 : 4); return box.x - margin < left - 0.5 || box.y - margin < top - 0.5 || box.x + box.width + margin > right + 0.5 || box.y + box.height + margin > bottom + 0.5; }).length };
+    });
+    expect(curvedBounds).toEqual({ uniquePaths: 3, outside: 0 });
+    const denseRows = ["record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value"];
+    for (let index = 0; index < 120; index += 1) denseRows.push(`node\tN${index}\t\t\t\t\t\t\tOne layer\tCell\t1`);
+    for (let index = 1; index < 120; index += 1) denseRows.push(`edge\t\tN0\tN${index}\t1\tundirected\tneutral\trelationship\tEvidence\t\t`);
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(denseRows.join("\n"));
+    await expect(page.getByText(/current layered layout is not pixel-safe/i)).toBeVisible();
+    await expect(page.getByText("Ready", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+  });
 });

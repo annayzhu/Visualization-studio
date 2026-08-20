@@ -2,7 +2,9 @@
 
 import type { ReactNode, RefObject } from "react";
 import { ScientificGenomicPlot, isGenomicPlotType } from "@/components/ScientificGenomicChartPreview";
+import { ScientificRelationshipPlot, isRelationshipPlotType } from "@/components/ScientificNetworkChartPreview";
 import { genomicFrameMetrics } from "@/lib/visualization-genomics";
+import { networkFrameMetrics } from "@/lib/visualization-network";
 import {
   buildSetMemberships,
   correlation,
@@ -72,7 +74,8 @@ const TEXT = "#23242A";
 
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   if (isGenomicPlotType(type)) return genomicFrameMetrics(type, settings);
-  const noAxes = ["venn", "sankey", "chord", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density"].includes(type);
+  if (isRelationshipPlotType(type)) return networkFrameMetrics(settings);
+  const noAxes = ["venn", "sankey", "chord", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density"].includes(type);
   const heatmapType = ["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(type);
   const hasHeatmapAnnotationLegend = heatmapType && Boolean(settings.heatmapRowAnnotationData.trim() || settings.heatmapColumnAnnotationData.trim());
   const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset", "genome-tracks", "oncoplot"].includes(type);
@@ -1108,6 +1111,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "chord") content = <ChordPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "circos") content = <CircosPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (isRelationshipPlotType(type)) content = <ScientificRelationshipPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (isGenomicPlotType(type)) content = <ScientificGenomicPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "pie" || type === "donut" || type === "rose") content = <CompositionPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "waffle") content = <WafflePlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;

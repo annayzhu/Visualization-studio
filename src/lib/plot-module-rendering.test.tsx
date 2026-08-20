@@ -16,6 +16,7 @@ const expectedAdvancedRenderers = new Set([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
   "upset", "sankey", "chord", "circos",
+  "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
   "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
 ]);
@@ -475,5 +476,74 @@ describe("registered plot-module examples", () => {
 
     const withoutValues = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="genome-tracks" dataset={trackData} mapping={{ ...trackModule.definition.defaultMapping, value: "" }} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
     expect(withoutValues).not.toContain('data-plot-element="genome-track-color-legend"');
+  });
+
+  it("renders typed network semantics, isolated nodes, and deterministic seeded layouts", () => {
+    const relationshipTypes = ["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"] as const;
+    relationshipTypes.forEach((id) => {
+      const plotModule = plotModuleRegistry.get(id);
+      const dataset = parseDelimitedData(plotModule.definition.sampleData);
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type={id} dataset={dataset} mapping={plotModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, showLabels: true }} themeId={defaultVisualizationThemeId} />);
+      expect(markup, id).toContain(`data-plot-family="${id}"`);
+      expect(markup, id).toContain('data-plot-element="network-node"');
+      expect(markup, id).toContain('data-plot-element="network-edge"');
+      expect(markup, id).toContain("data-direction=");
+      expect(markup, id).toContain("data-sign=");
+      expect(markup, id).toContain("data-edge-type=");
+      expect(markup, id).toContain("data-edge-group=");
+      expect(markup, id).toContain("Radius:");
+      expect(markup, id).toContain("Width:");
+      if (id === "cnet") expect(markup).toContain("Node value: 3e-4–2.4");
+      expect(markup, id).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    });
+    const ppi = plotModuleRegistry.get("ppi");
+    const ppiData = parseDelimitedData(ppi.definition.sampleData);
+    const withIsolate = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="ppi" dataset={ppiData} mapping={ppi.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, networkShowIsolates: true }} themeId={defaultVisualizationThemeId} />);
+    const withoutIsolate = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="ppi" dataset={ppiData} mapping={ppi.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, networkShowIsolates: false }} themeId={defaultVisualizationThemeId} />);
+    expect(withIsolate).toContain('data-node-id="Isolated_candidate"');
+    expect(withoutIsolate).not.toContain('data-node-id="Isolated_candidate"');
+
+    const general = plotModuleRegistry.get("network");
+    const generalData = parseDelimitedData(general.definition.sampleData);
+    const seeded = (networkSeed: number) => renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="network" dataset={generalData} mapping={general.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, networkSeed }} themeId={defaultVisualizationThemeId} />);
+    expect(seeded(42)).toBe(seeded(42));
+    expect(seeded(42)).not.toBe(seeded(43));
+
+    const loopAndParallelData = parseDelimitedData([
+      "record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value",
+      "node\tA\t\t\t\t\t\t\tG\tCell\t1",
+      "node\tB\t\t\t\t\t\t\tG\tCell\t2",
+      "edge\t\tA\tA\t0.5\tundirected\tpositive\tself\tEvidence_A\t\t",
+      "edge\t\tA\tB\t0.7\tdirected\tpositive\tpathway\tEvidence_B\t\t",
+      "edge\t\tB\tA\t0.9\tbidirectional\tnegative\tphysical\tEvidence_C\t\t",
+    ].join("\n"));
+    const loopAndParallel = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="network" dataset={loopAndParallelData} mapping={general.definition.defaultMapping} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+    const edgePaths = [...loopAndParallel.matchAll(/data-plot-element="network-edge"[^>]*><path d="([^"]+)"/g)].map((match) => match[1]);
+    expect(edgePaths).toHaveLength(3);
+    expect(new Set(edgePaths).size).toBe(3);
+    expect(loopAndParallel).toContain('data-edge-group="Evidence_A"');
+    expect(loopAndParallel).toContain('markerUnits="userSpaceOnUse"');
+    expect(loopAndParallel).toMatch(/data-direction-kind="undirected"[^>]*>[\s\S]*?<path[^>]*visibility="hidden"/);
+    expect(loopAndParallel).toMatch(/data-direction-kind="directed"[^>]*>[\s\S]*?<path(?![^>]*visibility="hidden")/);
+    expect(loopAndParallel).toMatch(/data-direction-kind="bidirectional"[^>]*>[\s\S]*?<path[^>]*>[\s\S]*?<path/);
+  });
+
+  it("renders trees and dendrograms as hierarchy-preserving branches", () => {
+    for (const id of ["tree", "dendrogram"] as const) {
+      const plotModule = plotModuleRegistry.get(id);
+      const dataset = parseDelimitedData(plotModule.definition.sampleData);
+      const markup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type={id} dataset={dataset} mapping={plotModule.definition.defaultMapping} settings={{ ...defaultVisualizationSettings, showLabels: true }} themeId={defaultVisualizationThemeId} />);
+      expect(markup).toContain(`data-plot-family="${id}"`);
+      expect(markup).toContain(`data-plot-element="${id}-branch"`);
+      expect(markup).toContain(`data-plot-element="${id}-node"`);
+      expect(markup).toContain(`data-plot-element="${id}-label"`);
+      if (id === "dendrogram") expect(markup).toContain("Merge height:");
+      expect(markup).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+    }
+    const dendrogram = plotModuleRegistry.get("dendrogram");
+    const fractional = parseDelimitedData("node\tparent\tlabel\tgroup\theight\nRoot\t\tRoot\tInternal\t0.2\nLeft\tRoot\tLeft\tG\t0\nRight\tRoot\tRight\tG\t0");
+    const fractionalMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="dendrogram" dataset={fractional} mapping={dendrogram.definition.defaultMapping} settings={defaultVisualizationSettings} themeId={defaultVisualizationThemeId} />);
+    expect(fractionalMarkup).toContain("Merge height: 0.2");
+    expect(fractionalMarkup).not.toContain("Merge height: 1<");
   });
 });

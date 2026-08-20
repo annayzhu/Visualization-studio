@@ -15,7 +15,7 @@ import {
 const expectedAdvancedRenderers = new Set([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
-  "upset", "sankey", "chord", "circos",
+  "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos",
   "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
   "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",

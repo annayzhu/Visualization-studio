@@ -788,4 +788,89 @@ test.describe("Visualization Studio browser acceptance", () => {
     await expect(page.getByText("Ready", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
   });
+
+  test("renders conserved flows and a shared-coordinate multi-track Circos", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop flow and circular acceptance");
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /^Sankey/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const sankey = page.locator("svg[aria-label='Sankey scientific figure preview']");
+    expect(await sankey.locator("[data-plot-element='flow-ribbon']").count()).toBeGreaterThan(3);
+    await expect(sankey).toContainText("input rows");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("source\ttarget\tvalue\tgroup\nExtremely long sender population label\tExtremely long receiver population label\t5\tLong evidence group one\nExtremely long sender population label\tSecond extremely long receiver label\t3\tLong evidence group two");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(sankey.locator("[data-full-label='Extremely long sender population label']")).toContainText("…");
+    const escapedSankeyText = await sankey.evaluate((element) => { const canvas = element.getBoundingClientRect(); return [...element.querySelectorAll("text")].filter((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1; }).length; });
+    expect(escapedSankeyText).toBe(0);
+
+    await page.getByRole("button", { name: /^Alluvial/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const alluvial = page.locator("svg[aria-label='Alluvial scientific figure preview']");
+    expect(await alluvial.locator("[data-plot-element='alluvial-ribbon']").count()).toBeGreaterThan(5);
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("flow_id\taxis\tstratum\tvalue\tgroup\nP1\tT0\tA\t5\tG\nP1\tT1\tB\t4\tG");
+    await expect(page.getByText(/changes weight across axes/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+    const crowdedAlluvial = ["flow_id\taxis\tstratum\tvalue\tgroup", ...Array.from({ length: 8 }, (_, axis) => `P1\tExtremely long alluvial axis ${axis + 1}\tExtremely long stratum alpha ${axis + 1}\t5\tCohort alpha`), ...Array.from({ length: 8 }, (_, axis) => `P2\tExtremely long alluvial axis ${axis + 1}\tExtremely long stratum beta ${axis + 1}\t3\tCohort beta`)].join("\n");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(crowdedAlluvial);
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const alluvialLabelSafety = await alluvial.evaluate((element) => {
+      const canvas = element.getBoundingClientRect(); const labels = [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element='alluvial-axis-label'], [data-plot-element='alluvial-stratum-label']")]; const boxes = labels.map((label) => label.getBoundingClientRect());
+      let collisions = 0; for (let first = 0; first < boxes.length; first += 1) for (let second = first + 1; second < boxes.length; second += 1) { const a = boxes[first]; const b = boxes[second]; if (a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5) collisions += 1; }
+      return { collisions, outside: boxes.filter((box) => box.left < canvas.left - 1 || box.right > canvas.right + 1 || box.top < canvas.top - 1 || box.bottom > canvas.bottom + 1).length };
+    });
+    expect(alluvialLabelSafety).toEqual({ collisions: 0, outside: 0 });
+
+    await page.getByRole("button", { name: /^Chord/ }).click();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("source\ttarget\tvalue\nDominant A\tDominant B\t1000\nTiny C\tTiny D\t0.001");
+    await expect(page.getByText(/minimum category arc/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+
+    await page.getByRole("button", { name: /^Ligand–receptor/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const ligandReceptor = page.locator("svg[aria-label='Ligand–receptor scientific figure preview']");
+    expect(await ligandReceptor.locator("[data-plot-element='ligand-receptor-edge']").count()).toBeGreaterThan(12);
+    await expect(ligandReceptor).toContainText("Ligand");
+    await expect(ligandReceptor).toContainText("Receptor");
+
+    await page.getByRole("button", { name: /^Circos/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const circos = page.locator("svg[aria-label='Circos scientific figure preview']");
+    await expect(circos.locator("[data-coordinate-system='shared-genomic']")).toHaveCount(1);
+    for (const element of ["circos-bar", "circos-heatmap", "circos-scatter", "circos-fusion", "circos-correlation", "circos-link", "circos-scale-legend"]) await expect(circos.locator(`[data-plot-element='${element}']`).first()).toBeVisible();
+    await expect(circos.locator("[data-full-label='GENE1']")).toBeVisible();
+    const footerClipStyles = await circos.locator("[data-plot-element='circos-scale-legend'] rect[data-no-clip]").evaluateAll((marks) => marks.map((mark) => getComputedStyle(mark).clipPath));
+    expect(footerClipStyles.length).toBeGreaterThan(2);
+    expect(footerClipStyles.every((clipPath) => clipPath === "none")).toBe(true);
+    const escaped = await circos.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      return [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element], text")].filter((mark) => { const box = mark.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1; }).length;
+    });
+    expect(escaped).toBe(0);
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "SVG" }).click();
+    const downloaded = await download;
+    const path = await downloaded.path();
+    expect(path).not.toBeNull();
+    const source = await readFile(path!, "utf8");
+    expect(source).toContain('data-coordinate-system="shared-genomic"');
+    expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+
+    const denseTracks = ["record_type\tchromosome\tstart\tend\tchromosome_length\tvalue\tlabel\ttrack\ttarget_chromosome\ttarget_start\ttarget_end\ttarget_chromosome_length", ...Array.from({ length: 8 }, (_, index) => `bar\tchr1\t${index * 10}\t${index * 10 + 5}\t1000\t${index + 1}\tF${index + 1}\tTrack ${index + 1}\t\t\t\t`)].join("\n");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(denseTracks);
+    const trackGap = page.getByRole("textbox", { name: "Track gap value", exact: true });
+    await trackGap.fill("12");
+    await trackGap.press("Enter");
+    await expect(page.getByText(/track spacing/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+    const denseScatterTracks = ["record_type\tchromosome\tstart\tend\tchromosome_length\tvalue\tlabel\ttrack\ttarget_chromosome\ttarget_start\ttarget_end\ttarget_chromosome_length", ...Array.from({ length: 8 }, (_, index) => `scatter\tchr1\t${index * 10}\t${index * 10 + 5}\t1000\t${index + 1}\tS${index + 1}\tScatter ${index + 1}\t\t\t\t`)].join("\n");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(denseScatterTracks);
+    await trackGap.fill("0");
+    await trackGap.press("Enter");
+    const pointSize = page.getByRole("textbox", { name: "Point size value", exact: true });
+    await pointSize.fill("12");
+    await pointSize.press("Enter");
+    await expect(page.getByText(/scatter diameter within its track band/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+  });
 });

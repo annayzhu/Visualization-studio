@@ -3,6 +3,7 @@
 import type { ReactNode, RefObject } from "react";
 import { ScientificGenomicPlot, isGenomicPlotType } from "@/components/ScientificGenomicChartPreview";
 import { ScientificRelationshipPlot, isRelationshipPlotType } from "@/components/ScientificNetworkChartPreview";
+import { ScientificFlowCircularPlot } from "@/components/ScientificFlowCircularChartPreview";
 import { genomicFrameMetrics } from "@/lib/visualization-genomics";
 import { networkFrameMetrics } from "@/lib/visualization-network";
 import {
@@ -75,11 +76,11 @@ const TEXT = "#23242A";
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   if (isGenomicPlotType(type)) return genomicFrameMetrics(type, settings);
   if (isRelationshipPlotType(type)) return networkFrameMetrics(settings);
-  const noAxes = ["venn", "sankey", "chord", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density"].includes(type);
+  const noAxes = ["venn", "sankey", "alluvial", "chord", "ligand-receptor", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density"].includes(type);
   const heatmapType = ["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(type);
   const hasHeatmapAnnotationLegend = heatmapType && Boolean(settings.heatmapRowAnnotationData.trim() || settings.heatmapColumnAnnotationData.trim());
   const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset", "genome-tracks", "oncoplot"].includes(type);
-  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo"].includes(type);
+  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo"].includes(type);
   const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
   if (heatmapType) return heatmapLayoutMetrics(settings, { hasAnnotationLegend: hasHeatmapAnnotationLegend, rowAnnotationTracks: 0, columnAnnotationTracks: 0, showRowCut: false, showColumnCut: false, showRowDendrogram: false, showColumnDendrogram: false, showSidePlot: false, rowCount: 1, columnCount: 1, maxColumnLabelCharacters: 0, maxCutClusters: 0 }).frame;
@@ -886,57 +887,17 @@ function UpSetPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame
 }
 
 function SankeyPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
-  const edges = dataset.rows.map((row) => ({ source: row[mapping.source], target: row[mapping.target], value: Math.max(0, parseNumericValue(row[mapping.value]) ?? 0) }));
-  const sources = [...new Set(edges.map((edge) => edge.source))];
-  const targets = [...new Set(edges.map((edge) => edge.target))];
-  const nodes = [...new Set([...sources, ...targets])];
-  const colorMap = palette(nodes, colors);
-  const sourceTotals = new Map(sources.map((source) => [source, edges.filter((edge) => edge.source === source).reduce((sum, edge) => sum + edge.value, 0)]));
-  const targetTotals = new Map(targets.map((target) => [target, edges.filter((edge) => edge.target === target).reduce((sum, edge) => sum + edge.value, 0)]));
-  const maximumTotal = Math.max(...sourceTotals.values(), ...targetTotals.values(), 1);
-  const sourceY = new Map(sources.map((source, index) => [source, frame.top + frame.plotHeight * (index + 0.5) / sources.length]));
-  const targetY = new Map(targets.map((target, index) => [target, frame.top + frame.plotHeight * (index + 0.5) / targets.length]));
-  const left = frame.left + frame.plotWidth * 0.08;
-  const right = frame.left + frame.plotWidth * 0.92;
-  return <g>
-    {edges.map((edge, index) => { const sy = sourceY.get(edge.source) ?? 0; const ty = targetY.get(edge.target) ?? 0; const width = Math.max(1, edge.value / maximumTotal * 32); return <path key={index} d={`M ${left + 10} ${sy} C ${left + frame.plotWidth * 0.35} ${sy}, ${right - frame.plotWidth * 0.35} ${ty}, ${right - 10} ${ty}`} fill="none" stroke={colorMap.get(edge.source)} strokeWidth={width} strokeOpacity={settings.opacity * 0.5} />; })}
-    {sources.map((source) => { const y = sourceY.get(source) ?? 0; const h = Math.max(12, (sourceTotals.get(source) ?? 0) / maximumTotal * 40); return <g key={source}><rect x={left} y={y - h / 2} width={10} height={h} rx={2} fill={colorMap.get(source)} /><text x={left - 7} y={y + 4} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{source.slice(0, 15)}</text></g>; })}
-    {targets.map((target) => { const y = targetY.get(target) ?? 0; const h = Math.max(12, (targetTotals.get(target) ?? 0) / maximumTotal * 40); return <g key={target}><rect x={right - 10} y={y - h / 2} width={10} height={h} rx={2} fill={colorMap.get(target)} /><text x={right + 7} y={y + 4} fill={TEXT} fontSize={settings.tickSize}>{target.slice(0, 15)}</text></g>; })}
-  </g>;
+  return <ScientificFlowCircularPlot type="sankey" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
 }
 
 function polar(cx: number, cy: number, radius: number, angle: number) { return [cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius] as const; }
-function arcPath(cx: number, cy: number, radius: number, start: number, end: number) { const a = polar(cx, cy, radius, start); const b = polar(cx, cy, radius, end); return `M ${a[0]} ${a[1]} A ${radius} ${radius} 0 ${end - start > Math.PI ? 1 : 0} 1 ${b[0]} ${b[1]}`; }
 
 function ChordPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
-  const edges = dataset.rows.map((row) => ({ source: row[mapping.source], target: row[mapping.target], value: Math.max(0, parseNumericValue(row[mapping.value]) ?? 0) }));
-  const nodes = [...new Set(edges.flatMap((edge) => [edge.source, edge.target]))];
-  const colorMap = palette(nodes, colors);
-  const cx = frame.left + frame.plotWidth / 2; const cy = frame.top + frame.plotHeight / 2; const radius = Math.min(frame.plotWidth, frame.plotHeight) * 0.39;
-  const angle = new Map(nodes.map((node, index) => [node, -Math.PI / 2 + index * Math.PI * 2 / nodes.length]));
-  const maxValue = Math.max(...edges.map((edge) => edge.value), 1);
-  return <g>
-    {nodes.map((node) => { const center = angle.get(node) ?? 0; const start = center - Math.PI * 0.8 / nodes.length; const end = center + Math.PI * 0.8 / nodes.length; const label = polar(cx, cy, radius + 20, center); return <g key={node}><path d={arcPath(cx, cy, radius, start, end)} fill="none" stroke={colorMap.get(node)} strokeWidth={12} /><text x={label[0]} y={label[1] + 4} textAnchor={Math.cos(center) > 0.15 ? "start" : Math.cos(center) < -0.15 ? "end" : "middle"} fill={TEXT} fontSize={settings.tickSize}>{node.slice(0, 14)}</text></g>; })}
-    {edges.map((edge, index) => { const source = polar(cx, cy, radius - 7, angle.get(edge.source) ?? 0); const target = polar(cx, cy, radius - 7, angle.get(edge.target) ?? 0); return <path key={index} d={`M ${source[0]} ${source[1]} Q ${cx} ${cy} ${target[0]} ${target[1]}`} fill="none" stroke={colorMap.get(edge.source)} strokeOpacity={settings.opacity * 0.55} strokeWidth={1 + edge.value / maxValue * 8} />; })}
-  </g>;
+  return <ScientificFlowCircularPlot type="chord" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
 }
 
 function CircosPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
-  const links = dataset.rows.map((row) => ({ sourceChr: row[mapping.sourceChr], sourceStart: parseNumericValue(row[mapping.sourceStart]) ?? 0, sourceEnd: parseNumericValue(row[mapping.sourceEnd]) ?? 0, targetChr: row[mapping.targetChr], targetStart: parseNumericValue(row[mapping.targetStart]) ?? 0, targetEnd: parseNumericValue(row[mapping.targetEnd]) ?? 0, value: Math.max(0, parseNumericValue(row[mapping.value]) ?? 1) }));
-  const chromosomes = [...new Set(links.flatMap((link) => [link.sourceChr, link.targetChr]))];
-  const lengths = new Map(chromosomes.map((chromosome) => [chromosome, Math.max(1, ...links.flatMap((link) => [link.sourceChr === chromosome ? link.sourceEnd : 0, link.targetChr === chromosome ? link.targetEnd : 0]))]));
-  const total = [...lengths.values()].reduce((sum, value) => sum + value, 0);
-  const gap = 0.045;
-  let cursor = -Math.PI / 2;
-  const sectors = new Map<string, { start: number; end: number }>();
-  chromosomes.forEach((chromosome) => { const span = (Math.PI * 2 - gap * chromosomes.length) * (lengths.get(chromosome) ?? 1) / total; sectors.set(chromosome, { start: cursor, end: cursor + span }); cursor += span + gap; });
-  const cx = frame.left + frame.plotWidth / 2; const cy = frame.top + frame.plotHeight / 2; const radius = Math.min(frame.plotWidth, frame.plotHeight) * 0.39;
-  const colorMap = palette(chromosomes, colors); const maxValue = Math.max(...links.map((link) => link.value), 1);
-  const coordinateAngle = (chromosome: string, position: number) => { const sector = sectors.get(chromosome)!; return sector.start + (sector.end - sector.start) * position / (lengths.get(chromosome) ?? 1); };
-  return <g>
-    {chromosomes.map((chromosome) => { const sector = sectors.get(chromosome)!; const mid = (sector.start + sector.end) / 2; const label = polar(cx, cy, radius + 20, mid); return <g key={chromosome}><path d={arcPath(cx, cy, radius, sector.start, sector.end)} fill="none" stroke={colorMap.get(chromosome)} strokeWidth={14} /><path d={arcPath(cx, cy, radius - 20, sector.start, sector.end)} fill="none" stroke={colorMap.get(chromosome)} strokeOpacity={0.35} strokeWidth={5} /><text x={label[0]} y={label[1] + 4} textAnchor={Math.cos(mid) > 0.15 ? "start" : Math.cos(mid) < -0.15 ? "end" : "middle"} fill={TEXT} fontSize={settings.tickSize} fontWeight={700}>{chromosome}</text></g>; })}
-    {links.map((link, index) => { const sourceAngle = coordinateAngle(link.sourceChr, (link.sourceStart + link.sourceEnd) / 2); const targetAngle = coordinateAngle(link.targetChr, (link.targetStart + link.targetEnd) / 2); const source = polar(cx, cy, radius - 23, sourceAngle); const target = polar(cx, cy, radius - 23, targetAngle); return <path key={index} d={`M ${source[0]} ${source[1]} Q ${cx} ${cy} ${target[0]} ${target[1]}`} fill="none" stroke={colorMap.get(link.sourceChr)} strokeWidth={1 + link.value / maxValue * 7} strokeOpacity={settings.opacity * 0.55} />; })}
-  </g>;
+  return <ScientificFlowCircularPlot type="circos" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
 }
 
 function sectorPath(cx: number, cy: number, outerRadius: number, start: number, end: number, innerRadius = 0) {
@@ -1109,7 +1070,9 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "venn") content = <VennPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "upset") content = <UpSetPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "alluvial") content = <ScientificFlowCircularPlot type="alluvial" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "chord") content = <ChordPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "ligand-receptor") content = <ScientificFlowCircularPlot type="ligand-receptor" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "circos") content = <CircosPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (isRelationshipPlotType(type)) content = <ScientificRelationshipPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (isGenomicPlotType(type)) content = <ScientificGenomicPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;

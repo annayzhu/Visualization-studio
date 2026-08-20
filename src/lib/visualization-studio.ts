@@ -24,6 +24,20 @@ import {
   parseNetworkRecords,
   type NetworkPlotType,
 } from "./visualization-network";
+import {
+  aggregateFlowEdges,
+  alluvialAxisOrder,
+  chordSectorLayout,
+  circularLabelLayoutMetrics,
+  circosCoordinateSystem,
+  circosTrackOrder,
+  flowCircularFrame,
+  flowCircularLayoutMetrics,
+  isCircosRecordType,
+  parseAlluvialRecords,
+  parseCircosTrackRecords,
+  parseLigandReceptorRecords,
+} from "./visualization-flow-circular";
 
 export type PlotType =
   | "bar"
@@ -60,7 +74,9 @@ export type PlotType =
   | "venn"
   | "upset"
   | "sankey"
+  | "alluvial"
   | "chord"
+  | "ligand-receptor"
   | "circos"
   | "manhattan"
   | "qq"
@@ -1271,6 +1287,26 @@ Tumor\tMacrophage\t12\tImmune
 Fibroblast\tTumor\t10\tStroma
 Macrophage\tT cell\t7\tImmune
 Endothelial\tTumor\t6\tStroma`,
+  alluvial: `flow_id\taxis\tstratum\tvalue\tgroup
+P1\tBaseline\tSensitive\t18\tSensitive
+P1\tWeek 4\tPartial response\t18\tSensitive
+P1\tWeek 12\tDurable response\t18\tSensitive
+P2\tBaseline\tSensitive\t8\tSensitive
+P2\tWeek 4\tStable disease\t8\tSensitive
+P2\tWeek 12\tProgression\t8\tSensitive
+P3\tBaseline\tResistant\t13\tResistant
+P3\tWeek 4\tStable disease\t13\tResistant
+P3\tWeek 12\tProgression\t13\tResistant
+P4\tBaseline\tResistant\t7\tResistant
+P4\tWeek 4\tPartial response\t7\tResistant
+P4\tWeek 12\tDurable response\t7\tResistant`,
+  ligandReceptor: `source_cell\tligand\treceptor\ttarget_cell\tweight\tevidence
+Tumor\tTGFB1\tTGFBR2\tFibroblast\t0.86\tcurated database
+Tumor\tVEGFA\tKDR\tEndothelial\t0.79\tcurated database
+Macrophage\tIL1B\tIL1R1\tFibroblast\t0.67\tpredicted
+Fibroblast\tCXCL12\tCXCR4\tT cell\t0.74\tcurated database
+T cell\tIFNG\tIFNGR1\tTumor\t0.71\tvalidated
+Endothelial\tDLL4\tNOTCH1\tTumor\t0.58\tpredicted`,
   generalNetwork: `record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value
 node\tTumor cell\t\t\t\t\t\t\tMalignant\tCell type\t18
 node\tCD8 T cell\t\t\t\t\t\t\tImmune\tCell type\t14
@@ -1450,11 +1486,21 @@ chr7\t55202000\t55202100\t3.8\tVariants\tVariant B`,
 8\t0.84\t0.05\t0.06\t0.05
 9\t0.10\t0.38\t0.41\t0.11
 10\t0.06\t0.05\t0.08\t0.81`,
-  circos: `sourceChr\tsourceStart\tsourceEnd\ttargetChr\ttargetStart\ttargetEnd\tvalue
-chr1\t12000000\t18000000\tchr5\t42000000\t47000000\t8
-chr2\t35000000\t39000000\tchr8\t76000000\t80000000\t5
-chr5\t60000000\t65000000\tchr12\t22000000\t26000000\t7
-chr8\t18000000\t23000000\tchr1\t90000000\t96000000\t4`,
+  circos: `record_type\tchromosome\tstart\tend\tchromosome_length\tvalue\tlabel\ttrack\ttarget_chromosome\ttarget_start\ttarget_end\ttarget_chromosome_length
+heatmap\tchr1\t10000000\t24000000\t100000000\t2.8\tGain\tCopy number\t\t\t\t
+heatmap\tchr1\t24000000\t42000000\t100000000\t-1.4\tLoss\tCopy number\t\t\t\t
+heatmap\tchr5\t18000000\t36000000\t80000000\t1.7\tGain\tCopy number\t\t\t\t
+bar\tchr1\t15000000\t17000000\t100000000\t8.4\tPeak A\tAccessibility\t\t\t\t
+bar\tchr5\t25000000\t27000000\t80000000\t6.9\tPeak B\tAccessibility\t\t\t\t
+bar\tchr8\t43000000\t45000000\t100000000\t9.2\tPeak C\tAccessibility\t\t\t\t
+scatter\tchr1\t31000000\t31000100\t100000000\t0.82\trsA\tAssociation\t\t\t\t
+scatter\tchr5\t52000000\t52000100\t80000000\t0.64\trsB\tAssociation\t\t\t\t
+scatter\tchr8\t69000000\t69000100\t100000000\t0.91\trsC\tAssociation\t\t\t\t
+label\tchr1\t36000000\t36000100\t100000000\t\tGENE1\tGenes\t\t\t\t
+label\tchr5\t41000000\t41000100\t80000000\t\tGENE5\tGenes\t\t\t\t
+fusion\tchr1\t16000000\t16500000\t100000000\t3\tFusion A\tEvents\tchr5\t26000000\t26500000\t80000000
+correlation\tchr5\t52000000\t52500000\t80000000\t-0.62\tContact B\tEvents\tchr8\t69000000\t69500000\t100000000
+link\tchr8\t43000000\t44000000\t100000000\t2.5\tLink C\tEvents\tchr1\t31000000\t31500000\t100000000`,
 };
 
 const plotDefinitionSeeds: PlotDefinition[] = [
@@ -1866,16 +1912,49 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     name: id === "sankey" ? "Sankey" : "Chord",
     family: id === "sankey" ? "Flow" : "Relationships",
     summary: id === "sankey" ? "Weighted source-to-target flows with proportional node and ribbon widths." : "Circular weighted relationships between categorical sectors.",
-    inputHint: "One row per edge with non-negative weight. Repeated edges are aggregated.",
+    inputHint: id === "sankey" ? "One row per directed flow with a strictly positive weight. Repeated source–target–group rows are aggregated and disclosed." : "One row per categorical relationship with a strictly positive weight. Repeated source–target rows are aggregated; Chord color represents the source sector.",
     roles: [
       { key: "source", label: "Source", kind: "category" as const, required: true },
       { key: "target", label: "Target", kind: "category" as const, required: true },
       { key: "value", label: "Weight", kind: "number" as const, required: true },
-      { key: "group", label: "Group", kind: "category" as const, required: false },
+      ...(id === "sankey" ? [{ key: "group", label: "Group", kind: "category" as const, required: false }] : []),
     ],
-    defaultMapping: { source: "source", target: "target", value: "value", group: "group" },
+    defaultMapping: (id === "sankey" ? { source: "source", target: "target", value: "value", group: "group" } : { source: "source", target: "target", value: "value" }) as Record<string, string>,
     sampleData: samples.network,
   })),
+  {
+    id: "alluvial",
+    name: "Alluvial",
+    family: "Multi-stage flow",
+    summary: "Weighted cohorts traced across two or more ordered categorical axes.",
+    inputHint: "Long format: one row per flow ID and ordered axis. A flow must retain one positive weight across every supplied axis.",
+    roles: [
+      { key: "flow", label: "Flow ID", kind: "label", required: true },
+      { key: "axis", label: "Ordered axis", kind: "category", required: true },
+      { key: "stratum", label: "Stratum", kind: "category", required: true },
+      { key: "value", label: "Weight", kind: "number", required: true },
+      { key: "group", label: "Ribbon group", kind: "category", required: false },
+    ],
+    defaultMapping: { flow: "flow_id", axis: "axis", stratum: "stratum", value: "value", group: "group" },
+    sampleData: samples.alluvial,
+  },
+  {
+    id: "ligand-receptor",
+    name: "Ligand–receptor",
+    family: "Cell communication",
+    summary: "Directed sender–ligand–receptor–receiver relationships with explicit evidence and weight.",
+    inputHint: "One row per supplied ligand–receptor interaction. Weight must be strictly positive and its upstream meaning must be documented.",
+    roles: [
+      { key: "sourceCell", label: "Sender cell", kind: "category", required: true },
+      { key: "ligand", label: "Ligand", kind: "label", required: true },
+      { key: "receptor", label: "Receptor", kind: "label", required: true },
+      { key: "targetCell", label: "Receiver cell", kind: "category", required: true },
+      { key: "value", label: "Interaction weight", kind: "number", required: true },
+      { key: "evidence", label: "Evidence / method", kind: "category", required: true },
+    ],
+    defaultMapping: { sourceCell: "source_cell", ligand: "ligand", receptor: "receptor", targetCell: "target_cell", value: "weight", evidence: "evidence" },
+    sampleData: samples.ligandReceptor,
+  },
   ...(["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"] as const).map((id) => {
     const metadata = {
       network: { name: "Network", family: "Relationships", summary: "General node–edge network with explicit direction, weight, sign, type, grouping, and isolated-node records.", sample: samples.generalNetwork },
@@ -1928,18 +2007,23 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id: "circos",
     name: "Circos",
     family: "Genomic context",
-    summary: "Genomic sectors and inter-locus links using explicit chromosome intervals.",
-    inputHint: "Each link needs source and target chromosome/start/end coordinates. Coordinates must be non-negative and end ≥ start.",
+    summary: "A shared genomic coordinate system for concentric bars, heatmaps, scatter, labels, fusions, correlations, and links.",
+    inputHint: "Each row declares record_type and an explicit chromosome/contig length from one reference build. Link, fusion, and correlation rows additionally need target coordinates and target sequence length.",
     roles: [
-      { key: "sourceChr", label: "Source chromosome", kind: "category", required: true },
-      { key: "sourceStart", label: "Source start", kind: "number", required: true },
-      { key: "sourceEnd", label: "Source end", kind: "number", required: true },
-      { key: "targetChr", label: "Target chromosome", kind: "category", required: true },
-      { key: "targetStart", label: "Target start", kind: "number", required: true },
-      { key: "targetEnd", label: "Target end", kind: "number", required: true },
-      { key: "value", label: "Link weight", kind: "number", required: false },
+      { key: "recordType", label: "Record type", kind: "category", required: true },
+      { key: "chromosome", label: "Chromosome", kind: "category", required: true },
+      { key: "start", label: "Start", kind: "number", required: true },
+      { key: "end", label: "End", kind: "number", required: true },
+      { key: "chromosomeLength", label: "Chromosome / contig length", kind: "number", required: true },
+      { key: "value", label: "Value / link weight", kind: "number", required: false },
+      { key: "label", label: "Label", kind: "label", required: false },
+      { key: "track", label: "Track", kind: "category", required: false },
+      { key: "targetChromosome", label: "Target chromosome", kind: "category", required: false },
+      { key: "targetStart", label: "Target start", kind: "number", required: false },
+      { key: "targetEnd", label: "Target end", kind: "number", required: false },
+      { key: "targetChromosomeLength", label: "Target chromosome / contig length", kind: "number", required: false },
     ],
-    defaultMapping: { sourceChr: "sourceChr", sourceStart: "sourceStart", sourceEnd: "sourceEnd", targetChr: "targetChr", targetStart: "targetStart", targetEnd: "targetEnd", value: "value" },
+    defaultMapping: { recordType: "record_type", chromosome: "chromosome", start: "start", end: "end", chromosomeLength: "chromosome_length", value: "value", label: "label", track: "track", targetChromosome: "target_chromosome", targetStart: "target_start", targetEnd: "target_end", targetChromosomeLength: "target_chromosome_length" },
     sampleData: samples.circos,
   },
   {
@@ -2170,7 +2254,9 @@ export const plotReferences = {
   upset: { citation: "Lex et al., 2014. UpSet: Visualization of Intersecting Sets. IEEE TVCG.", href: "https://doi.org/10.1109/TVCG.2014.2346248" },
   sankeyHistory: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management: Part I. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00004.x" },
   sankey: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00015.x" },
+  alluvial: { citation: "Rosvall & Bergstrom, 2010. Mapping Change in Large Networks. PLoS ONE.", href: "https://doi.org/10.1371/journal.pone.0008694" },
   chord: { citation: "Gu et al., 2014. circlize Implements and Enhances Circular Visualization in R. Bioinformatics.", href: "https://doi.org/10.1093/bioinformatics/btu393" },
+  ligandReceptor: { citation: "Armingol et al., 2021. Deciphering cell–cell interactions and communication from gene expression. Nat Rev Genet.", href: "https://doi.org/10.1038/s41576-020-00292-x" },
   networkLayout: { citation: "Fruchterman & Reingold, 1991. Graph drawing by force-directed placement. Software: Practice and Experience.", href: "https://doi.org/10.1002/spe.4380211102" },
   cytoscape: { citation: "Shannon et al., 2003. Cytoscape: a software environment for integrated models of biomolecular interaction networks. Genome Research.", href: "https://doi.org/10.1101/gr.1239303" },
   cerna: { citation: "Salmena et al., 2011. A ceRNA hypothesis: the Rosetta Stone of a hidden RNA language? Cell.", href: "https://doi.org/10.1016/j.cell.2011.07.014" },
@@ -2435,6 +2521,20 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     origin: "现代 Chord diagram 常由邻接矩阵或 from–to 表生成；circlize 等工具把这种通用圆形关系图推广到迁移、通信和生物网络。",
     references: [plotReferences.chord],
   },
+  alluvial: {
+    definition: "Alluvial 图把同一 flow ID 在多个有序阶段中的类别位置连接起来；每条带宽代表该 cohort 的恒定数量或权重，竖向块表示各阶段的类别总量。",
+    suitableData: "同一批对象在至少两个有序时间点、状态或分类轴上的去向；每个 flow ID 在各轴应有唯一类别和一致的正权重。",
+    answers: "同一 cohort 如何跨多个阶段重新分配，主要迁移路径和流失/聚合位置在哪里。阶段顺序来自输入，不由图形推断。",
+    origin: "Alluvial 这一名称借用了冲积层的视觉隐喻；Rosvall 与 Bergstrom 将其用于追踪大型网络中随时间变化的模块结构。",
+    references: [plotReferences.alluvial, plotReferences.sankey],
+  },
+  "ligand-receptor": {
+    definition: "按 sender cell → ligand → receptor → receiver cell 四层展示上游给定的细胞通讯候选关系，线宽编码显式输入的 interaction weight，evidence 字段保留推断或验证来源。",
+    suitableData: "来自明确配体–受体数据库和上游评分流程的细胞对、配体、受体、权重与证据类型。不同工具的分数不可在未校准时直接比较。",
+    answers: "哪些细胞群可能通过哪些配体–受体对发生通信，以及候选关系由什么证据支持。表达共现或算法评分不证明直接结合、方向性效应或体内因果。",
+    origin: "配体–受体网络图随着单细胞转录组细胞通讯推断方法普及而广泛使用，但它本质上是对预定义分子配对与表达/评分结果的结构化展示。",
+    references: [plotReferences.ligandReceptor],
+  },
   network: {
     definition: "通用 network 由节点与边构成：节点颜色编码分组，大小编码可选节点值；边宽编码非负权重，箭头编码方向，颜色编码正/负/中性符号，线型编码关系类型。孤立节点必须用独立 node 记录声明。",
     suitableData: "明确区分 node 与 edge 的关系数据。Edge 记录可给 direction、weight、sign、edge type；node 记录可给 group、type、value。布局由所选算法和整数 seed 确定，但几何距离不等于统计距离。",
@@ -2485,9 +2585,9 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     references: [plotReferences.dendrogram, plotReferences.tidyTree],
   },
   circos: {
-    definition: "以染色体或 contig 的真实坐标为圆周骨架，叠加同心数据轨道，并把连接精确锚定到两个基因组区间。",
-    suitableData: "带染色体和起止坐标的基因组区段及区段间连接，如融合、重排或染色质互作。",
-    answers: "事件位于哪些基因组区域，跨染色体或远距离连接的整体格局如何。",
+    definition: "以显式提供的染色体或 contig 长度及真实坐标为唯一圆周骨架，在同一坐标系叠加 bar、heatmap、scatter、label 等同心数据轨道，并把 link、fusion、correlation 精确锚定到两个基因组区间。每个数值轨道独立缩放并显示范围；它不同于只表达类别关系的 Chord。",
+    suitableData: "同一参考基因组版本下的染色体或 contig 序列长度与安全整数起止坐标、区段数值及区段间连接。每行用 record_type 明确图层语义；correlation 必须为 [-1,1] 的系数，数值记录不得留空。",
+    answers: "多类事件位于哪些基因组区域，不同轨道是否共定位，跨染色体或远距离连接的整体格局如何。图形不会推断参考版本或结构变异真实性。",
     origin: "Krzywinski 等人在 2009 年创建 Circos 来展示比较基因组和结构变异；圆内连带只是它众多轨道中的一种。",
     references: [plotReferences.circos],
   },
@@ -2607,7 +2707,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 const advancedRendererIds = new Set<PlotType>([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
-  "upset", "sankey", "chord", "circos",
+  "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos",
   "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
   "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
   "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
@@ -2617,7 +2717,7 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
   "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ];
-const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap"]);
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
@@ -2655,6 +2755,11 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   waterfall: ["genomicSortSamples"],
   oncoplot: ["genomicSortSamples", "oncoplotShowMargins"],
   "motif-logo": ["motifDisplayMode"],
+  sankey: ["showLabels"],
+  alluvial: ["showLabels"],
+  chord: ["showLabels"],
+  "ligand-receptor": ["showLabels"],
+  circos: ["showLabels", "genomicTrackGap", "continuousLow", "continuousHigh"],
   network: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
   ppi: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
   cerna: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
@@ -2666,6 +2771,11 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
 };
 
 const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof VisualizationSettings>>> = {
+  sankey: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
+  alluvial: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
+  chord: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
+  "ligand-receptor": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
+  circos: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "pointSize", "opacity", "categoricalColors", "showLabels", "genomicTrackGap", "continuousLow", "continuousHigh"]),
   manhattan: new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid", "categoricalColors", "showLabels", "labelLimit", "genomicSignificanceLog10"]),
   qq: new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid", "categoricalColors", "showLabels", "labelLimit"]),
   "chromosome-ideogram": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "axisLineWidth", "showLabels"]),
@@ -2697,7 +2807,8 @@ function dataShapeFor(type: PlotType): PlotDataShape {
   if (["heatmap", "clustered-heatmap", "correlation-heatmap", "pca"].includes(type)) return "matrix";
   if (["pcoa", "umap", "tsne", "nmds"].includes(type)) return "coordinates";
   if (["venn", "upset"].includes(type)) return "sets";
-  if (["sankey", "chord", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"].includes(type)) return "network";
+  if (["sankey", "chord", "ligand-receptor", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"].includes(type)) return "network";
+  if (type === "alluvial") return "long";
   if (["treemap", "sunburst", "tree", "dendrogram"].includes(type)) return "hierarchy";
   if (type === "circos") return "genomic-links";
   if (["manhattan", "chromosome-ideogram", "snp-density", "genome-tracks"].includes(type)) return "genomic-coordinates";
@@ -2707,7 +2818,7 @@ function dataShapeFor(type: PlotType): PlotDataShape {
 }
 
 function numericAxesFor(type: PlotType): Array<"x" | "y"> {
-  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "chord", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "manhattan", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
+  if (["heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "manhattan", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type)) return [];
   if (["enrichment", "enrichment-bar", "survival-forest"].includes(type)) return ["x"];
   if (["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge"].includes(type)) return ["x", "y"];
   if (["errorbar", "lollipop"].includes(type)) return ["y"];
@@ -3016,7 +3127,7 @@ export function parseRatioValue(value: string | undefined) {
 
 const mappingAliases: Record<string, string[]> = {
   category: ["category", "condition", "sample", "name", "term"],
-  value: ["value", "mean", "expression", "score", "abundance", "count", "variantcount", "density"],
+  value: ["value", "weight", "mean", "expression", "score", "abundance", "count", "variantcount", "density"],
   secondary: ["secondary", "secondaryvalue", "comparison", "overlay", "value2"],
   target: ["target", "reference", "goal", "benchmark", "to", "receiver"],
   facet: ["facet", "panel", "stratum", "cohort"],
@@ -3047,6 +3158,7 @@ const mappingAliases: Record<string, string[]> = {
   item: ["item", "gene", "feature", "id"],
   set: ["set", "geneset", "list", "collection"],
   source: ["source", "from", "sender"],
+  flow: ["flow", "flowid", "cohort", "path"],
   sourceChr: ["sourcechr", "chr1", "chromosome1"],
   sourceStart: ["sourcestart", "start1"],
   sourceEnd: ["sourceend", "end1"],
@@ -3242,7 +3354,7 @@ export function validatePlotDataset(
     if (column && !dataset.headers.includes(column)) errors.push(`${role.label} references a missing column (${column}).`);
     if (column && role.kind === "number") {
       const invalidCount = dataset.rows.filter((row) => {
-        if (["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"].includes(definition.id) && !role.required && !row[column]?.trim()) return false;
+        if (["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "circos"].includes(definition.id) && !role.required && !row[column]?.trim()) return false;
         const value = (definition.id === "enrichment" || definition.id === "enrichment-bar") && role.key === "ratio"
           ? parseRatioValue(row[column])
           : parseNumericValue(row[column]);
@@ -3385,6 +3497,7 @@ export function validatePlotDataset(
 
   if (settings && definition.id === "manhattan" && settings.genomicSignificanceLog10 <= 0) errors.push("The Manhattan −log10 significance threshold must be positive.");
   if (settings && definition.id === "genome-tracks" && settings.genomicTrackGap < 0) errors.push("Genome track gap must be non-negative.");
+  if (settings && definition.id === "circos" && settings.genomicTrackGap < 0) errors.push("Circos track gap must be non-negative.");
 
   if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(definition.id) && settings) {
     const ordinationName = definition.name;
@@ -4012,21 +4125,121 @@ export function validatePlotDataset(
   }
 
   if (["sankey", "chord"].includes(definition.id) && mapping.value) {
-    const negativeWeights = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) < 0).length;
-    if (negativeWeights > 0) errors.push(`Weight contains ${negativeWeights} negative value${negativeWeights === 1 ? "" : "s"}.`);
-    if (dataset.rows.length > 250) warnings.push("More than 250 network edges will be visually dense; filter or aggregate before publication.");
+    const nonPositiveWeights = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) <= 0).length;
+    if (nonPositiveWeights > 0) errors.push(`Weight contains ${nonPositiveWeights} missing, zero, or negative value${nonPositiveWeights === 1 ? "" : "s"}; Sankey and Chord flows must be strictly positive.`);
+    const flowMapping = definition.id === "chord" ? { ...mapping, group: "" } : mapping;
+    const edges = aggregateFlowEdges(dataset.rows, flowMapping);
+    const categories = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+    const compactFrame = flowCircularFrame(settings?.width ?? 340, settings?.height ?? 340, Boolean(settings?.title));
+    const chordRadius = Math.min(compactFrame.plotWidth, compactFrame.plotHeight) * 0.37;
+    const chordLayout = definition.id === "chord" ? chordSectorLayout(edges, chordRadius) : null;
+    const layout = flowCircularLayoutMetrics(definition.id as "sankey" | "chord", settings?.width ?? 340, settings?.height ?? 340, definition.id === "chord" ? categories.size : Math.max(new Set(edges.map((edge) => edge.source)).size, new Set(edges.map((edge) => edge.target)).size), 0, { title: Boolean(settings?.title), tickSize: settings?.tickSize, showLabels: settings?.showLabels, minimumSectorPixels: chordLayout?.minimumArcPixels });
+    if (!layout.fits) errors.push(`${definition.name} cannot fit ${categories.size} categories safely in the current compact canvas (${layout.spacing.toFixed(1)} px ${layout.reason}); increase the figure size or filter categories.`);
+    const aggregated = edges.reduce((sum, edge) => sum + Math.max(0, edge.rows - 1), 0);
+    if (aggregated > 0) warnings.push(`${aggregated} repeated flow row${aggregated === 1 ? " was" : "s were"} aggregated by source and target${mapping.group ? ", plus mapped group" : ""}; the preview discloses this aggregation.`);
+    if (definition.id === "chord" && edges.some((edge) => edge.source === edge.target)) errors.push("Chord self-loops are not supported in the compact renderer; remove them or represent the diagonal quantity in a separate composition view.");
+    if (definition.id === "chord" && settings?.showLabels && chordLayout) {
+      const cx = compactFrame.left + compactFrame.plotWidth / 2; const cy = compactFrame.top + compactFrame.plotHeight / 2;
+      const candidates = chordLayout.nodes.map((node) => { const sector = chordLayout.sectors.get(node)!; const mid = (sector.start + sector.end) / 2; const x = cx + Math.cos(mid) * (chordRadius + 16); const y = cy + Math.sin(mid) * (chordRadius + 16) + 3; const anchor = Math.cos(mid) > 0.15 ? "start" as const : Math.cos(mid) < -0.15 ? "end" as const : "middle" as const; const available = anchor === "start" ? Math.max(8, compactFrame.width - x - 4) : anchor === "end" ? Math.max(8, x - 4) : Math.max(8, Math.min(x - 4, compactFrame.width - x - 4) * 2); return { label: node, x, y, anchor, available, fontSize: settings.tickSize }; });
+      const labels = circularLabelLayoutMetrics(candidates, compactFrame.width, compactFrame.height);
+      if (!labels.fits) errors.push(`Chord labels are not collision-safe in the current canvas (${labels.collisions} overlap${labels.collisions === 1 ? "" : "s"}, ${labels.outside} outside); increase size, hide labels, shorten category names, or filter small sectors.`);
+    }
+    const flowGroups = new Set(edges.map((edge) => edge.group));
+    if (definition.id === "sankey" && mapping.group && dataset.rows.some((row) => !row[mapping.group]?.trim())) errors.push("Mapped Sankey group values must be complete; unmap Group to color by source, or supply an explicit group for every flow row.");
+    if (definition.id === "sankey" && mapping.group && flowGroups.size > 4) errors.push(`The compact Sankey group legend supports at most four groups; detected ${flowGroups.size}. Filter, combine explicitly as Other, or increase semantic aggregation.`);
+    if (dataset.rows.length > 1_000) errors.push("Flow previews are limited to 1,000 input rows before aggregation; pre-aggregate or filter with a documented rule.");
+  }
+
+  if (definition.id === "alluvial") {
+    const records = parseAlluvialRecords(dataset.rows, mapping);
+    const axes = alluvialAxisOrder(records);
+    if (axes.length < 2) errors.push("Alluvial input needs at least two ordered axes.");
+    const invalid = records.filter((record) => !record.flow || !record.axis || !record.stratum || !Number.isFinite(record.value) || record.value <= 0);
+    if (invalid.length > 0) errors.push(`${invalid.length} alluvial row${invalid.length === 1 ? " is" : "s are"} missing a flow ID, axis, stratum, or positive finite weight.`);
+    const duplicateFlowAxes = new Set<string>(); const seenFlowAxes = new Set<string>();
+    records.forEach((record) => { const key = `${record.flow}\u0000${record.axis}`; if (seenFlowAxes.has(key)) duplicateFlowAxes.add(key); seenFlowAxes.add(key); });
+    if (duplicateFlowAxes.size > 0) errors.push(`${duplicateFlowAxes.size} flow–axis pair${duplicateFlowAxes.size === 1 ? " is" : "s are"} duplicated; every flow ID must occupy exactly one stratum per axis.`);
+    const flows = [...new Set(records.map((record) => record.flow))];
+    const incomplete = flows.filter((flow) => new Set(records.filter((record) => record.flow === flow).map((record) => record.axis)).size !== axes.length);
+    if (incomplete.length > 0) errors.push(`${incomplete.length} alluvial flow${incomplete.length === 1 ? " does" : "s do"} not occur on every axis; missing paths cannot be interpreted as conserved flow.`);
+    const changing = flows.filter((flow) => new Set(records.filter((record) => record.flow === flow).map((record) => record.value)).size > 1);
+    if (changing.length > 0) errors.push(`${changing.length} alluvial flow${changing.length === 1 ? " changes" : "s change"} weight across axes; use a constant cohort weight or split gain/loss into explicit flows.`);
+    const changingGroups = mapping.group ? flows.filter((flow) => new Set(records.filter((record) => record.flow === flow).map((record) => record.group)).size > 1) : [];
+    if (changingGroups.length > 0) errors.push(`${changingGroups.length} alluvial flow${changingGroups.length === 1 ? " changes" : "s change"} ribbon group across axes; one conserved path must keep one group/color.`);
+    if (mapping.group && dataset.rows.some((row) => !row[mapping.group]?.trim())) errors.push("Mapped Alluvial group values must be complete; unmap Ribbon group for one neutral cohort color, or supply a group on every axis row.");
+    const alluvialGroups = mapping.group ? new Set(records.map((record) => record.group)) : new Set<string>();
+    if (alluvialGroups.size > 4) errors.push(`The compact Alluvial group legend supports at most four groups; detected ${alluvialGroups.size}. Filter or combine groups explicitly.`);
+    const maxStrata = Math.max(0, ...axes.map((axis) => new Set(records.filter((record) => record.axis === axis).map((record) => record.stratum)).size));
+    const layout = flowCircularLayoutMetrics("alluvial", settings?.width ?? 340, settings?.height ?? 340, maxStrata, axes.length, { title: Boolean(settings?.title), tickSize: settings?.tickSize, showLabels: settings?.showLabels });
+    if (!layout.fits) errors.push(`Alluvial layout cannot fit ${axes.length} axes and up to ${maxStrata} strata safely (${layout.spacing.toFixed(1)} px ${layout.reason}); increase the figure size or reduce axes/strata.`);
+    if (dataset.rows.length > 1_500) errors.push("Alluvial previews are limited to 1,500 rows; aggregate cohorts before rendering.");
+  }
+
+  if (definition.id === "ligand-receptor") {
+    const records = parseLigandReceptorRecords(dataset.rows, mapping);
+    const invalid = records.filter((record) => !record.sourceCell || !record.targetCell || !record.ligand || !record.receptor || !record.evidence || !Number.isFinite(record.value) || record.value <= 0);
+    if (invalid.length > 0) errors.push(`${invalid.length} ligand–receptor row${invalid.length === 1 ? " is" : "s are"} incomplete; sender, ligand, receptor, receiver, evidence, and a strictly positive finite weight are required.`);
+    const maximumLayer = Math.max(0, new Set(records.map((record) => record.sourceCell)).size, new Set(records.map((record) => record.ligand)).size, new Set(records.map((record) => record.receptor)).size, new Set(records.map((record) => record.targetCell)).size);
+    const layout = flowCircularLayoutMetrics("ligand-receptor", settings?.width ?? 340, settings?.height ?? 340, maximumLayer, 4, { title: Boolean(settings?.title), tickSize: settings?.tickSize, showLabels: settings?.showLabels });
+    if (!layout.fits) errors.push(`Ligand–receptor layout cannot fit ${maximumLayer} entries in its densest layer safely (${layout.spacing.toFixed(1)} px ${layout.reason}); increase height or filter interactions.`);
+    if (dataset.rows.length > 400) errors.push("Ligand–receptor previews are limited to 400 supplied interactions; filter by a documented evidence/weight rule.");
   }
 
   if (definition.id === "circos") {
-    const invalidIntervals = dataset.rows.filter((row) => {
-      const ss = parseNumericValue(row[mapping.sourceStart]);
-      const se = parseNumericValue(row[mapping.sourceEnd]);
-      const ts = parseNumericValue(row[mapping.targetStart]);
-      const te = parseNumericValue(row[mapping.targetEnd]);
-      return ss === null || se === null || ts === null || te === null || ss < 0 || ts < 0 || se < ss || te < ts;
-    }).length;
-    if (invalidIntervals > 0) errors.push(`${invalidIntervals} Circos row${invalidIntervals === 1 ? " has" : "s have"} invalid genomic intervals.`);
-    if (dataset.rows.length > 500) warnings.push("More than 500 Circos links may obscure structure; consider filtering by evidence or weight.");
+    const records = parseCircosTrackRecords(dataset.rows, mapping);
+    const unknownTypes = [...new Set(dataset.rows.map((row) => row[mapping.recordType]?.trim().toLowerCase() ?? "").filter((type) => !isCircosRecordType(type)))];
+    if (unknownTypes.length > 0) errors.push(`Unsupported Circos record type${unknownTypes.length === 1 ? "" : "s"}: ${unknownTypes.slice(0, 8).join(", ")}. Use bar, heatmap, scatter, label, link, fusion, or correlation.`);
+    const invalidIntervals = records.filter((record) => !record.chromosome || !Number.isSafeInteger(record.start) || !Number.isSafeInteger(record.end) || record.start < 0 || record.end <= record.start);
+    if (invalidIntervals.length > 0) errors.push(`${invalidIntervals.length} Circos row${invalidIntervals.length === 1 ? " has" : "s have"} invalid genomic coordinates; 0 ≤ start < end must use safe integers.`);
+    const linkRecords = records.filter((record) => ["link", "fusion", "correlation"].includes(record.type));
+    const invalidTargets = linkRecords.filter((record) => !record.targetChromosome || !Number.isSafeInteger(record.targetStart) || !Number.isSafeInteger(record.targetEnd) || record.targetStart < 0 || record.targetEnd <= record.targetStart);
+    if (invalidTargets.length > 0) errors.push(`${invalidTargets.length} Circos link/fusion/correlation row${invalidTargets.length === 1 ? " has" : "s have"} invalid or missing target genomic coordinates.`);
+    const invalidLengths = records.filter((record) => !Number.isSafeInteger(record.chromosomeLength) || record.chromosomeLength <= 0 || record.end > record.chromosomeLength);
+    if (invalidLengths.length > 0) errors.push(`${invalidLengths.length} Circos row${invalidLengths.length === 1 ? " has" : "s have"} an invalid chromosome/contig length or an interval extending beyond it.`);
+    const invalidTargetLengths = linkRecords.filter((record) => !Number.isSafeInteger(record.targetChromosomeLength) || record.targetChromosomeLength <= 0 || record.targetEnd > record.targetChromosomeLength);
+    if (invalidTargetLengths.length > 0) errors.push(`${invalidTargetLengths.length} Circos link/fusion/correlation row${invalidTargetLengths.length === 1 ? " has" : "s have"} an invalid target chromosome/contig length or an interval extending beyond it.`);
+    const declaredLengths = new Map<string, Set<number>>();
+    records.forEach((record) => { const source = declaredLengths.get(record.chromosome) ?? new Set<number>(); source.add(record.chromosomeLength); declaredLengths.set(record.chromosome, source); if (record.targetChromosome) { const target = declaredLengths.get(record.targetChromosome) ?? new Set<number>(); target.add(record.targetChromosomeLength); declaredLengths.set(record.targetChromosome, target); } });
+    const conflictingLengths = [...declaredLengths.entries()].filter(([, lengths]) => lengths.size > 1).map(([chromosome]) => chromosome);
+    if (conflictingLengths.length > 0) errors.push(`Circos chromosome/contig lengths conflict across rows for: ${conflictingLengths.slice(0, 8).join(", ")}. Use one reference build and one explicit length per sequence.`);
+    const numericRecords = records.filter((record) => ["bar", "heatmap", "scatter", "link", "fusion", "correlation"].includes(record.type));
+    const missingValues = numericRecords.filter((record) => !Number.isFinite(record.value));
+    if (missingValues.length > 0) errors.push(`${missingValues.length} numeric Circos record${missingValues.length === 1 ? " is" : "s are"} missing a finite value; values are never imputed.`);
+    const nonPositiveWeights = records.filter((record) => ["link", "fusion"].includes(record.type) && Number.isFinite(record.value) && record.value <= 0);
+    if (nonPositiveWeights.length > 0) errors.push("Circos link and fusion weights must be strictly positive; correlation is the only signed relationship record.");
+    const negativeBars = records.filter((record) => record.type === "bar" && Number.isFinite(record.value) && record.value < 0);
+    if (negativeBars.length > 0) errors.push("Circos bar values must be non-negative; use a heatmap track for signed continuous values.");
+    const invalidCorrelations = records.filter((record) => record.type === "correlation" && (!Number.isFinite(record.value) || record.value < -1 || record.value > 1));
+    if (invalidCorrelations.length > 0) errors.push("Circos correlation values must be finite coefficients in [-1, 1].");
+    const zeroCorrelations = records.filter((record) => record.type === "correlation" && record.value === 0).length;
+    if (zeroCorrelations > 0) warnings.push(`${zeroCorrelations} zero-correlation record${zeroCorrelations === 1 ? " is" : "s are"} omitted because r = 0 has no visible relationship width.`);
+    const axisIntervals = [...declaredLengths.entries()].flatMap(([chromosome, lengths]) => { const length = [...lengths][0]; return Number.isSafeInteger(length) && length > 0 ? [{ chromosome, start: 0, end: length }] : []; });
+    if (invalidIntervals.length === 0 && invalidTargets.length === 0 && invalidLengths.length === 0 && invalidTargetLengths.length === 0) {
+      const span = genomeAxisSpanMetrics(axisIntervals);
+      if (!span.fits) errors.push(`Circos cumulative genomic span exceeds the safe browser limit of ${span.maximumSpan.toExponential(0)} bp; split the view or use a documented rescaled coordinate system.`);
+    }
+    const coordinates = circosCoordinateSystem(records); const tracks = circosTrackOrder(records);
+    const compactFrame = flowCircularFrame(settings?.width ?? 340, settings?.height ?? 340, Boolean(settings?.title));
+    const provisionalOuter = Math.min(compactFrame.plotWidth, compactFrame.plotHeight) * 0.39;
+    const minimumSectorPixels = coordinates.chromosomes.length ? Math.min(...coordinates.chromosomes.map((chromosome) => { const sector = coordinates.sectors.get(chromosome)!; return (sector.end - sector.start) * provisionalOuter; })) : 0;
+    const hasScatter = records.some((record) => record.type === "scatter");
+    const layout = flowCircularLayoutMetrics("circos", settings?.width ?? 340, settings?.height ?? 340, coordinates.chromosomes.length, tracks.length, { title: Boolean(settings?.title), trackGap: settings?.genomicTrackGap ?? 4, minimumSectorPixels, pointSize: settings?.pointSize, hasScatter });
+    if (!layout.fits) errors.push(`Circos cannot fit ${coordinates.chromosomes.length} chromosomes/contigs and ${tracks.length} concentric tracks safely (${layout.spacing.toFixed(1)} px ${layout.reason}); increase size or reduce tracks.`);
+    const mixedNumericTracks = tracks.filter((track) => new Set(records.filter((record) => record.track === track && ["bar", "heatmap", "scatter"].includes(record.type)).map((record) => record.type)).size > 1);
+    if (mixedNumericTracks.length > 0) errors.push(`Each Circos numeric track must use one mark type so its scale remains interpretable; mixed tracks: ${mixedNumericTracks.slice(0, 8).join(", ")}.`);
+    const numericTrackCount = tracks.filter((track) => records.some((record) => record.track === track && ["bar", "heatmap", "scatter"].includes(record.type))).length;
+    const hasCorrelation = records.some((record) => record.type === "correlation");
+    if (Math.ceil(numericTrackCount / 2) * 10 + (hasCorrelation ? 18 : 0) > 48) errors.push(`The Circos scale legend cannot fit ${numericTrackCount} numeric tracks${hasCorrelation ? " plus the signed-correlation key" : ""} in the compact footer; reduce tracks or increase figure height.`);
+    if (settings?.showLabels && layout.radial) {
+      const cx = compactFrame.left + compactFrame.plotWidth / 2; const cy = compactFrame.top + compactFrame.plotHeight / 2; const outer = layout.radial.outer;
+      const candidates = coordinates.chromosomes.map((chromosome) => { const sector = coordinates.sectors.get(chromosome)!; const mid = (sector.start + sector.end) / 2; const x = cx + Math.cos(mid) * (outer + 13); const y = cy + Math.sin(mid) * (outer + 13) + 3; const anchor = Math.cos(mid) > 0.16 ? "start" as const : Math.cos(mid) < -0.16 ? "end" as const : "middle" as const; const available = anchor === "start" ? Math.max(8, compactFrame.width - x - 4) : anchor === "end" ? Math.max(8, x - 4) : Math.max(8, Math.min(x - 4, compactFrame.width - x - 4) * 2); return { label: chromosome, x, y, anchor, available, fontSize: Math.max(8, settings.tickSize - 1) }; });
+      records.filter((record) => record.type === "label" && record.label).forEach((record) => { const trackIndex = tracks.indexOf(record.track); const radius = Math.max(14, layout.radial!.radii[trackIndex] ?? outer - 17); const middle = (coordinates.angle(record.chromosome, record.start) + coordinates.angle(record.chromosome, record.end)) / 2; candidates.push({ label: record.label, x: cx + Math.cos(middle) * radius, y: cy + Math.sin(middle) * radius - 3, anchor: "middle", available: 42, fontSize: Math.max(7, settings.tickSize - 3) }); });
+      const labels = circularLabelLayoutMetrics(candidates, compactFrame.width, compactFrame.height);
+      if (!labels.fits) errors.push(`Circos labels are not collision-safe in the current canvas (${labels.collisions} overlap${labels.collisions === 1 ? "" : "s"}, ${labels.outside} outside); increase size, hide labels, or filter/coalesce nearby labels.`);
+    }
+    const labelCount = records.filter((record) => record.type === "label").length;
+    if (labelCount > 24) errors.push(`Circos compact export supports at most 24 label records; detected ${labelCount}. Filter labels or increase semantic aggregation.`);
+    if (dataset.rows.length > 2_000) errors.push("Circos browser previews are limited to 2,000 total track records; pre-bin dense tracks using a documented aggregation rule.");
   }
 
   return { errors: [...new Set(errors)].slice(0, 10), warnings: [...new Set(warnings)].slice(0, 10) };

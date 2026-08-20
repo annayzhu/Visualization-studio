@@ -77,7 +77,7 @@ describe("plot-module registry interface", () => {
   });
 
   it("adapts all existing plots to the shared module contract", () => {
-    expect(plotModuleRegistry.list()).toHaveLength(53);
+    expect(plotModuleRegistry.list()).toHaveLength(61);
     plotModuleRegistry.list().forEach((plotModule) => {
       expect(plotModule.definition.id).toBeTruthy();
       expect(plotModule.examples.length).toBeGreaterThan(0);
@@ -98,6 +98,10 @@ describe("plot-module registry interface", () => {
     expect(getPlotModule("pca").renderer).toBe("advanced");
     expect(getPlotModule("pca").capabilities.settingKeys).toEqual(expect.arrayContaining(["ordinationView", "ordinationShowLoadings", "ordinationPermanovaR2"]));
     expect(getPlotModule("tsne").capabilities.dataShape).toBe("coordinates");
+    expect(getPlotModule("network").capabilities.dataShape).toBe("network");
+    expect(getPlotModule("network").capabilities.settingKeys).toEqual(expect.arrayContaining(["networkLayout", "networkSeed", "networkShowIsolates"]));
+    expect(getPlotModule("tree").capabilities.dataShape).toBe("hierarchy");
+    expect(getPlotModule("dendrogram").capabilities.settingKeys).toContain("treeOrientation");
     expect(getPlotModule("nmds").capabilities.settingKeys).toContain("ordinationStress");
     expect(getPlotModule("box").capabilities.settingKeys).not.toContain("legendPosition");
     expect(getPlotModule("circos").renderer).toBe("advanced");

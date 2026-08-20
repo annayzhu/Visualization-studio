@@ -215,18 +215,20 @@ export type KaplanMeierPoint = { time: number; survival: number; atRisk: number;
 
 export function kaplanMeier(records: Array<{ time: number; event: 0 | 1 }>) {
   const ordered = [...records].sort((a, b) => a.time - b.time || b.event - a.event);
-  const times = [...new Set(ordered.map((record) => record.time))];
   const points: KaplanMeierPoint[] = [{ time: 0, survival: 1, atRisk: ordered.length, events: 0, censored: 0 }];
   let survival = 1;
   let atRisk = ordered.length;
-  times.forEach((time) => {
-    const recordsAtTime = ordered.filter((record) => record.time === time);
-    const events = recordsAtTime.filter((record) => record.event === 1).length;
-    const censored = recordsAtTime.length - events;
+  for (let start = 0; start < ordered.length;) {
+    const time = ordered[start].time;
+    let end = start; let events = 0;
+    while (end < ordered.length && ordered[end].time === time) { if (ordered[end].event === 1) events += 1; end += 1; }
+    const countAtTime = end - start;
+    const censored = countAtTime - events;
     if (atRisk > 0 && events > 0) survival *= 1 - events / atRisk;
     points.push({ time, survival, atRisk, events, censored });
-    atRisk -= recordsAtTime.length;
-  });
+    atRisk -= countAtTime;
+    start = end;
+  }
   return points;
 }
 
@@ -236,14 +238,15 @@ export function rocCurve(records: Array<{ truth: 0 | 1; score: number }>) {
   const positives = records.filter((record) => record.truth === 1).length;
   const negatives = records.length - positives;
   if (positives === 0 || negatives === 0) return { points: [] as RocPoint[], auc: Number.NaN };
-  const thresholds = [Number.POSITIVE_INFINITY, ...[...new Set(records.map((record) => record.score))].sort((a, b) => b - a), Number.NEGATIVE_INFINITY];
-  const points = thresholds.map((threshold) => {
-    const predictedPositive = records.filter((record) => record.score >= threshold);
-    const truePositive = predictedPositive.filter((record) => record.truth === 1).length;
-    const falsePositive = predictedPositive.length - truePositive;
-    return { fpr: falsePositive / negatives, tpr: truePositive / positives, threshold };
-  });
-  const unique = points.filter((point, index) => index === 0 || point.fpr !== points[index - 1].fpr || point.tpr !== points[index - 1].tpr);
+  const ordered = [...records].sort((a, b) => b.score - a.score);
+  const unique: RocPoint[] = [{ fpr: 0, tpr: 0, threshold: Number.POSITIVE_INFINITY }];
+  let truePositive = 0; let falsePositive = 0;
+  for (let start = 0; start < ordered.length;) {
+    const threshold = ordered[start].score; let end = start;
+    while (end < ordered.length && ordered[end].score === threshold) { if (ordered[end].truth === 1) truePositive += 1; else falsePositive += 1; end += 1; }
+    unique.push({ fpr: falsePositive / negatives, tpr: truePositive / positives, threshold });
+    start = end;
+  }
   const auc = unique.slice(1).reduce((sum, point, index) => {
     const previous = unique[index];
     return sum + (point.fpr - previous.fpr) * (point.tpr + previous.tpr) / 2;

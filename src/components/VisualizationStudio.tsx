@@ -880,7 +880,7 @@ export function VisualizationStudio() {
       </div>
 
       <div className="grid items-start gap-[var(--ln-vis-panel-gap)] xl:grid-cols-[180px_minmax(0,1fr)_288px] xl:items-start" style={mainGridStyle}>
-        <Card className="hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none md:block xl:sticky xl:top-[var(--visualization-panel-top)] xl:flex xl:h-[var(--visualization-panel-height)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
+        <Card data-visualization-panel="plots" className="hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none md:block xl:sticky xl:top-[var(--visualization-panel-top)] xl:flex xl:h-[var(--visualization-panel-height)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
           <CardHeader title="Plot types" className="h-12 shrink-0" />
           <CardBody className="space-y-1 p-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
             {plotModuleRegistry.list().map(({ definition: plot }) => (
@@ -893,7 +893,7 @@ export function VisualizationStudio() {
         </Card>
 
         <div className="min-w-0 space-y-[var(--ln-vis-panel-gap)]">
-          <div ref={previewCardRef} className="scroll-mt-[var(--visualization-panel-top)]">
+          <div ref={previewCardRef} data-visualization-panel="preview" className="scroll-mt-[var(--visualization-panel-top)]">
           <Card className="overflow-hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-preview-border)] shadow-[var(--ln-vis-preview-shadow)]">
             <CardHeader className="min-h-12 shrink-0 max-sm:block max-sm:[&_.card-action]:mt-2" title={`${definition.name} preview`} action={<div className="flex flex-wrap items-center justify-end gap-1.5 max-sm:justify-start"><Badge>{dataset.rows.length} {plotType === "pca" ? "observations" : "rows"}</Badge><Badge tone={isValid ? "success" : "danger"}>{isValid ? "Ready" : "Check data"}</Badge><span className="mx-0.5 h-5 w-px bg-hairline max-sm:hidden" aria-hidden /><Button size="sm" onClick={exportSvg} disabled={!isValid}><Download className="h-3.5 w-3.5" aria-hidden />SVG</Button><Button size="sm" onClick={exportPng} disabled={!isValid} title="Export PNG at 600 dpi"><ImageIcon className="h-3.5 w-3.5" aria-hidden />PNG</Button><Button size="sm" onClick={exportConfig}><FileJson className="h-3.5 w-3.5" aria-hidden />Config</Button></div>} />
             <CardBody className="p-3 sm:p-4">
@@ -1009,7 +1009,7 @@ export function VisualizationStudio() {
           </Card>
         </div>
 
-        <div className="flex min-h-0 flex-col gap-[var(--ln-vis-panel-gap)] overflow-hidden xl:sticky xl:top-[var(--visualization-panel-top)] xl:h-[var(--visualization-panel-height)]">
+        <div data-visualization-panel="parameters" className="flex min-h-0 flex-col gap-[var(--ln-vis-panel-gap)] overflow-hidden xl:sticky xl:top-[var(--visualization-panel-top)] xl:h-[var(--visualization-panel-height)]">
           <Card className="min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col">
             <CardHeader className="h-12 shrink-0" title="Figure parameters" action={<Button size="sm" variant="ghost" onClick={() => {
               const resetSettings = settingsForTheme(themeId);

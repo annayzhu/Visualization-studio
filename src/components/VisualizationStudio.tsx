@@ -571,7 +571,9 @@ export function VisualizationStudio() {
     setSelectedIntersectionSignature("");
     if (plotType === "pca") setPcaOptions(defaultPcaOptions);
     if (plotType === "bar") updateSetting("barInputMode", exampleIndex === 1 ? "long" : "summary");
+    if (plotType === "roc") updateSetting("rocInputMode", exampleIndex === 1 ? "precomputed-time" : "raw");
     if (plotType === "venn" || plotType === "upset") updateSetting("setInputMode", exampleIndex === 1 ? "peak-overlap" : "membership");
+    if (example.settings) setSettings((current) => ({ ...current, ...example.settings as Partial<VisualizationSettings> }));
   };
 
   const selectPlot = (nextType: PlotType) => {
@@ -599,6 +601,7 @@ export function VisualizationStudio() {
       heatmapColumnClusters: nextType === "correlation-heatmap" ? current.heatmapRowClusters : current.heatmapColumnClusters,
       compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
       setInputMode: (nextType === "venn" || nextType === "upset") ? "membership" : current.setInputMode,
+      rocInputMode: nextType === "roc" ? "raw" : current.rocInputMode,
       legendPosition: (["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment", "enrichment-bar", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos"] as PlotType[]).includes(nextType) && current.legendPosition === "bottom" ? "right" : current.legendPosition,
     }, nextType));
     window.requestAnimationFrame(() => {
@@ -1048,6 +1051,15 @@ export function VisualizationStudio() {
               {setAnalysis && setAnalysis.intersections.length > 0 ? <><SelectControl label="Exact intersection to download" value={selectedSetIntersection?.signature ?? ""} onChange={setSelectedIntersectionSignature}>{setAnalysis.intersections.map((entry) => <option key={entry.signature} value={entry.signature}>{entry.sets.join(" ∩ ")} · n={entry.size}</option>)}</SelectControl><Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={downloadSelectedIntersection}><Download className="h-3.5 w-3.5" aria-hidden />Download selected members</Button></> : null}
               <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Counts are exact membership combinations. Peak mode splits half-open intervals [start, end) into disjoint atomic genomic segments wherever active set membership changes; counts are segments, not base pairs or original peaks. Size weighting is only a visual cue, never an area-proportional fit.</p>
             </ControlGroup> : null}
+
+            {plotType === "roc" ? <ControlGroup title="ROC input">
+              <SelectControl label="Input structure" value={settings.rocInputMode} onChange={(value) => updateSetting("rocInputMode", value as VisualizationSettings["rocInputMode"])}><option value="raw">Raw binary outcomes + scores</option><option value="precomputed-time">Time-dependent coordinates + 95% CI</option></SelectControl>
+              <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Raw mode computes empirical ROC and trapezoidal AUC per model. Time-dependent mode only displays censoring-aware coordinates, pointwise TPR intervals, horizons, and AUC intervals supplied by a documented upstream method; it never infers them from ordinary binary scores.</p>
+            </ControlGroup> : null}
+
+            {plotType === "calibration" ? <ControlGroup title="Calibration grouping"><RangeControl label="Equal-frequency bins" value={settings.calibrationBinCount} minimum={3} maximum={15} step={1} onChange={(value) => updateSetting("calibrationBinCount", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Subjects are sorted by predicted probability and divided into approximately equal-frequency bins separately for each model. Fewer bins are more stable in small cohorts.</p></ControlGroup> : null}
+
+            {plotType === "decision-curve" ? <ControlGroup title="Decision thresholds"><RangeControl label="Minimum threshold" value={settings.decisionThresholdMinimum} minimum={0.005} maximum={0.5} step={0.005} onChange={(value) => updateSetting("decisionThresholdMinimum", value)} /><RangeControl label="Maximum threshold" value={settings.decisionThresholdMaximum} minimum={0.05} maximum={0.99} step={0.01} onChange={(value) => updateSetting("decisionThresholdMaximum", value)} /><RangeControl label="Grid resolution" value={settings.decisionThresholdStep} minimum={0.005} maximum={0.05} step={0.005} onChange={(value) => updateSetting("decisionThresholdStep", value)} /><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Net benefit is evaluated only on the displayed threshold grid. Choose a clinically meaningful interval; a grid step ≤0.01 is recommended when narrow utility regions matter.</p></ControlGroup> : null}
 
             {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} uncertainty`}>
               <SelectControl label="Error representation" value={plotType === "bar" ? settings.barErrorType : settings.lineErrorType} onChange={(value) => selectErrorType(plotType === "bar" ? "barErrorType" : "lineErrorType", value as VisualizationSettings["barErrorType"] | VisualizationSettings["lineErrorType"])}><option value="none">None</option><option value="sd">Mean ± SD</option><option value="sem">Mean ± SEM</option>{plotType === "line" ? <option value="ci95">95% CI half-width</option> : null}</SelectControl>

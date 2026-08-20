@@ -110,11 +110,12 @@ describe("Visualization Studio data contracts", () => {
       "scatter", "correlation", "volcano", "ma", "quadrant", "bar", "errorbar", "line", "area", "lollipop",
       "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "clustered-heatmap", "correlation-heatmap", "pca", "pcoa", "umap", "tsne", "nmds",
       "enrichment", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos",
+      "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score",
       "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
       "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
       "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid",
     ];
-    expect(plotDefinitions).toHaveLength(63);
+    expect(plotDefinitions).toHaveLength(71);
     expect(requested.every((id) => plotDefinitions.some((definition) => definition.id === id && definition.sampleData.length > 20))).toBe(true);
     plotDefinitions.forEach((definition) => {
       const examples = getPlotExamples(definition);

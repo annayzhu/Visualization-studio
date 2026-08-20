@@ -3,7 +3,7 @@ export type PlotRendererId = "standard" | "advanced";
 export type PlotDataShape = "long" | "matrix" | "coordinates" | "sets" | "network" | "hierarchy" | "genomic-links" | "genomic-coordinates" | "alterations" | "motif-matrix";
 
 type PlotRoleLike = { key: string; label: string; kind: "category" | "number" | "label"; required: boolean };
-type PlotExampleLike = { label: string; description: string; data: string; metadata?: string; mapping?: Record<string, string> };
+type PlotExampleLike = { label: string; description: string; data: string; metadata?: string; mapping?: Record<string, string>; settings?: Record<string, unknown> };
 type PlotDefinitionLike<PlotId extends string> = {
   id: PlotId;
   name: string;

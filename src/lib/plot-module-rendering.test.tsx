@@ -15,6 +15,7 @@ import {
 const expectedAdvancedRenderers = new Set([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
+  "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score",
   "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos",
   "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
   "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
@@ -32,7 +33,8 @@ describe("registered plot-module examples", () => {
         const mappings = analysis || example.mapping === undefined ? [selectedMapping] : [selectedMapping, inferredMapping];
 
         for (const mapping of mappings) {
-          const validation = validatePlotDataset(plotModule.definition, dataset, mapping, defaultVisualizationSettings);
+          const settings = { ...defaultVisualizationSettings, ...example.settings } as typeof defaultVisualizationSettings;
+          const validation = validatePlotDataset(plotModule.definition, dataset, mapping, settings);
           expect(validation.errors, `${plotModule.definition.id} / ${example.label}`).toEqual([]);
 
           const markup = renderToStaticMarkup(
@@ -41,7 +43,7 @@ describe("registered plot-module examples", () => {
               type={plotModule.definition.id}
               dataset={dataset}
               mapping={mapping}
-              settings={defaultVisualizationSettings}
+              settings={settings}
               themeId={defaultVisualizationThemeId}
             />,
           );

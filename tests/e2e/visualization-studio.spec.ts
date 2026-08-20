@@ -947,4 +947,93 @@ test.describe("Visualization Studio browser acceptance", () => {
     }).length);
     expect(summaryCollisions).toBe(0);
   });
+
+  test("renders clinical evaluation modules with explicit assumptions and uncertainty", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop clinical-evaluation acceptance");
+    await page.goto("/");
+
+    const cases = [
+      { button: /^Funnel/, type: "Funnel", element: "funnel-study", minimum: 7 },
+      { button: /^Precision–recall/, type: "Precision–recall", element: "pr-curve", minimum: 2 },
+      { button: /^Calibration/, type: "Calibration", element: "calibration-series", minimum: 2 },
+      { button: /^Decision curve/, type: "Decision curve", element: "decision-curve", minimum: 2 },
+      { button: /^Nomogram/, type: "Nomogram", element: "nomogram-point", minimum: 8 },
+      { button: /^LASSO path/, type: "LASSO path", element: "lasso-path", minimum: 3 },
+      { button: /^Cutoff KM/, type: "Cutoff KM", element: "cutoff-km", minimum: 2 },
+      { button: /^Risk-score panel/, type: "Risk-score panel", element: "risk-subject", minimum: 10 },
+    ];
+    for (const entry of cases) {
+      await page.getByRole("button", { name: entry.button }).click();
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      const svg = page.locator(`svg[aria-label='${entry.type} scientific figure preview']`);
+      expect(await svg.locator(`[data-plot-element='${entry.element}']`).count()).toBeGreaterThanOrEqual(entry.minimum);
+      expect(await svg.innerHTML()).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+      const outside = await svg.evaluate((element) => { const canvas = element.getBoundingClientRect(); return [...element.querySelectorAll<SVGGraphicsElement>("text, [data-plot-element]")].filter((mark) => { const box = mark.getBoundingClientRect(); return box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1; }).length; });
+      expect(outside, entry.type).toBe(0);
+    }
+
+    await page.getByRole("button", { name: /^Cutoff KM/ }).click();
+    const cutoffKm = page.locator("svg[aria-label='Cutoff KM scientific figure preview']");
+    await expect(cutoffKm.locator("[data-step-curve='right-continuous']")).toHaveCount(2);
+    expect(await cutoffKm.locator("[data-step-curve='right-continuous']").first().getAttribute("d")).toMatch(/^M [\d.]+ [\d.]+(?: H [\d.]+ V [\d.]+)+$/);
+    expect(await cutoffKm.locator("[data-plot-element='cutoff-km-censor']").count()).toBeGreaterThan(0);
+    await expect(cutoffKm.locator("[data-plot-element='cutoff-km-censor'] title").first()).toContainText(/censored at time/);
+
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("sample\tscore\ttime\tevent\tcutoff\nL0\t0.1\t0\t0\t0.5\nL1\t0.2\t8\t0\t0.5\nL2\t0.3\t4\t1\t0.5\nH0\t0.7\t0\t0\t0.5\nH1\t0.8\t8\t0\t0.5\nH2\t0.9\t5\t1\t0.5");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const censorBounds = await cutoffKm.evaluate((element) => {
+      const svg = element as SVGSVGElement; const canvas = svg.getBoundingClientRect();
+      return [...svg.querySelectorAll<SVGGElement>("[data-plot-element='cutoff-km-censor']")].map((mark) => { const box = mark.getBoundingClientRect(); const horizontal = mark.querySelector<SVGLineElement>("line")!; return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, canvasLeft: canvas.left, canvasRight: canvas.right, canvasTop: canvas.top, canvasBottom: canvas.bottom, clip: getComputedStyle(horizontal).clipPath, anchorX: Number(mark.dataset.censorTimeX), lineCenterX: (Number(horizontal.getAttribute("x1")) + Number(horizontal.getAttribute("x2"))) / 2 }; });
+    });
+    expect(censorBounds.length).toBeGreaterThanOrEqual(4);
+    expect(censorBounds.every((box) => box.left >= box.canvasLeft - 0.5 && box.right <= box.canvasRight + 0.5 && box.top >= box.canvasTop - 0.5 && box.bottom <= box.canvasBottom + 0.5 && box.clip === "none" && Math.abs(box.anchorX - box.lineCenterX) < 1e-6), JSON.stringify(censorBounds)).toBe(true);
+
+    await page.getByRole("button", { name: /^Precision–recall/ }).click();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("sample\ttruth\tscore\tmodel\nS1\t1\t0.9\tExtremely long externally validated integrated clinical molecular model\nS2\t0\t0.2\tExtremely long externally validated integrated clinical molecular model\nS3\t1\t0.8\tSecond exceptionally long independent prediction model identity\nS4\t0\t0.1\tSecond exceptionally long independent prediction model identity");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const precisionRecall = page.locator("svg[aria-label='Precision–recall scientific figure preview']");
+    await expect(precisionRecall.locator("text[data-full-label]").first()).toContainText("…");
+    const escapedModelLabels = await precisionRecall.evaluate((element) => { const canvas = element.getBoundingClientRect(); return [...element.querySelectorAll<SVGTextElement>("text[data-full-label]")].filter((label) => { const box = label.getBoundingClientRect(); return box.left < canvas.left - 1 || box.right > canvas.right + 1; }).length; });
+    expect(escapedModelLabels).toBe(0);
+
+    await page.getByRole("button", { name: /^LASSO path/ }).click();
+    const lassoRows = ["lambda\tcoefficient\tfeature", ...Array.from({ length: 12 }, (_, feature) => [1, 0.1].map((lambda, point) => `${lambda}\t${(feature + 1) * (point + 1) / 20}\t宽字符临床分子特征名称 ${String(feature + 1).padStart(2, "0")} extraordinarily long suffix`).join("\n"))].join("\n");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(lassoRows);
+    const legendSize = page.getByRole("textbox", { name: "Legend size value" });
+    await legendSize.fill("16"); await legendSize.press("Enter");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const lasso = page.locator("svg[aria-label='LASSO path scientific figure preview']");
+    const lassoLayout = await lasso.evaluate((element) => { const canvas = element.getBoundingClientRect(); const labels = [...element.querySelectorAll<SVGTextElement>("text[data-full-label]")].map((label) => label.getBoundingClientRect()).sort((a, b) => a.top - b.top); return { collisions: labels.filter((label, index) => index > 0 && label.top < labels[index - 1].bottom - 0.5).length, escaped: labels.filter((label) => label.left < canvas.left - 0.5 || label.right > canvas.right + 0.5).length }; });
+    expect(lassoLayout).toEqual({ collisions: 0, escaped: 0 });
+
+    await page.getByRole("button", { name: /^Nomogram/ }).click();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("predictor\tlevel\tpoints\nStage\tNearly identical level alpha\t10\nStage\tNearly identical level beta\t10.1");
+    await expect(page.getByText(/overlap within predictor/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("predictor\tlevel\tpoints\nStage\tVery long zero-point boundary label\t0\nStage\tMiddle\t50\nBiomarker\tVery long maximum boundary label\t100\nBiomarker\tQuarter\t25");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const nomogram = page.locator("svg[aria-label='Nomogram scientific figure preview']");
+    const nomogramEscapes = await nomogram.evaluate((element) => { const svg = element as SVGSVGElement; const clip = svg.querySelector<SVGRectElement>("clipPath rect")!; const left = Number(clip.getAttribute("x")); const right = left + Number(clip.getAttribute("width")); return [...svg.querySelectorAll<SVGTextElement>("text[data-full-label]")].filter((label) => { if (["Stage", "Biomarker"].includes(label.dataset.fullLabel ?? "")) return false; const box = label.getBBox(); return box.x < left - 0.5 || box.x + box.width > right + 0.5; }).length; });
+    expect(nomogramEscapes).toBe(0);
+
+    await page.getByRole("button", { name: /^ROC/ }).click();
+    await page.getByRole("button", { name: /Example 2.*Time-dependent/ }).click();
+    await expect(page.getByRole("combobox", { name: "Input structure" })).toHaveValue("precomputed-time");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const roc = page.locator("svg[aria-label='ROC scientific figure preview']");
+    await expect(roc.locator("[data-plot-element='time-dependent-roc']")).toHaveCount(4);
+    await expect(roc.locator("[data-auc-interval]")).toHaveCount(4);
+    await expect(roc.locator("[data-auc-interval]").first()).toContainText(/AUC.*\[.*–.*\]/);
+
+    await page.getByRole("button", { name: /^Decision curve/ }).click();
+    await page.getByRole("textbox", { name: "Minimum threshold value" }).fill("0.01");
+    await page.getByRole("textbox", { name: "Minimum threshold value" }).press("Enter");
+    await page.getByRole("textbox", { name: "Grid resolution value" }).fill("0.01");
+    await page.getByRole("textbox", { name: "Grid resolution value" }).press("Enter");
+    const decisionSvg = page.locator("svg[aria-label='Decision curve scientific figure preview']");
+    await expect(decisionSvg.locator("[data-plot-element='decision-threshold-grid']")).toContainText("Grid 0.010–0.800 · Δ 0.010");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("truth\tscore\tmodel\n1\t1.2\tModel\n0\t0.2\tModel");
+    await expect(page.getByText(/Predicted probability contains 1 value outside \[0, 1\]/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+  });
 });

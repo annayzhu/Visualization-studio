@@ -5,6 +5,7 @@ import { ScientificGenomicPlot, isGenomicPlotType } from "@/components/Scientifi
 import { ScientificRelationshipPlot, isRelationshipPlotType } from "@/components/ScientificNetworkChartPreview";
 import { ScientificFlowCircularPlot } from "@/components/ScientificFlowCircularChartPreview";
 import { ScientificSetPlot } from "@/components/ScientificSetChartPreview";
+import { ScientificClinicalPlot, type ClinicalPlotType } from "@/components/ScientificClinicalChartPreview";
 import { genomicFrameMetrics } from "@/lib/visualization-genomics";
 import { networkFrameMetrics } from "@/lib/visualization-network";
 import {
@@ -78,7 +79,7 @@ function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   const heatmapType = ["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(type);
   const hasHeatmapAnnotationLegend = heatmapType && Boolean(settings.heatmapRowAnnotationData.trim() || settings.heatmapColumnAnnotationData.trim());
   const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset", "genome-tracks", "oncoplot"].includes(type);
-  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo"].includes(type);
+  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"].includes(type);
   const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
   if (heatmapType) return heatmapLayoutMetrics(settings, { hasAnnotationLegend: hasHeatmapAnnotationLegend, rowAnnotationTracks: 0, columnAnnotationTracks: 0, showRowCut: false, showColumnCut: false, showRowDendrogram: false, showColumnDendrogram: false, showSidePlot: false, rowCount: 1, columnCount: 1, maxColumnLabelCharacters: 0, maxCutClusters: 0 }).frame;
@@ -838,12 +839,40 @@ function ForestPlot({ frame, dataset, mapping, settings, colors, gridColor }: { 
 }
 
 function RocPlot({ frame, dataset, mapping, settings, colors, gridColor }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[]; gridColor: string }) {
-  const groups = [...new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "Model" : "Model"))];
-  const colorMap = palette(groups, colors);
   const xDomain = resolveAxisDomain([0, 1], settings.xMin, settings.xMax);
   const yDomain = resolveAxisDomain([0, 1], settings.yMin, settings.yMax);
   const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
   const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
+  if (settings.rocInputMode === "precomputed-time") {
+    const curveKeys = [...new Set(dataset.rows.map((row) => `${mapping.group ? row[mapping.group] || "Model" : "Model"}\u0000${parseNumericValue(row[mapping.horizon])}`))];
+    const curves = curveKeys.map((key, index) => {
+      const [group, horizon] = key.split("\u0000");
+      const rows = dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group && parseNumericValue(row[mapping.horizon]) === Number(horizon)).sort((a, b) => (parseNumericValue(a[mapping.fpr]) ?? 0) - (parseNumericValue(b[mapping.fpr]) ?? 0));
+      const first = rows[0];
+      return { key, group, horizon, color: categoricalColorForIndex(index, colors), rows, auc: parseNumericValue(first?.[mapping.auc]) ?? Number.NaN, aucLower: parseNumericValue(first?.[mapping.aucLower]) ?? Number.NaN, aucUpper: parseNumericValue(first?.[mapping.aucUpper]) ?? Number.NaN };
+    });
+    const compactProbability = (value: number) => value.toFixed(3).replace(/^0/, "");
+    const timeLegend = settings.legendPosition === "none" ? null : settings.legendPosition === "right"
+      ? <g data-plot-element="time-roc-legend" transform={`translate(${frame.left + frame.plotWidth + 18} ${frame.top + 5})`}>{curves.map((curve, index) => { const label = `${curve.group} · ${curve.horizon}`; return <g key={curve.key} transform={`translate(0 ${index * (settings.legendSize * 2 + 11)})`}><circle cx={4} cy={-4} r={4} fill={curve.color} /><text data-full-label={label} x={13} y={0} fill={TEXT} fontSize={settings.legendSize}><title>{label}</title>{compactLegendLabel(label, settings.legendSize, frame.width - (frame.left + frame.plotWidth + 35), 22)}</text><text data-auc-interval x={13} y={settings.legendSize + 4} fill={TEXT} fontSize={Math.max(8, settings.legendSize - 1)}>{`AUC ${compactProbability(curve.auc)} [${compactProbability(curve.aucLower)}–${compactProbability(curve.aucUpper)}]`}</text></g>; })}</g>
+      : <g data-plot-element="time-roc-legend" transform={`translate(${frame.left} ${frame.height - 68})`}>{curves.map((curve, index) => { const cellWidth = frame.plotWidth / 2; return <g key={curve.key} transform={`translate(${index % 2 * cellWidth} ${Math.floor(index / 2) * (settings.legendSize * 2 + 8)})`}><circle cx={4} cy={-4} r={4} fill={curve.color} /><text x={13} y={0} fill={TEXT} fontSize={settings.legendSize}>{compactLegendLabel(`${curve.group} · ${curve.horizon}`, settings.legendSize, cellWidth - 17, 18)}</text><text data-auc-interval x={13} y={settings.legendSize + 3} fill={TEXT} fontSize={Math.max(7, settings.legendSize - 2)}>{`AUC ${curve.auc.toFixed(2)} [${curve.aucLower.toFixed(2)}, ${curve.aucUpper.toFixed(2)}]`}</text></g>; })}</g>;
+    return <>
+      <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "1 − specificity"} yLabel={settings.yLabel || "Sensitivity"} gridColor={gridColor} />
+      <g data-plot-data>
+        <line x1={xAt(0)} x2={xAt(1)} y1={yAt(0)} y2={yAt(1)} stroke="#9B9DA3" strokeDasharray="5 4" />
+        {curves.map((curve) => {
+          const upper = curve.rows.map((row) => `${xAt(parseNumericValue(row[mapping.fpr]) ?? 0)},${yAt(parseNumericValue(row[mapping.tprUpper]) ?? 0)}`);
+          const lower = [...curve.rows].reverse().map((row) => `${xAt(parseNumericValue(row[mapping.fpr]) ?? 0)},${yAt(parseNumericValue(row[mapping.tprLower]) ?? 0)}`);
+          return <g key={curve.key} data-plot-element="time-dependent-roc" data-model={curve.group} data-horizon={curve.horizon}>
+            <polygon points={[...upper, ...lower].join(" ")} fill={curve.color} fillOpacity={0.13} stroke="none"><title>Pointwise 95% confidence band supplied upstream</title></polygon>
+            <polyline points={curve.rows.map((row) => `${xAt(parseNumericValue(row[mapping.fpr]) ?? 0)},${yAt(parseNumericValue(row[mapping.tpr]) ?? 0)}`).join(" ")} fill="none" stroke={curve.color} strokeWidth={settings.dataLineWidth} />
+          </g>;
+        })}
+      </g>
+      {timeLegend}
+    </>;
+  }
+  const groups = [...new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "Model" : "Model"))];
+  const colorMap = palette(groups, colors);
   const curves = groups.map((group) => ({ group, ...rocCurve(dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group).map((row) => ({ truth: (parseNumericValue(row[mapping.truth]) === 1 ? 1 : 0) as 0 | 1, score: parseNumericValue(row[mapping.score]) ?? 0 }))) }));
   return <>
     <Axes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={settings.xLabel || "1 − specificity"} yLabel={settings.yLabel || "Sensitivity"} gridColor={gridColor} />
@@ -1036,6 +1065,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "km") content = <KmPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "survival-forest") content = <ForestPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "roc") content = <RocPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (["funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"].includes(type)) content = <ScientificClinicalPlot type={type as ClinicalPlotType} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "venn" || type === "upset") content = <ScientificSetPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "alluvial") content = <ScientificFlowCircularPlot type="alluvial" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;

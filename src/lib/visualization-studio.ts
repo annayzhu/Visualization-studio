@@ -38,6 +38,11 @@ import {
   parseCircosTrackRecords,
   parseLigandReceptorRecords,
 } from "./visualization-flow-circular";
+import {
+  analyzeSetIntersections,
+  setDiagramLayoutMetrics,
+  upsetAdaptiveLayout,
+} from "./visualization-sets";
 
 export type PlotType =
   | "bar"
@@ -343,6 +348,10 @@ export type VisualizationSettings = {
   networkShowIsolates: boolean;
   networkEdgeOpacity: number;
   treeOrientation: "vertical" | "horizontal";
+  setInputMode: "auto" | "membership" | "peak-overlap";
+  vennLayout: "auto" | "classic" | "radial";
+  vennProportional: boolean;
+  upsetMaxIntersections: number;
   correlationMethod: "pearson" | "spearman";
   xThreshold: number;
   yThreshold: number;
@@ -472,6 +481,10 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   networkShowIsolates: true,
   networkEdgeOpacity: 0.62,
   treeOrientation: "vertical",
+  setInputMode: "auto",
+  vennLayout: "auto",
+  vennProportional: false,
+  upsetMaxIntersections: 10,
   correlationMethod: "pearson",
   xThreshold: 0,
   yThreshold: 0,
@@ -1281,6 +1294,19 @@ AKT1\tProteomics
 TP53\tCRISPR
 AKT1\tCRISPR
 KRAS\tCRISPR`,
+  setPeaks: `peak_id\tset\tchromosome\tstart\tend
+RNA_1\tRNA-seq\tchr1\t100\t180
+RNA_2\tRNA-seq\tchr1\t260\t330
+RNA_3\tRNA-seq\tchr2\t500\t570
+ATAC_1\tATAC-seq\tchr1\t140\t220
+ATAC_2\tATAC-seq\tchr1\t300\t380
+ATAC_3\tATAC-seq\tchr2\t700\t760
+H3K27ac_1\tH3K27ac\tchr1\t160\t205
+H3K27ac_2\tH3K27ac\tchr2\t530\t610
+H3K27ac_3\tH3K27ac\tchr2\t720\t790
+TF_1\tTF ChIP-seq\tchr1\t175\t240
+TF_2\tTF ChIP-seq\tchr2\t540\t590
+TF_3\tTF ChIP-seq\tchr3\t80\t140`,
   network: `source\ttarget\tvalue\tgroup
 Tumor\tT cell\t18\tImmune
 Tumor\tMacrophage\t12\tImmune
@@ -1898,14 +1924,21 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id,
     name: id === "venn" ? "Venn" : "UpSet",
     family: "Set relationships",
-    summary: id === "venn" ? "Two- or three-set overlap with exact region counts." : "Scalable set intersections with membership matrix and ranked intersection sizes.",
-    inputHint: id === "venn" ? "Long format item/set membership. Venn is restricted to 2–3 unique sets." : "Long format item/set membership; duplicate memberships are collapsed.",
+    summary: id === "venn" ? "Exact two-to-seven-set intersections using classic circles or a compact radial exact-intersection layout." : "Adaptive ranked exact intersections with a membership matrix, set-size summaries, and downloadable members.",
+    inputHint: "Use item–set membership rows, or genomic peak intervals (set, chromosome, start, end). Duplicate rows collapse; peak counts are disjoint atomic genomic segments with constant active-set membership.",
     roles: [
-      { key: "item", label: "Item", kind: "label" as const, required: true },
+      { key: "item", label: "Item / peak ID", kind: "label" as const, required: false },
       { key: "set", label: "Set", kind: "category" as const, required: true },
+      { key: "chromosome", label: "Chromosome (peak input)", kind: "category" as const, required: false },
+      { key: "start", label: "Start (peak input)", kind: "number" as const, required: false },
+      { key: "end", label: "End (peak input)", kind: "number" as const, required: false },
     ],
-    defaultMapping: { item: "item", set: "set" },
+    defaultMapping: { item: "item", set: "set", chromosome: "", start: "", end: "" },
     sampleData: samples.sets,
+    examples: [
+      { label: "Example 1 · Membership", description: "Long-form item–set membership; repeated item–set rows are deduplicated before exact combinations are counted.", data: samples.sets, mapping: { item: "item", set: "set", chromosome: "", start: "", end: "" } },
+      { label: "Example 2 · Peak overlap", description: "Half-open genomic intervals split into disjoint chromosome-specific segments wherever the active set membership changes.", data: samples.setPeaks, mapping: { item: "peak_id", set: "set", chromosome: "chromosome", start: "start", end: "end" } },
+    ],
   })),
   ...(["sankey", "chord"] as const).map((id) => ({
     id,
@@ -2494,16 +2527,16 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     references: [plotReferences.roc],
   },
   venn: {
-    definition: "用重叠闭合区域表示集合及其交集；区域位置表达集合逻辑，但面积通常不严格按成员数成比例。",
-    suitableData: "2–3 个集合的成员关系，如基因、蛋白、峰、样本或候选条目列表。",
-    answers: "少量集合之间独有和共享成员各有多少。",
-    origin: "John Venn 在 1880 年为形式逻辑系统化这类集合关系图；现代生物学后来把它用于少量基因或候选集合比较。",
-    references: [plotReferences.venn],
+    definition: "用经典圆形（2–3 集合）或径向精确交集索引（4–7 集合）表示观察到的集合组合；径向模式不是闭合曲线 Venn 图。",
+    suitableData: "2–7 个集合的 item–set 成员长表，或带 set、chromosome、start、end 的 genomic peak 区间。",
+    answers: "少量集合之间独有和共享成员各有多少；size-weighted 模式只是视觉提示，不是面积拟合，仍应以区域数字作为精确计数。",
+    origin: "John Venn 在 1880 年系统化集合关系图；当集合多于三个时，本工具改用可辨认的径向精确交集索引，不把它冒充为经典 Venn 闭合曲线。",
+    references: [plotReferences.venn, plotReferences.upset],
   },
   upset: {
     definition: "用点阵列明确标出参与某个交集的集合，再用柱长显示该精确交集的大小。",
-    suitableData: "三个及以上集合的成员关系，尤其适合交集组合较多的情况。",
-    answers: "哪些集合组合构成主要交集，各交集和单集合规模分别多大。",
+    suitableData: "两个及以上集合的 item–set 成员关系或 genomic peak 区间，尤其适合交集组合较多的情况。",
+    answers: "哪些精确集合组合构成主要交集，各交集和单集合规模分别多大，并可下载所选交集的明确成员清单。",
     origin: "Lex 等人在 2014 年提出 UpSet，目标是把难以扩展到许多集合的 Venn 图转换为可排序、可查询的矩阵视图。",
     references: [plotReferences.upset],
   },
@@ -2760,6 +2793,8 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   chord: ["showLabels"],
   "ligand-receptor": ["showLabels"],
   circos: ["showLabels", "genomicTrackGap", "continuousLow", "continuousHigh"],
+  venn: ["setInputMode", "vennLayout", "vennProportional"],
+  upset: ["setInputMode", "upsetMaxIntersections"],
   network: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
   ppi: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
   cerna: ["showLabels", "networkLayout", "networkSeed", "networkShowIsolates", "networkEdgeOpacity"],
@@ -2771,6 +2806,8 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
 };
 
 const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof VisualizationSettings>>> = {
+  venn: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "dataLineWidth", "opacity", "categoricalColors", "setInputMode", "vennLayout", "vennProportional"]),
+  upset: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "opacity", "categoricalColors", "setInputMode", "upsetMaxIntersections"]),
   sankey: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
   alluvial: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
   chord: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
@@ -2841,6 +2878,10 @@ export function isPlotRoleActive(type: PlotType, roleKey: string, settings: Visu
   if (["pca", "pcoa", "umap", "tsne", "nmds"].includes(type)) {
     if (settings.ordinationView === "scree") return false;
     if (roleKey === "z") return settings.ordinationView === "3d";
+  }
+  if (type === "venn" || type === "upset") {
+    if (roleKey === "item") return settings.setInputMode !== "peak-overlap";
+    if (["chromosome", "start", "end"].includes(roleKey)) return settings.setInputMode !== "membership";
   }
   if (type !== "bar") return true;
   if (roleKey === "secondary") return ["dual-axis", "overlay"].includes(settings.barVariant);
@@ -3979,9 +4020,42 @@ export function validatePlotDataset(
     if (invalidIntervals > 0) errors.push(`${invalidIntervals} confidence interval${invalidIntervals === 1 ? " is" : "s are"} not ordered lower ≤ estimate ≤ upper.`);
   }
 
-  if (definition.id === "venn" && mapping.set) {
-    const setCount = new Set(dataset.rows.map((row) => row[mapping.set]).filter(Boolean)).size;
-    if (setCount < 2 || setCount > 3) errors.push(`Venn diagrams require 2–3 unique sets; detected ${setCount}. Use UpSet for more sets.`);
+  if ((definition.id === "venn" || definition.id === "upset") && mapping.set) {
+    const requestedMode = settings?.setInputMode ?? "auto";
+    const analysis = analyzeSetIntersections(dataset.rows, mapping, requestedMode);
+    if (analysis.safetyError) errors.push(analysis.safetyError);
+    if (analysis.mode === "membership" && !mapping.item) errors.push("Item ID must be mapped for item–set membership input.");
+    if (analysis.mode === "peak-overlap") {
+      const missingIntervalRoles = ["chromosome", "start", "end"].filter((role) => !mapping[role]);
+      if (missingIntervalRoles.length > 0) errors.push(`Peak-overlap input requires chromosome, start, and end mappings; missing ${missingIntervalRoles.join(", ")}.`);
+      if (!analysis.safetyError && analysis.invalidRows.length === 0) warnings.push("Peak overlaps use half-open intervals [start, end). Counts refer to disjoint atomic genomic segments over which the active set combination is constant; they are segment counts, not base-pair totals or original peak counts.");
+    }
+    if (analysis.invalidRows.length > 0) errors.push(`${analysis.invalidRows.length} set row${analysis.invalidRows.length === 1 ? " is" : "s are"} incomplete or invalid (rows ${analysis.invalidRows.slice(0, 8).join(", ")}${analysis.invalidRows.length > 8 ? ", …" : ""}).`);
+    if (!analysis.safetyError && analysis.memberships.size < 1) errors.push("No valid set members or atomic genomic segments were detected.");
+    if (analysis.duplicatesCollapsed > 0) warnings.push(`${analysis.duplicatesCollapsed} duplicate record${analysis.duplicatesCollapsed === 1 ? " was" : "s were"} collapsed before exact intersections were counted.`);
+    const setCount = analysis.sets.length;
+    if (definition.id === "venn") {
+      if (setCount < 2 || setCount > 7) errors.push(`Venn/radial intersection diagrams require 2–7 unique sets; detected ${setCount}. Use UpSet for larger collections.`);
+      const requestedLayout = settings?.vennLayout ?? "auto";
+      if (requestedLayout === "classic" && setCount > 3) errors.push("Classic circle Venn layout supports 2–3 sets; choose Auto or Radial exact intersections for 4–7 sets.");
+      const useRadial = requestedLayout === "radial" || (requestedLayout === "auto" && setCount > 3);
+      if (useRadial && settings) {
+        const layout = setDiagramLayoutMetrics(settings.width, settings.height, analysis, settings.tickSize, settings.vennProportional);
+        if (!layout.fits) errors.push(`The ${analysis.intersections.length} observed exact regions need at least ${layout.minimumLabelArc.toFixed(1)} px each, but the smallest radial region has ${layout.minimumArc.toFixed(1)} px; increase figure size, turn off size weighting, filter the data, or use UpSet.`);
+      }
+      if (settings?.vennProportional) warnings.push("Size weighting is a visual cue, not an area-proportional Venn fit; printed numbers remain the authoritative exact-intersection counts.");
+    } else {
+      if (setCount < 2 || setCount > 20) errors.push(`UpSet supports 2–20 sets in the compact studio; detected ${setCount}.`);
+      if (settings) {
+        const left = Math.min(178, settings.width * 0.32);
+        const top = settings.title ? 48 : 24;
+        const plotWidth = Math.max(100, settings.width - left - 22);
+        const plotHeight = Math.max(90, settings.height - top - 58);
+        const visibleIntersections = Math.max(1, Math.min(settings.upsetMaxIntersections, analysis.intersections.length, Math.floor(plotWidth / 24)));
+        const layout = upsetAdaptiveLayout(top, plotHeight, setCount, visibleIntersections, plotWidth, settings.tickSize);
+        if (!layout.fits) errors.push(`The UpSet matrix cannot keep ${setCount} set rows and ${visibleIntersections} intersections legible at ${settings.width} × ${settings.height} px; increase the figure size, reduce sets, or show fewer intersections.`);
+      }
+    }
   }
 
   const explicitNetworkTypes: NetworkPlotType[] = ["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map"];

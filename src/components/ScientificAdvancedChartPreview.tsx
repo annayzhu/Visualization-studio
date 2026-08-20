@@ -4,10 +4,10 @@ import type { ReactNode, RefObject } from "react";
 import { ScientificGenomicPlot, isGenomicPlotType } from "@/components/ScientificGenomicChartPreview";
 import { ScientificRelationshipPlot, isRelationshipPlotType } from "@/components/ScientificNetworkChartPreview";
 import { ScientificFlowCircularPlot } from "@/components/ScientificFlowCircularChartPreview";
+import { ScientificSetPlot } from "@/components/ScientificSetChartPreview";
 import { genomicFrameMetrics } from "@/lib/visualization-genomics";
 import { networkFrameMetrics } from "@/lib/visualization-network";
 import {
-  buildSetMemberships,
   correlation,
   correlationPValue,
   correlationMatrix,
@@ -16,8 +16,6 @@ import {
   kaplanMeier,
   matrixFromRows,
   rocCurve,
-  upsetVerticalLayout,
-  vennRegionLayout,
   type HierarchicalClusterNode,
 } from "@/lib/visualization-advanced";
 import {
@@ -857,35 +855,6 @@ function RocPlot({ frame, dataset, mapping, settings, colors, gridColor }: { fra
   </>;
 }
 
-function VennPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
-  const membership = buildSetMemberships(dataset.rows, mapping.item, mapping.set);
-  const sets = membership.sets;
-  const centers = sets.length === 2 ? [[frame.left + frame.plotWidth * 0.43, frame.top + frame.plotHeight * 0.52], [frame.left + frame.plotWidth * 0.57, frame.top + frame.plotHeight * 0.52]] : [[frame.left + frame.plotWidth * 0.43, frame.top + frame.plotHeight * 0.43], [frame.left + frame.plotWidth * 0.57, frame.top + frame.plotHeight * 0.43], [frame.left + frame.plotWidth * 0.5, frame.top + frame.plotHeight * 0.59]];
-  const radius = Math.min(frame.plotWidth, frame.plotHeight) * 0.27;
-  const layout = vennRegionLayout(centers as Array<[number, number]>, radius);
-  const exact = (wanted: string[]) => [...membership.memberships.values()].filter((itemSets) => itemSets.size === wanted.length && wanted.every((set) => itemSets.has(set))).length;
-  return <g>
-    {sets.map((set, index) => <g key={set}><circle cx={centers[index][0]} cy={centers[index][1]} r={radius} fill={colors[index % colors.length]} fillOpacity={settings.opacity * 0.3} stroke={colors[index % colors.length]} strokeWidth={settings.dataLineWidth} /><text x={layout.setLabels[index][0]} y={layout.setLabels[index][1]} textAnchor="middle" fill={TEXT} fontSize={settings.legendSize} fontWeight={700}>{set}</text></g>)}
-    {sets.map((set, index) => <text key={`only-${set}`} x={layout.only[index][0]} y={layout.only[index][1]} textAnchor="middle" fill={TEXT} fontSize={settings.axisLabelSize} fontWeight={700}>{exact([set])}</text>)}
-    {sets.length >= 2 ? <text x={layout.pairs[0][0]} y={layout.pairs[0][1]} textAnchor="middle" fill={TEXT} fontSize={settings.axisLabelSize} fontWeight={700}>{exact([sets[0], sets[1]])}</text> : null}
-    {sets.length === 3 && layout.triple ? <><text x={layout.pairs[1][0]} y={layout.pairs[1][1]} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize} fontWeight={700}>{exact([sets[0], sets[2]])}</text><text x={layout.pairs[2][0]} y={layout.pairs[2][1]} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize} fontWeight={700}>{exact([sets[1], sets[2]])}</text><text x={layout.triple[0]} y={layout.triple[1]} textAnchor="middle" fill={TEXT} fontSize={settings.axisLabelSize} fontWeight={700}>{exact(sets)}</text></> : null}
-  </g>;
-}
-
-function UpSetPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
-  const membership = buildSetMemberships(dataset.rows, mapping.item, mapping.set);
-  const intersections = membership.intersections.slice(0, Math.min(10, Math.floor(frame.plotWidth / 38)));
-  const max = Math.max(...intersections.map((entry) => entry.size), 1);
-  const layout = upsetVerticalLayout(frame.top, frame.plotHeight, membership.sets.length);
-  const band = frame.plotWidth / Math.max(1, intersections.length);
-  return <g>
-    <line x1={frame.left} x2={frame.left + frame.plotWidth} y1={layout.baseline} y2={layout.baseline} stroke={TEXT} strokeWidth={settings.axisLineWidth} />
-    {intersections.map((entry, index) => { const height = entry.size / max * layout.barHeight; const x = frame.left + band * (index + 0.5); return <g key={entry.sets.join("|")}><rect x={x - band * 0.28} y={layout.baseline - height} width={band * 0.56} height={height} fill={colors[0]} fillOpacity={settings.opacity} /><text x={x} y={layout.baseline - height - 7} textAnchor="middle" fill={TEXT} fontSize={settings.tickSize}>{entry.size}</text>{membership.sets.map((set, setIndex) => <circle key={set} cx={x} cy={layout.matrixTop + setIndex * layout.rowGap} r={4.5} fill={entry.sets.includes(set) ? colors[1] ?? colors[0] : "#D5D6D8"} />)}{entry.sets.length > 1 ? <line x1={x} x2={x} y1={layout.matrixTop + Math.min(...entry.sets.map((set) => membership.sets.indexOf(set))) * layout.rowGap} y2={layout.matrixTop + Math.max(...entry.sets.map((set) => membership.sets.indexOf(set))) * layout.rowGap} stroke={colors[1] ?? colors[0]} strokeWidth={2} /> : null}</g>; })}
-    {membership.sets.map((set, index) => <text key={set} x={frame.left - 8} y={layout.matrixTop + index * layout.rowGap + settings.tickSize * 0.34} textAnchor="end" fill={TEXT} fontSize={settings.tickSize}>{set.slice(0, 16)}</text>)}
-    <text x={frame.left} y={frame.top + settings.axisLabelSize} fill={TEXT} fontSize={settings.axisLabelSize} fontWeight={700}>Intersection size</text>
-  </g>;
-}
-
 function SankeyPlot({ frame, dataset, mapping, settings, colors }: { frame: Frame; dataset: ParsedDataset; mapping: Record<string, string>; settings: VisualizationSettings; colors: string[] }) {
   return <ScientificFlowCircularPlot type="sankey" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
 }
@@ -1067,8 +1036,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "km") content = <KmPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "survival-forest") content = <ForestPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "roc") content = <RocPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
-  else if (type === "venn") content = <VennPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
-  else if (type === "upset") content = <UpSetPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
+  else if (type === "venn" || type === "upset") content = <ScientificSetPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "alluvial") content = <ScientificFlowCircularPlot type="alluvial" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "chord") content = <ChordPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;

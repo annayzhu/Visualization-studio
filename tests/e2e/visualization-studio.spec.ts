@@ -793,7 +793,7 @@ test.describe("Visualization Studio browser acceptance", () => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop flow and circular acceptance");
     await page.goto("/");
 
-    await page.getByRole("button", { name: /^Sankey/ }).click();
+    await page.getByRole("button", { name: "Sankey Flow" }).click();
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const sankey = page.locator("svg[aria-label='Sankey scientific figure preview']");
     expect(await sankey.locator("[data-plot-element='flow-ribbon']").count()).toBeGreaterThan(3);
@@ -1035,5 +1035,155 @@ test.describe("Visualization Studio browser acceptance", () => {
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("truth\tscore\tmodel\n1\t1.2\tModel\n0\t0.2\tModel");
     await expect(page.getByText(/Predicted probability contains 1 value outside \[0, 1\]/)).toBeVisible();
     await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+  });
+
+  test("renders enrichment and specialized scientific views with explicit quantitative limits", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop enrichment-specialized acceptance");
+    await page.goto("/");
+    const cases = [
+      { button: /^GO circle/, type: "GO circle", element: "enrichment-circle-term", minimum: 8 },
+      { button: /^KEGG circle/, type: "KEGG circle", element: "enrichment-circle-term", minimum: 6 },
+      { button: /^GO chord/, type: "GO chord", element: "go-chord-link", minimum: 10 },
+      { button: /^Pathway impact/, type: "Pathway impact", element: "pathway-impact", minimum: 6 },
+      { button: /^NES \/ FDR summary/, type: "NES / FDR summary", element: "nes-fdr", minimum: 7 },
+      { button: /^Multi-GSEA/, type: "Multi-GSEA", element: "multi-gsea-series", minimum: 3 },
+      { button: /^Enrichment ridge/, type: "Enrichment ridge", element: "enrichment-ridge", minimum: 5 },
+      { button: /^Relationship ribbon–bubble/, type: "Relationship ribbon–bubble", element: "sankey-bubble-term", minimum: 7 },
+      { button: /^Geographic point map/, type: "Geographic point map", element: "geographic-site", minimum: 8 },
+      { button: /^Petal/, type: "Petal", element: "petal", minimum: 8 },
+      { button: /^Word cloud/, type: "Word cloud", element: "word-cloud-term", minimum: 12 },
+    ];
+    for (const entry of cases) {
+      await page.getByRole("button", { name: entry.button }).click();
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      const svg = page.locator(`svg[aria-label='${entry.type} scientific figure preview']`);
+      expect(await svg.locator(`[data-plot-element='${entry.element}']`).count(), entry.type).toBeGreaterThanOrEqual(entry.minimum);
+      expect(await svg.innerHTML()).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
+      const escaped = await svg.evaluate((element) => { const canvas = element.getBoundingClientRect(); return [...element.querySelectorAll<SVGGraphicsElement>("text, [data-plot-element]")].filter((mark) => { const box = mark.getBoundingClientRect(); return box.width > 0 && box.height > 0 && (box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1); }).length; });
+      expect(escaped, entry.type).toBe(0);
+      await expect(page.getByRole("button", { name: "SVG" })).toBeEnabled();
+    }
+    await page.getByRole("button", { name: /^Multi-GSEA/ }).click();
+    const gsea = page.locator("svg[aria-label='Multi-GSEA scientific figure preview']");
+    expect(await gsea.locator("[data-plot-element='multi-gsea-hit']").count()).toBeGreaterThanOrEqual(27);
+    await expect(gsea.locator("text[data-full-label]").first()).toContainText(/NES.*FDR/);
+    for (const footerCase of [{ name: /^Multi-GSEA/, type: "Multi-GSEA" }, { name: /^Enrichment ridge/, type: "Enrichment ridge" }]) {
+      await page.getByRole("button", { name: footerCase.name }).click();
+      await page.getByRole("textbox", { name: "Tick size value", exact: true }).fill("16");
+      await page.getByRole("textbox", { name: "Tick size value", exact: true }).press("Enter");
+      if (footerCase.type === "Multi-GSEA") {
+        await page.getByRole("textbox", { name: "Legend size value", exact: true }).fill("16");
+        await page.getByRole("textbox", { name: "Legend size value", exact: true }).press("Enter");
+      }
+      await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+      const footerDoesNotOverlap = await page.locator(`svg[aria-label='${footerCase.type} scientific figure preview']`).evaluate((element) => {
+        const note = element.querySelector<SVGGraphicsElement>("[data-plot-element='method-note']");
+        const xLabel = element.querySelector<SVGGraphicsElement>("[data-specialized-x-label]");
+        if (!note || !xLabel) return false;
+        const noteBox = note.getBBox(); const labelBox = xLabel.getBBox();
+        return noteBox.y + noteBox.height + 2 <= labelBox.y;
+      });
+      expect(footerDoesNotOverlap).toBe(true);
+    }
+
+    await page.getByRole("button", { name: /^GO circle/ }).click();
+    await expect(page.getByLabel("1 · BP")).toBeVisible();
+    await expect(page.getByLabel("2 · CC")).toBeVisible();
+    await expect(page.getByLabel("3 · MF")).toBeVisible();
+    await expect(page.getByLabel("Sequential low")).toBeVisible();
+    await expect(page.locator("[data-plot-element='enrichment-group-sector']")).toHaveCount(3);
+    await expect(page.locator("[data-plot-element='fdr-scale']")).toBeVisible();
+    const fdrOutsidePlot = await page.locator("svg[aria-label='GO circle scientific figure preview']").evaluate((element) => {
+      const clip = element.querySelector<SVGRectElement>("clipPath rect"); const legend = element.querySelector<SVGGraphicsElement>("[data-plot-element='fdr-scale']");
+      if (!clip || !legend) return false;
+      const plotBottom = Number(clip.getAttribute("y")) + Number(clip.getAttribute("height"));
+      return legend.getBBox().y >= plotBottom + 1;
+    });
+    expect(fdrOutsidePlot).toBe(true);
+    const circleFooterSafe = await page.locator("svg[aria-label='GO circle scientific figure preview']").evaluate((element) => {
+      const selectors = ["[data-plot-element='enrichment-group-legend']", "[data-plot-element='fdr-scale']", "[data-plot-element='size-scale']", "[data-plot-element='method-note']"];
+      const boxes = selectors.map((selector) => element.querySelector<SVGGraphicsElement>(selector)?.getBBox()).filter((box): box is DOMRect => Boolean(box));
+      const canvas = (element as SVGSVGElement).viewBox.baseVal;
+      const inside = boxes.every((box) => box.x >= -0.5 && box.y >= -0.5 && box.x + box.width <= canvas.width + 0.5 && box.y + box.height <= canvas.height + 0.5);
+      const separate = boxes.every((box, index) => boxes.slice(index + 1).every((other) => box.x + box.width <= other.x + 0.5 || other.x + other.width <= box.x + 0.5 || box.y + box.height <= other.y + 0.5 || other.y + other.height <= box.y + 0.5));
+      return boxes.length === selectors.length && inside && separate;
+    });
+    expect(circleFooterSafe).toBe(true);
+
+    await page.getByRole("button", { name: /^Pathway impact/ }).click();
+    await page.getByRole("textbox", { name: "Point size value", exact: true }).fill("12");
+    await page.getByRole("textbox", { name: "Point size value", exact: true }).press("Enter");
+    await page.getByRole("textbox", { name: "Tick size value", exact: true }).fill("16");
+    await page.getByRole("textbox", { name: "Tick size value", exact: true }).press("Enter");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const pathwayFooterSafe = await page.locator("svg[aria-label='Pathway impact scientific figure preview']").evaluate((element) => {
+      const size = element.querySelector<SVGGraphicsElement>("[data-plot-element='size-scale']")?.getBBox();
+      const fdr = element.querySelector<SVGGraphicsElement>("[data-plot-element='fdr-scale']")?.getBBox();
+      const clip = element.querySelector<SVGRectElement>("clipPath rect");
+      if (!size || !fdr || !clip) return false;
+      const plotBottom = Number(clip.getAttribute("y")) + Number(clip.getAttribute("height"));
+      const boxes = [...element.querySelectorAll<SVGGraphicsElement>("text")].map((text) => ({ text: text.textContent, box: text.getBBox() })).filter(({ box }) => box.y >= plotBottom - 0.5 && box.width > 0 && box.height > 0);
+      const textsSeparate = boxes.every(({ box }, index) => boxes.slice(index + 1).every(({ box: other }) => box.x + box.width <= other.x + 0.5 || other.x + other.width <= box.x + 0.5 || box.y + box.height <= other.y + 0.5 || other.y + other.height <= box.y + 0.5));
+      const scalesSeparate = size.x + size.width <= fdr.x - 1 || fdr.x + fdr.width <= size.x - 1 || size.y + size.height <= fdr.y - 1 || fdr.y + fdr.height <= size.y - 1;
+      return textsSeparate && scalesSeparate && Boolean(element.querySelector("[data-plot-element='category-footer-legend']"));
+    });
+    expect(pathwayFooterSafe).toBe(true);
+
+    await page.getByRole("button", { name: /^GO chord/ }).click();
+    const chordFooterSafe = await page.locator("svg[aria-label='GO chord scientific figure preview']").evaluate((element) => {
+      const selectors = ["[data-plot-element='go-chord-effect-legend']", "[data-plot-element='category-footer-legend']", "[data-plot-element='method-note']"];
+      const boxes = selectors.map((selector) => element.querySelector<SVGGraphicsElement>(selector)?.getBBox()).filter((box): box is DOMRect => Boolean(box));
+      return boxes.length === selectors.length && boxes.every((box, index) => boxes.slice(index + 1).every((other) => box.x + box.width <= other.x + 0.5 || other.x + other.width <= box.x + 0.5 || box.y + box.height <= other.y + 0.5 || other.y + other.height <= box.y + 0.5));
+    });
+    expect(chordFooterSafe).toBe(true);
+
+    await page.getByRole("button", { name: /^Geographic point map/ }).click();
+    await page.getByRole("textbox", { name: "Tick size value", exact: true }).fill("11");
+    await page.getByRole("textbox", { name: "Tick size value", exact: true }).press("Enter");
+    await page.getByRole("checkbox", { name: "Labels" }).check({ force: true });
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("site\tlatitude\tlongitude\tvalue\tgroup\nNorthEastEdge\t90\t180\t10\tA\nSouthWestEdge\t-90\t-180\t8\tB\nNorthWestEdge\t90\t-180\t6\tA\nSouthEastEdge\t-90\t180\t4\tB");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const map = page.locator("svg[aria-label='Geographic point map scientific figure preview']");
+    const mapBoundsSafe = await map.evaluate((element) => {
+      const plot = element.querySelector<SVGRectElement>("[data-plot-family='geographic-map'] > rect");
+      if (!plot) return false;
+      const left = Number(plot.getAttribute("x")); const top = Number(plot.getAttribute("y"));
+      const right = left + Number(plot.getAttribute("width")); const bottom = top + Number(plot.getAttribute("height"));
+      const marksSafe = [...element.querySelectorAll<SVGCircleElement>("[data-plot-element='geographic-site'] circle")].every((circle) => {
+        const cx = Number(circle.getAttribute("cx")); const cy = Number(circle.getAttribute("cy")); const radius = Number(circle.getAttribute("r"));
+        return cx - radius >= left && cx + radius <= right && cy - radius >= top && cy + radius <= bottom;
+      });
+      const labelsSafe = [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element='geographic-site'] text")].every((label) => { const box = label.getBBox(); return box.x >= left - 0.5 && box.x + box.width <= right + 0.5 && box.y >= top - 0.5 && box.y + box.height <= bottom + 0.5; });
+      return marksSafe && labelsSafe;
+    });
+    expect(mapBoundsSafe).toBe(true);
+    const mapFooterSafe = await map.evaluate((element) => {
+      const selectors = ["[data-plot-element='category-footer-legend']", "[data-plot-element='size-scale']", "[data-plot-element='method-note']"];
+      const boxes = selectors.map((selector) => element.querySelector<SVGGraphicsElement>(selector)?.getBBox()).filter((box): box is DOMRect => Boolean(box));
+      const canvas = (element as SVGSVGElement).viewBox.baseVal;
+      const inside = boxes.every((box) => box.x >= -0.5 && box.y >= -0.5 && box.x + box.width <= canvas.width + 0.5 && box.y + box.height <= canvas.height + 0.5);
+      const separate = boxes.every((box, index) => boxes.slice(index + 1).every((other) => box.x + box.width <= other.x + 0.5 || other.x + other.width <= box.x + 0.5 || box.y + box.height <= other.y + 0.5 || other.y + other.height <= box.y + 0.5));
+      return boxes.length === selectors.length && inside && separate;
+    });
+    expect(mapFooterSafe).toBe(true);
+
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("site\tlatitude\tlongitude\tvalue\tgroup\nSite one\t30\t120\t10\tA\nSite two\t30\t120\t9\tB\nSite three\t30\t120\t8\tA\nSite four\t30\t120\t7\tB\nSite five\t30\t120\t6\tA");
+    await expect(page.getByText(/overlapping point pair/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+    const manyGroups = Array.from({ length: 13 }, (_, index) => `Site${index}\t${-60 + index * 10}\t${-150 + index * 24}\t${index + 1}\tGroup${index}`).join("\n");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`site\tlatitude\tlongitude\tvalue\tgroup\n${manyGroups}`);
+    await expect(page.getByText(/group legend needs .* footer rows/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
+
+    await page.getByRole("button", { name: /^Petal/ }).click();
+    await page.getByRole("checkbox", { name: "Labels" }).check({ force: true });
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("category\tvalue\nA very long category on the right\t8\nA long category at the bottom\t7\nA very long category on the left\t6\nA long category at the top\t5");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const petalLabelsInside = await page.locator("svg[aria-label='Petal scientific figure preview']").evaluate((element) => {
+      const clip = element.querySelector<SVGRectElement>("clipPath rect"); if (!clip) return false;
+      const left = Number(clip.getAttribute("x")); const top = Number(clip.getAttribute("y")); const right = left + Number(clip.getAttribute("width")); const bottom = top + Number(clip.getAttribute("height"));
+      return [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element='petal'] text")].every((label) => { const box = label.getBBox(); return box.x >= left - 0.5 && box.x + box.width <= right + 0.5 && box.y >= top - 0.5 && box.y + box.height <= bottom + 0.5; });
+    });
+    expect(petalLabelsInside).toBe(true);
   });
 });

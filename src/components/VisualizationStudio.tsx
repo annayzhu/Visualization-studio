@@ -249,6 +249,15 @@ function categoricalColorLabels(plotType: PlotType, rows: Array<Record<string, s
   }
   if (plotType === "radar" || plotType === "polar-profile") return uniqueColumnValues(rows, mapping.series, "All");
   if (plotType === "population-pyramid") return uniqueColumnValues(rows, mapping.group, "Group");
+  if (plotType === "go-circle" || plotType === "kegg-circle") return uniqueColumnValues(rows, mapping.group, plotType === "go-circle" ? "GO" : "KEGG");
+  if (plotType === "go-chord") return ["Positive effect", "Negative effect", ...uniqueColumnValues(rows, mapping.group, "Ontology")];
+  if (plotType === "pathway-impact") return uniqueColumnValues(rows, mapping.group, "Pathway group");
+  if (plotType === "multi-gsea") return uniqueColumnValues(rows, mapping.group, "Gene set");
+  if (plotType === "enrichment-ridge") return uniqueColumnValues(rows, mapping.term, "Term");
+  if (plotType === "sankey-bubble") return uniqueColumnValues(rows, mapping.source, "Source");
+  if (plotType === "geographic-map") return uniqueColumnValues(rows, mapping.group, "Sites");
+  if (plotType === "petal") return uniqueColumnValues(rows, mapping.label, "Category");
+  if (plotType === "word-cloud") return uniqueColumnValues(rows, mapping.label, "Term");
   return [];
 }
 
@@ -1043,6 +1052,7 @@ export function VisualizationStudio() {
               {(plotType === "line" || (plotType === "pca" && settings.ordinationView === "scores") || ((plotType === "scatter" || plotType === "correlation") && !["pair-matrix", "3d", "ternary"].includes(settings.associationVariant)) || (plotType === "bar" && !["horizontal", "bullet", "pyramid", "dual-axis", "overlay", "polar", "faceted"].includes(settings.barVariant))) ? <ToggleControl label="Swap axes" checked={settings.swapAxes} onChange={(value) => updateSetting("swapAxes", value)} /> : null}
               {(plotType === "scatter" || plotType === "correlation") && ["points", "marginal", "ellipse", "hull"].includes(settings.associationVariant) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
               {(["pca", "pcoa", "umap", "tsne", "nmds", "quadrant"] as PlotType[]).includes(plotType) ? <ToggleControl label="Point labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
+              {(["go-circle", "kegg-circle", "go-chord", "pathway-impact", "sankey-bubble", "geographic-map", "petal"] as PlotType[]).includes(plotType) ? <ToggleControl label="Labels" checked={settings.showLabels} onChange={(value) => updateSetting("showLabels", value)} /> : null}
             </ControlGroup> : null}
 
             {(plotType === "venn" || plotType === "upset") ? <ControlGroup title="Set intersections">
@@ -1205,7 +1215,7 @@ export function VisualizationStudio() {
 
               <ControlGroup title="Editable colors">
                 {categoryLabels.map((label, index) => <ColorControl key={`${label}-${index}`} label={`${index + 1} · ${label}`} value={settings.categoricalColors[index] ?? journalThemes[themeId].categorical[index % journalThemes[themeId].categorical.length]} onChange={(value) => updateCategoryColor(index, value)} />)}
-                {plotType === "enrichment" || plotType === "enrichment-bar" || ((plotType === "heatmap" || plotType === "clustered-heatmap") && settings.heatmapScale === "none" && settings.heatmapColorMode === "sequential") ? <><ColorControl label="Sequential low" value={settings.continuousLow} onChange={(value) => updateSetting("continuousLow", value)} /><ColorControl label="Sequential high" value={settings.continuousHigh} onChange={(value) => updateSetting("continuousHigh", value)} /></> : null}
+                {(["enrichment", "enrichment-bar", "go-circle", "kegg-circle", "pathway-impact", "nes-fdr"] as PlotType[]).includes(plotType) || ((plotType === "heatmap" || plotType === "clustered-heatmap") && settings.heatmapScale === "none" && settings.heatmapColorMode === "sequential") ? <><ColorControl label="Sequential low" value={settings.continuousLow} onChange={(value) => updateSetting("continuousLow", value)} /><ColorControl label="Sequential high" value={settings.continuousHigh} onChange={(value) => updateSetting("continuousHigh", value)} /></> : null}
                 {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) && (plotType === "correlation-heatmap" || settings.heatmapScale !== "none" || settings.heatmapColorMode === "diverging") ? <><ColorControl label="Diverging low" value={settings.divergingLow} onChange={(value) => updateSetting("divergingLow", value)} /><ColorControl label="Midpoint" value={settings.divergingMid} onChange={(value) => updateSetting("divergingMid", value)} /><ColorControl label="Diverging high" value={settings.divergingHigh} onChange={(value) => updateSetting("divergingHigh", value)} /></> : null}
               </ControlGroup>
             </CardBody>

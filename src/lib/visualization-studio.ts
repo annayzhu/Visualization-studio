@@ -73,6 +73,17 @@ export type PlotType =
   | "enrichment"
   | "enrichment-bar"
   | "gsea"
+  | "go-circle"
+  | "kegg-circle"
+  | "go-chord"
+  | "pathway-impact"
+  | "nes-fdr"
+  | "multi-gsea"
+  | "enrichment-ridge"
+  | "sankey-bubble"
+  | "geographic-map"
+  | "petal"
+  | "word-cloud"
   | "km"
   | "survival-forest"
   | "roc"
@@ -623,6 +634,219 @@ export function estimateLegendTextWidth(label: string, fontSize: number) {
   return em * Math.max(1, fontSize);
 }
 
+export type EnrichmentSpecializedLayoutInput = {
+  rowCount: number;
+  groupCount?: number;
+  termCount?: number;
+  geneCount?: number;
+  maximumGroupLabelWidth?: number;
+};
+
+export function enrichmentSpecializedFrameMetrics(type: PlotType, settings: VisualizationSettings) {
+  const noAxes = ["go-circle", "kegg-circle", "go-chord", "sankey-bubble", "geographic-map", "petal", "word-cloud"].includes(type);
+  const left = noAxes ? 14 : 66;
+  const top = settings.title ? 48 : 24;
+  const right = 22;
+  const bottom = ["go-circle", "kegg-circle"].includes(type) ? 110
+    : ["geographic-map"].includes(type) ? 90
+      : ["pathway-impact"].includes(type) ? 145
+        : ["go-chord", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble"].includes(type) ? 82
+        : 58;
+  return {
+    width: settings.width,
+    height: settings.height,
+    left,
+    right,
+    top,
+    bottom,
+    plotWidth: Math.max(100, settings.width - left - right),
+    plotHeight: Math.max(90, settings.height - top - bottom),
+  };
+}
+
+export type GeographicLayoutRow = { label: string; latitude: number; longitude: number; value: number };
+
+export const enrichmentCircleRadius = (value: number, maximum: number) => 5 + Math.sqrt(Math.max(0, value) / Math.max(maximum, Number.EPSILON)) * 11;
+export const pathwayImpactRadius = (value: number, maximum: number, pointSize: number) => 4 + Math.sqrt(Math.max(0, value) / Math.max(maximum, Number.EPSILON)) * pointSize;
+export const geographicPointRadius = (value: number, maximum: number, pointSize: number) => 3 + Math.sqrt(Math.max(0, value) / Math.max(maximum, Number.EPSILON)) * pointSize;
+export const relationshipRibbonWidth = (ratio: number) => 1 + Math.max(0, ratio) * 12;
+export const relationshipBubbleRadius = (value: number, maximum: number) => 4 + Math.sqrt(Math.max(0, value) / Math.max(maximum, Number.EPSILON)) * 10;
+
+export function categoryFooterLayoutMetrics(type: PlotType, settings: VisualizationSettings, labels: string[], offset = 16) {
+  const frame = enrichmentSpecializedFrameMetrics(type, settings);
+  const perRow = Math.max(2, Math.min(4, Math.floor(frame.plotWidth / 70)));
+  const rows = Math.max(1, Math.ceil(labels.length / perRow));
+  const cellWidth = frame.plotWidth / perRow;
+  const fontSize = Math.max(7, settings.tickSize - 2);
+  const labelsFit = labels.every((label) => estimateLegendTextWidth(compactLegendLabel(label, fontSize, cellWidth - 13, 14), fontSize) <= cellWidth - 13 + 0.5);
+  const lastLegendBaseline = offset + (rows - 1) * 14;
+  const sizeOffset = offset + rows * 14 + 4;
+  const noteOffset = sizeOffset + 24;
+  const bottomFits = noteOffset + fontSize * 0.25 <= frame.bottom - 1;
+  return { frame, perRow, rows, cellWidth, fontSize, labelsFit, lastLegendBaseline, sizeOffset, noteOffset, bottomFits, offset };
+}
+
+export function geographicPointLayout(settings: VisualizationSettings, rows: GeographicLayoutRow[]) {
+  const frame = enrichmentSpecializedFrameMetrics("geographic-map", settings);
+  const maximumValue = Math.max(...rows.map((row) => row.value), 1);
+  const maximumRadius = geographicPointRadius(maximumValue, maximumValue, settings.pointSize);
+  const inset = maximumRadius + 1.5;
+  const xAt = (longitude: number) => scaleLinear(longitude, [-180, 180], [frame.left + inset, frame.left + frame.plotWidth - inset]);
+  const yAt = (latitude: number) => scaleLinear(latitude, [-90, 90], [frame.top + frame.plotHeight - inset, frame.top + inset]);
+  const marks = rows.map((row) => ({ ...row, x: xAt(row.longitude), y: yAt(row.latitude), radius: geographicPointRadius(row.value, maximumValue, settings.pointSize) }));
+  let markCollisionPairs = 0;
+  marks.forEach((mark, index) => marks.slice(index + 1).forEach((other) => { if (Math.hypot(mark.x - other.x, mark.y - other.y) < mark.radius + other.radius + 1) markCollisionPairs += 1; }));
+  const placedBoxes: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+  let labelCollisionCount = 0;
+  const items = marks.map((mark, index) => {
+    const maximumWidth = Math.max(20, frame.plotWidth * 0.25);
+    const text = compactLegendLabel(mark.label, settings.tickSize, maximumWidth, 16);
+    const width = estimateLegendTextWidth(text, settings.tickSize);
+    const height = settings.tickSize * 1.05;
+    const sideY = Math.max(frame.top + 1 + height * 0.82, Math.min(frame.top + frame.plotHeight - 1 - height * 0.18, mark.y - 4));
+    const candidates = [
+      { x: mark.x + mark.radius + 5, y: sideY, anchor: "start" as const, left: mark.x + mark.radius + 5, right: mark.x + mark.radius + 5 + width, top: sideY - height * 0.82, bottom: sideY + height * 0.18 },
+      { x: mark.x - mark.radius - 5, y: sideY, anchor: "end" as const, left: mark.x - mark.radius - 5 - width, right: mark.x - mark.radius - 5, top: sideY - height * 0.82, bottom: sideY + height * 0.18 },
+      { x: mark.x, y: mark.y - mark.radius - 5, anchor: "middle" as const, left: mark.x - width / 2, right: mark.x + width / 2, top: mark.y - mark.radius - 5 - height * 0.82, bottom: mark.y - mark.radius - 5 + height * 0.18 },
+      { x: mark.x, y: mark.y + mark.radius + settings.tickSize, anchor: "middle" as const, left: mark.x - width / 2, right: mark.x + width / 2, top: mark.y + mark.radius + settings.tickSize - height * 0.82, bottom: mark.y + mark.radius + settings.tickSize + height * 0.18 },
+    ];
+    const fits = (candidate: typeof candidates[number]) => candidate.left >= frame.left + 1 && candidate.right <= frame.left + frame.plotWidth - 1 && candidate.top >= frame.top + 1 && candidate.bottom <= frame.top + frame.plotHeight - 1;
+    const overlapsBox = (candidate: typeof candidates[number], box: typeof placedBoxes[number]) => candidate.left < box.right + 2 && candidate.right > box.left - 2 && candidate.top < box.bottom + 2 && candidate.bottom > box.top - 2;
+    const overlapsMark = (candidate: typeof candidates[number], other: typeof marks[number]) => {
+      if (other === mark) return false;
+      const nearestX = Math.max(candidate.left, Math.min(other.x, candidate.right));
+      const nearestY = Math.max(candidate.top, Math.min(other.y, candidate.bottom));
+      return Math.hypot(nearestX - other.x, nearestY - other.y) < other.radius + 1;
+    };
+    const chosen = candidates.find((candidate) => fits(candidate) && !placedBoxes.some((box) => overlapsBox(candidate, box)) && !marks.some((other) => overlapsMark(candidate, other)));
+    if (!chosen && settings.showLabels) labelCollisionCount += 1;
+    const fallback = chosen ?? candidates.find(fits) ?? candidates[0];
+    if (settings.showLabels) placedBoxes.push({ left: fallback.left, right: fallback.right, top: fallback.top, bottom: fallback.bottom });
+    return { ...mark, index, text, labelX: fallback.x, labelY: fallback.y, textAnchor: fallback.anchor, labelBox: fallback };
+  });
+  return { frame, items, markCollisionPairs, labelCollisionCount, inset, xAt, yAt };
+}
+
+export type PathwayImpactLayoutRow = { term: string; impact: number; fdr: number; count: number };
+
+/** Shared mark and label geometry keeps validation and the exported pathway-impact SVG in sync. */
+export function pathwayImpactLayout(settings: VisualizationSettings, rows: PathwayImpactLayoutRow[]) {
+  const frame = enrichmentSpecializedFrameMetrics("pathway-impact", settings);
+  const significance = rows.map((row) => -Math.log10(row.fdr));
+  const paddedDomain = (values: number[]): [number, number] => {
+    const extent = numericExtent([...values, 0], true);
+    const domain: [number, number] = extent[0] === extent[1] ? [extent[0] - 1, extent[1] + 1] : extent;
+    const padding = Math.max((domain[1] - domain[0]) * 0.08, Number.EPSILON);
+    return [domain[0] - padding, domain[1] + padding];
+  };
+  const xDomain = paddedDomain(rows.map((row) => row.impact));
+  const yDomain = paddedDomain(significance);
+  const significanceDomain = numericExtent([...significance, 0], true);
+  const maximumCount = Math.max(...rows.map((row) => row.count), 1);
+  const xAt = (value: number) => scaleLinear(value, xDomain, [frame.left, frame.left + frame.plotWidth]);
+  const yAt = (value: number) => scaleLinear(value, yDomain, [frame.top + frame.plotHeight, frame.top]);
+  const marks = rows.map((row) => ({ ...row, x: xAt(row.impact), y: yAt(-Math.log10(row.fdr)), radius: pathwayImpactRadius(row.count, maximumCount, settings.pointSize) }));
+  let markCollisionPairs = 0;
+  marks.forEach((mark, index) => marks.slice(index + 1).forEach((other) => {
+    if (Math.hypot(mark.x - other.x, mark.y - other.y) < mark.radius + other.radius + 1) markCollisionPairs += 1;
+  }));
+  const placedBoxes: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+  let labelCollisionCount = 0;
+  const items = marks.map((mark, index) => {
+    const maximumWidth = Math.max(24, frame.plotWidth * 0.32);
+    const text = compactLegendLabel(mark.term, settings.tickSize, maximumWidth, 18);
+    const width = estimateLegendTextWidth(text, settings.tickSize);
+    const height = settings.tickSize * 1.05;
+    const sideY = Math.max(frame.top + 1 + height * 0.82, Math.min(frame.top + frame.plotHeight - 1 - height * 0.18, mark.y - 4));
+    const candidates = [
+      { x: mark.x + mark.radius + 5, y: sideY, anchor: "start" as const, left: mark.x + mark.radius + 5, right: mark.x + mark.radius + 5 + width, top: sideY - height * 0.82, bottom: sideY + height * 0.18 },
+      { x: mark.x - mark.radius - 5, y: sideY, anchor: "end" as const, left: mark.x - mark.radius - 5 - width, right: mark.x - mark.radius - 5, top: sideY - height * 0.82, bottom: sideY + height * 0.18 },
+      { x: mark.x, y: mark.y - mark.radius - 5, anchor: "middle" as const, left: mark.x - width / 2, right: mark.x + width / 2, top: mark.y - mark.radius - 5 - height * 0.82, bottom: mark.y - mark.radius - 5 + height * 0.18 },
+      { x: mark.x, y: mark.y + mark.radius + settings.tickSize, anchor: "middle" as const, left: mark.x - width / 2, right: mark.x + width / 2, top: mark.y + mark.radius + settings.tickSize - height * 0.82, bottom: mark.y + mark.radius + settings.tickSize + height * 0.18 },
+    ];
+    const fits = (candidate: typeof candidates[number]) => candidate.left >= frame.left + 1 && candidate.right <= frame.left + frame.plotWidth - 1 && candidate.top >= frame.top + 1 && candidate.bottom <= frame.top + frame.plotHeight - 1;
+    const overlapsBox = (candidate: typeof candidates[number], box: typeof placedBoxes[number]) => candidate.left < box.right + 2 && candidate.right > box.left - 2 && candidate.top < box.bottom + 2 && candidate.bottom > box.top - 2;
+    const overlapsMark = (candidate: typeof candidates[number], other: typeof marks[number]) => {
+      if (other === mark) return false;
+      const nearestX = Math.max(candidate.left, Math.min(other.x, candidate.right));
+      const nearestY = Math.max(candidate.top, Math.min(other.y, candidate.bottom));
+      return Math.hypot(nearestX - other.x, nearestY - other.y) < other.radius + 1;
+    };
+    const chosen = candidates.find((candidate) => fits(candidate) && !placedBoxes.some((box) => overlapsBox(candidate, box)) && !marks.some((other) => overlapsMark(candidate, other)));
+    if (!chosen && settings.showLabels) labelCollisionCount += 1;
+    const fallback = chosen ?? candidates.find(fits) ?? candidates[0];
+    if (settings.showLabels) placedBoxes.push({ left: fallback.left, right: fallback.right, top: fallback.top, bottom: fallback.bottom });
+    return { ...mark, index, text, labelX: fallback.x, labelY: fallback.y, textAnchor: fallback.anchor, labelBox: fallback };
+  });
+  return { frame, xDomain, yDomain, significanceDomain, items, markCollisionPairs, labelCollisionCount };
+}
+
+export function petalLabelLayout(settings: VisualizationSettings, labels: string[]) {
+  const frame = enrichmentSpecializedFrameMetrics("petal", settings);
+  const cx = frame.left + frame.plotWidth / 2;
+  const cy = frame.top + frame.plotHeight / 2;
+  const maxRadius = Math.min(frame.plotWidth, frame.plotHeight) * 0.36;
+  return labels.map((label, index) => {
+    const angle = -Math.PI / 2 + index * Math.PI * 2 / labels.length;
+    const preferredX = cx + Math.cos(angle) * (maxRadius + 8);
+    const y = Math.max(frame.top + settings.tickSize, Math.min(frame.top + frame.plotHeight - 2, cy + Math.sin(angle) * (maxRadius + 8) + 3));
+    const direction = Math.cos(angle);
+    const anchor = direction < -0.2 ? "end" as const : direction > 0.2 ? "start" as const : "middle" as const;
+    const available = anchor === "start" ? frame.left + frame.plotWidth - preferredX - 2 : anchor === "end" ? preferredX - frame.left - 2 : 2 * Math.min(preferredX - frame.left - 2, frame.left + frame.plotWidth - preferredX - 2);
+    const text = compactLegendLabel(label, settings.tickSize, Math.max(8, available), 12);
+    return { angle, x: preferredX, y, textAnchor: anchor, text };
+  });
+}
+
+export function enrichmentSpecializedLayoutMetrics(type: PlotType, settings: VisualizationSettings, input: EnrichmentSpecializedLayoutInput) {
+  const frame = enrichmentSpecializedFrameMetrics(type, settings);
+  const rows = Math.max(1, input.rowCount);
+  const groups = Math.max(1, input.groupCount ?? 1);
+  const terms = Math.max(1, input.termCount ?? rows);
+  const genes = Math.max(1, input.geneCount ?? rows);
+  const radius = Math.min(frame.plotWidth, frame.plotHeight) * 0.38;
+  const circleOrbit = Math.min(frame.plotWidth, frame.plotHeight) * 0.32;
+  const circleSpacing = 2 * Math.PI * circleOrbit / rows;
+  const circleMinimum = settings.showLabels ? Math.max(34, settings.tickSize * 4.2) : 34;
+  const groupCellWidth = frame.plotWidth / groups;
+  const groupLegendMinimum = Math.max(42, Math.min(92, (input.maximumGroupLabelWidth ?? 0) + 15));
+  const termArcSpacing = Math.PI * 0.9 * radius / terms;
+  const geneArcSpacing = Math.PI * 0.9 * radius / genes;
+  const chordMinimum = settings.showLabels ? Math.max(10, settings.tickSize + 3) : 10;
+  const rowSpacing = frame.plotHeight / rows;
+  const nesMinimum = Math.max(settings.tickSize + 3, settings.pointSize * 1.4 + 3);
+  const ridgeMinimum = settings.tickSize + 6;
+  const sankeyMinimum = Math.max(30, settings.showLabels ? settings.tickSize + 4 : 0);
+  const gseaLabelFont = Math.max(8, settings.legendSize - 1);
+  const gseaLabelBlock = groups * (gseaLabelFont + 3);
+  const petalArcSpacing = 2 * Math.PI * Math.min(frame.plotWidth, frame.plotHeight) * 0.36 / rows;
+  const petalMinimum = settings.showLabels ? settings.tickSize * 3.6 : 9;
+  const cloudColumns = Math.max(2, Math.ceil(Math.sqrt(rows)));
+  const cloudRows = Math.ceil(rows / cloudColumns);
+  const cloudCellWidth = frame.plotWidth / cloudColumns;
+  const cloudCellHeight = frame.plotHeight / cloudRows;
+  return {
+    frame,
+    circleSpacing,
+    circleMinimum,
+    groupCellWidth,
+    groupLegendMinimum,
+    termArcSpacing,
+    geneArcSpacing,
+    chordMinimum,
+    rowSpacing,
+    nesMinimum,
+    ridgeMinimum,
+    sankeyMinimum,
+    gseaLabelBlock,
+    gseaLabelCapacity: frame.plotHeight * 0.42,
+    petalArcSpacing,
+    petalMinimum,
+    cloudCellWidth,
+    cloudCellHeight,
+  };
+}
+
 /** Character-aware conservative truncation keeps Arial legend text inside its assigned cell. */
 export function compactLegendLabel(label: string, fontSize: number, availablePixels: number, maximumCharacters: number) {
   const maximum = Math.max(1, maximumCharacters);
@@ -1121,6 +1345,33 @@ function buildAlterationExample() {
   return `sample\tgene\talteration\n${rows.join("\n")}`;
 }
 
+function buildMultiGseaExample() {
+  const sets = [
+    { name: "Interferon response", nes: 2.18, fdr: 0.004, phase: 0.15, hits: new Set([2, 4, 7, 9, 13, 18, 24, 31, 42, 54]) },
+    { name: "Oxidative phosphorylation", nes: -1.74, fdr: 0.018, phase: 1.35, hits: new Set([8, 16, 27, 38, 45, 50, 55, 58]) },
+    { name: "DNA repair", nes: 1.52, fdr: 0.041, phase: 2.45, hits: new Set([3, 11, 15, 22, 29, 33, 41, 49, 57]) },
+  ];
+  const background = 18_000;
+  const rows = sets.flatMap((set, setIndex) => Array.from({ length: 61 }, (_, rankIndex) => {
+    const rank = rankIndex * (background / 60);
+    const position = rank / background;
+    const direction = set.nes < 0 ? -1 : 1;
+    const envelope = Math.sin(position * Math.PI);
+    const score = direction * envelope * (0.42 + 0.08 * Math.sin(position * Math.PI * 3 + set.phase)) * (1 - setIndex * .09);
+    return `${rank}\t${score.toFixed(4)}\t${set.hits.has(rankIndex) ? 1 : 0}\t${set.name}\t${set.nes}\t${set.fdr}\t${background}`;
+  }));
+  return `rank\trunningES\thit\tset\tNES\tFDR\tbackground\n${rows.join("\n")}`;
+}
+
+function buildEnrichmentRidgeExample() {
+  const terms = ["Interferon response", "DNA repair", "Cell cycle", "Apoptosis", "Metabolism"];
+  const rows = terms.flatMap((term, termIndex) => Array.from({ length: 16 }, (_, index) => {
+    const score = -2.4 + index * .32 + Math.sin((index + 1) * (termIndex + 2) * .41) * .38 + (2 - termIndex) * .22;
+    return `${term}\tGene_${termIndex + 1}_${String(index + 1).padStart(2, "0")}\t${score.toFixed(3)}\t${(0.004 + termIndex * .008).toFixed(3)}\t${(0.18 + termIndex * .025).toFixed(3)}\t18000`;
+  }));
+  return `term\tgene\tscore\tFDR\tgeneRatio\tbackground\n${rows.join("\n")}`;
+}
+
 const samples = {
   bar: `category\tvalue\tsd\tsem\tgroup
 Control\t4.2\t0.45\t0.20\tControl
@@ -1258,20 +1509,105 @@ EPCAM\t-1.1\t0.021
 MUC1\t0.9\t0.084
 SOX2\t2.1\t0.0014`,
   heatmap: buildHeatmapExample(),
-  enrichment: `term\tgeneRatio\tcount\tpadj\tgroup
-Cell cycle\t0.36\t18\t0.0003\tBP
-DNA repair\t0.30\t15\t0.0012\tBP
-Apoptosis\t0.24\t12\t0.0041\tBP
-PI3K-AKT signaling\t0.32\t16\t0.0008\tKEGG
-p53 signaling\t0.22\t11\t0.0063\tKEGG
-Focal adhesion\t0.18\t9\t0.018\tKEGG`,
-  enrichmentFraction: `term\tgeneRatio\tcount\tpadj\tgroup
-Cell cycle\t18/50\t18\t0.0003\tBP
-DNA repair\t15/50\t15\t0.0012\tBP
-Apoptosis\t12/50\t12\t0.0041\tBP
-PI3K-AKT signaling\t16/50\t16\t0.0008\tKEGG
-p53 signaling\t11/50\t11\t0.0063\tKEGG
-Focal adhesion\t9/50\t9\t0.018\tKEGG`,
+  enrichment: `term\tgeneRatio\tcount\tpadj\tgroup\tbackground
+Cell cycle\t0.36\t18\t0.0003\tBP\t18000
+DNA repair\t0.30\t15\t0.0012\tBP\t18000
+Mitochondrial matrix\t0.24\t12\t0.0031\tCC\t18000
+DNA binding\t0.28\t14\t0.0026\tMF\t18000
+PI3K-AKT signaling\t0.32\t16\t0.0008\tKEGG\t18000
+p53 signaling\t0.22\t11\t0.0063\tKEGG\t18000
+Focal adhesion\t0.18\t9\t0.018\tKEGG\t18000`,
+  enrichmentFraction: `term\tgeneRatio\tcount\tpadj\tgroup\tbackground
+Cell cycle\t18/50\t18\t0.0003\tBP\t18000
+DNA repair\t15/50\t15\t0.0012\tBP\t18000
+Mitochondrial matrix\t12/50\t12\t0.0031\tCC\t18000
+DNA binding\t14/50\t14\t0.0026\tMF\t18000
+PI3K-AKT signaling\t16/50\t16\t0.0008\tKEGG\t18000
+p53 signaling\t11/50\t11\t0.0063\tKEGG\t18000
+Focal adhesion\t9/50\t9\t0.018\tKEGG\t18000`,
+  goCircle: `term\tgeneRatio\tcount\tFDR\tontology\tbackground
+Cell cycle\t0.36\t18\t0.0003\tBP\t18000
+DNA repair\t0.30\t15\t0.0012\tBP\t18000
+Mitochondrial matrix\t0.24\t12\t0.0031\tCC\t18000
+Chromosome region\t0.20\t10\t0.0074\tCC\t18000
+ATPase activity\t0.18\t9\t0.0092\tMF\t18000
+DNA binding\t0.28\t14\t0.0026\tMF\t18000
+Apoptotic process\t0.22\t11\t0.011\tBP\t18000
+Nuclear envelope\t0.16\t8\t0.024\tCC\t18000`,
+  keggCircle: `term\tgeneRatio\tcount\tFDR\tpathway_group\tbackground
+PI3K-AKT signaling\t0.32\t16\t0.0008\tSignaling\t18000
+p53 signaling\t0.22\t11\t0.0063\tSignaling\t18000
+Focal adhesion\t0.18\t9\t0.018\tCellular process\t18000
+Cell cycle\t0.30\t15\t0.0016\tCellular process\t18000
+Oxidative phosphorylation\t0.24\t12\t0.0049\tMetabolism\t18000
+Glutathione metabolism\t0.16\t8\t0.027\tMetabolism\t18000`,
+  goChord: `term\tgene\teffect\tgeneRatio\tcount\tFDR\tontology\tbackground
+Cell cycle\tCDK1\t1.8\t0.36\t18\t0.0003\tBP\t18000
+Cell cycle\tCCNB1\t1.5\t0.36\t18\t0.0003\tBP\t18000
+Cell cycle\tMKI67\t1.2\t0.36\t18\t0.0003\tBP\t18000
+DNA repair\tBRCA1\t1.1\t0.30\t15\t0.0012\tBP\t18000
+DNA repair\tRAD51\t1.4\t0.30\t15\t0.0012\tBP\t18000
+DNA repair\tTP53\t-1.3\t0.30\t15\t0.0012\tBP\t18000
+Apoptotic process\tTP53\t-1.3\t0.22\t11\t0.011\tBP\t18000
+Apoptotic process\tBAX\t1.0\t0.22\t11\t0.011\tBP\t18000
+ATPase activity\tATP5F1A\t0.9\t0.18\t9\t0.0092\tMF\t18000
+ATPase activity\tABCB1\t1.6\t0.18\t9\t0.0092\tMF\t18000`,
+  pathwayImpact: `term\timpact\tcount\tgeneRatio\tFDR\tgroup\tbackground
+PI3K-AKT signaling\t0.62\t16\t0.32\t0.0008\tSignaling\t18000
+p53 signaling\t0.54\t11\t0.22\t0.0063\tSignaling\t18000
+Cell cycle\t0.48\t15\t0.30\t0.0016\tCellular process\t18000
+Focal adhesion\t0.29\t9\t0.18\t0.018\tCellular process\t18000
+Oxidative phosphorylation\t0.38\t12\t0.24\t0.0049\tMetabolism\t18000
+Glutathione metabolism\t0.17\t8\t0.16\t0.027\tMetabolism\t18000`,
+  nesFdr: `term\tNES\tFDR\tgroup\tgeneRatio\tbackground
+Interferon response\t2.18\t0.004\tHallmark\t0.28\t18000
+DNA repair\t1.52\t0.041\tGO BP\t0.22\t18000
+Cell cycle\t1.86\t0.009\tKEGG\t0.30\t18000
+Apoptosis\t1.21\t0.083\tHallmark\t0.18\t18000
+Oxidative phosphorylation\t-1.74\t0.018\tKEGG\t0.24\t18000
+Fatty acid metabolism\t-1.43\t0.036\tHallmark\t0.20\t18000
+Ribosome biogenesis\t-1.12\t0.097\tGO BP\t0.16\t18000`,
+  multiGsea: buildMultiGseaExample(),
+  enrichmentRidge: buildEnrichmentRidgeExample(),
+  sankeyBubble: `source\tterm\tgeneRatio\tcount\tFDR\tbackground
+BP\tCell cycle\t0.36\t18\t0.0003\t18000
+BP\tDNA repair\t0.30\t15\t0.0012\t18000
+BP\tApoptosis\t0.22\t11\t0.011\t18000
+CC\tMitochondrial matrix\t0.24\t12\t0.0031\t18000
+CC\tChromosome region\t0.20\t10\t0.0074\t18000
+MF\tATPase activity\t0.18\t9\t0.0092\t18000
+MF\tDNA binding\t0.28\t14\t0.0026\t18000`,
+  geographicMap: `site\tlatitude\tlongitude\tvalue\tgroup
+Shanghai\t31.23\t121.47\t42\tEast Asia
+London\t51.51\t-0.13\t28\tEurope
+New York\t40.71\t-74.01\t35\tNorth America
+Sao Paulo\t-23.55\t-46.63\t19\tSouth America
+Cape Town\t-33.92\t18.42\t16\tAfrica
+Sydney\t-33.87\t151.21\t21\tOceania
+Cairo\t30.04\t31.24\t31\tMiddle East
+Delhi\t28.61\t77.21\t26\tSouth Asia`,
+  petal: `category\tvalue
+Sensitivity\t0.88
+Specificity\t0.81
+Calibration\t0.74
+Reproducibility\t0.79
+Coverage\t0.68
+Robustness\t0.83
+Interpretability\t0.71
+Feasibility\t0.76`,
+  wordCloud: `term\tweight
+Immunity\t96
+Metabolism\t82
+Cell cycle\t74
+DNA repair\t69
+Inflammation\t63
+Apoptosis\t58
+Migration\t52
+Angiogenesis\t46
+Hypoxia\t41
+Signaling\t37
+Chromatin\t32
+Translation\t28`,
   ma: `gene\tmeanExpression\tlog2FC\tpadj
 TP53\t240.5\t-2.8\t0.0002
 EGFR\t1580.2\t2.4\t0.0008
@@ -1774,15 +2110,16 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     name: "Enrichment dot",
     family: "Enrichment",
     summary: "Term, ratio, count, and FDR encoded independently and legibly.",
-    inputHint: "One row per term. Ratios may be decimals or fractions such as 8/40.",
+    inputHint: "One row per precomputed term with tested background, ratio, count, and FDR. Ratios may be decimals or fractions such as 8/40; this module does not run enrichment.",
     roles: [
       { key: "term", label: "Term", kind: "label", required: true },
       { key: "ratio", label: "Gene ratio", kind: "number", required: true },
       { key: "count", label: "Gene count", kind: "number", required: true },
       { key: "pValue", label: "Adjusted P value", kind: "number", required: true },
       { key: "group", label: "Ontology / group", kind: "category", required: false },
+      { key: "background", label: "Tested background size", kind: "number", required: true },
     ],
-    defaultMapping: { term: "term", ratio: "geneRatio", count: "count", pValue: "padj", group: "group" },
+    defaultMapping: { term: "term", ratio: "geneRatio", count: "count", pValue: "padj", group: "group", background: "background" },
     sampleData: samples.enrichment,
     examples: [
       { label: "Example 1", description: "Gene ratio supplied as decimals.", data: samples.enrichment },
@@ -1938,14 +2275,15 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     name: "Enrichment bar",
     family: "Enrichment",
     summary: "Ranked pathway bars with FDR encoded by a continuous color scale.",
-    inputHint: "One row per term; ratios may be decimals or fractions such as 8/40.",
+    inputHint: "One row per precomputed term with tested background, ratio, and FDR; ratios may be decimals or fractions such as 8/40. This module does not run enrichment.",
     roles: [
       { key: "term", label: "Term", kind: "label", required: true },
       { key: "ratio", label: "Gene ratio", kind: "number", required: true },
       { key: "pValue", label: "Adjusted P value", kind: "number", required: true },
       { key: "group", label: "Ontology / group", kind: "category", required: false },
+      { key: "background", label: "Tested background size", kind: "number", required: true },
     ],
-    defaultMapping: { term: "term", ratio: "geneRatio", pValue: "padj", group: "group" },
+    defaultMapping: { term: "term", ratio: "geneRatio", pValue: "padj", group: "group", background: "background" },
     sampleData: samples.enrichment,
     examples: [
       { label: "Example 1", description: "Gene ratio supplied as decimals.", data: samples.enrichment },
@@ -1966,6 +2304,62 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     ],
     defaultMapping: { rank: "rank", score: "runningES", hit: "hit", label: "label" },
     sampleData: samples.gsea,
+  },
+  {
+    id: "go-circle", name: "GO circle", family: "Enrichment", summary: "Circular GO term overview grouped by BP, CC, and MF with count and FDR encodings.", inputHint: "Use precomputed GO enrichment results. Supply ontology, gene ratio, hit count, FDR, and tested background size; this module does not run enrichment.",
+    roles: [{ key: "term", label: "GO term", kind: "label", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "count", label: "Hit count", kind: "number", required: true }, { key: "pValue", label: "FDR", kind: "number", required: true }, { key: "group", label: "Ontology (BP / CC / MF)", kind: "category", required: true }, { key: "background", label: "Tested background size", kind: "number", required: true }],
+    defaultMapping: { term: "term", ratio: "geneRatio", count: "count", pValue: "FDR", group: "ontology", background: "background" }, sampleData: samples.goCircle,
+    examples: [{ label: "Example 1 · BP / CC / MF", description: "Precomputed GO results with explicit ontology, denominator background, gene ratio, count, and FDR.", data: samples.goCircle }],
+  },
+  {
+    id: "kegg-circle", name: "KEGG circle", family: "Enrichment", summary: "Circular KEGG pathway overview with pathway groups, counts, ratios, and FDR.", inputHint: "Use precomputed KEGG enrichment output with a declared tested background; the circular position is decorative and does not recalculate pathways.",
+    roles: [{ key: "term", label: "KEGG pathway", kind: "label", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "count", label: "Hit count", kind: "number", required: true }, { key: "pValue", label: "FDR", kind: "number", required: true }, { key: "group", label: "Pathway group", kind: "category", required: true }, { key: "background", label: "Tested background size", kind: "number", required: true }],
+    defaultMapping: { term: "term", ratio: "geneRatio", count: "count", pValue: "FDR", group: "pathway_group", background: "background" }, sampleData: samples.keggCircle,
+  },
+  {
+    id: "go-chord", name: "GO chord", family: "Enrichment relationships", summary: "Term–gene membership links arranged as a compact circular relationship diagram.", inputHint: "One row per precomputed GO term–gene membership. Repeat term-level ratio, count, FDR, ontology, and tested background consistently across member rows.",
+    roles: [{ key: "term", label: "GO term", kind: "label", required: true }, { key: "label", label: "Member gene", kind: "label", required: true }, { key: "effect", label: "Gene effect", kind: "number", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "count", label: "Term hit count", kind: "number", required: true }, { key: "pValue", label: "Term FDR", kind: "number", required: true }, { key: "group", label: "Ontology", kind: "category", required: true }, { key: "background", label: "Tested background size", kind: "number", required: true }],
+    defaultMapping: { term: "term", label: "gene", effect: "effect", ratio: "geneRatio", count: "count", pValue: "FDR", group: "ontology", background: "background" }, sampleData: samples.goChord,
+  },
+  {
+    id: "pathway-impact", name: "Pathway impact", family: "Pathway analysis", summary: "Supplied pathway-topology impact versus FDR with hit-count bubbles.", inputHint: "Use impact scores from a documented upstream topology-aware pathway method. Supply ratio, count, FDR, pathway group, and tested background; impact is never inferred here.",
+    roles: [{ key: "term", label: "Pathway", kind: "label", required: true }, { key: "impact", label: "Upstream impact score", kind: "number", required: true }, { key: "count", label: "Hit count", kind: "number", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "pValue", label: "FDR", kind: "number", required: true }, { key: "group", label: "Pathway group", kind: "category", required: true }, { key: "background", label: "Tested background size", kind: "number", required: true }],
+    defaultMapping: { term: "term", impact: "impact", count: "count", ratio: "geneRatio", pValue: "FDR", group: "group", background: "background" }, sampleData: samples.pathwayImpact,
+  },
+  {
+    id: "nes-fdr", name: "NES / FDR summary", family: "Enrichment", summary: "Signed normalized enrichment scores with FDR encoded independently.", inputHint: "Use precomputed NES and FDR values from a documented ranked-set analysis; include gene ratio and tested background for context.",
+    roles: [{ key: "term", label: "Gene set", kind: "label", required: true }, { key: "nes", label: "NES", kind: "number", required: true }, { key: "pValue", label: "FDR", kind: "number", required: true }, { key: "group", label: "Collection", kind: "category", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "background", label: "Ranked background size", kind: "number", required: true }],
+    defaultMapping: { term: "term", nes: "NES", pValue: "FDR", group: "group", ratio: "geneRatio", background: "background" }, sampleData: samples.nesFdr,
+  },
+  {
+    id: "multi-gsea", name: "Multi-GSEA", family: "Enrichment", summary: "Multiple supplied running-enrichment curves over one complete common ranked list, with hit positions, NES, and FDR.", inputHint: "Provide precomputed running scores and 0/1 hit indicators at representative positions spanning rank 0 through one common ranked-background endpoint for every set. Running ES must be zero at both endpoints; repeat constant per-set NES and FDR.",
+    roles: [{ key: "rank", label: "Rank", kind: "number", required: true }, { key: "score", label: "Running enrichment score", kind: "number", required: true }, { key: "hit", label: "Gene-set hit (0 / 1)", kind: "number", required: true }, { key: "group", label: "Gene set", kind: "category", required: true }, { key: "nes", label: "NES", kind: "number", required: true }, { key: "pValue", label: "FDR", kind: "number", required: true }, { key: "background", label: "Ranked background size", kind: "number", required: true }],
+    defaultMapping: { rank: "rank", score: "runningES", hit: "hit", group: "set", nes: "NES", pValue: "FDR", background: "background" }, sampleData: samples.multiGsea,
+  },
+  {
+    id: "enrichment-ridge", name: "Enrichment ridge", family: "Enrichment", summary: "Per-term distributions of supplied member-level ranked statistics.", inputHint: "Provide member-level statistics for each precomputed enriched term and repeat its FDR, gene ratio, and tested background consistently; density is normalized within term.",
+    roles: [{ key: "term", label: "Enriched term", kind: "label", required: true }, { key: "label", label: "Member gene", kind: "label", required: true }, { key: "score", label: "Ranked statistic", kind: "number", required: true }, { key: "pValue", label: "Term FDR", kind: "number", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "background", label: "Tested background size", kind: "number", required: true }],
+    defaultMapping: { term: "term", label: "gene", score: "score", pValue: "FDR", ratio: "geneRatio", background: "background" }, sampleData: samples.enrichmentRidge,
+  },
+  {
+    id: "sankey-bubble", name: "Relationship ribbon–bubble", family: "Enrichment", summary: "Non-conserved source-to-term relationship ribbons combined with term bubbles for ratios and counts.", inputHint: "Use precomputed enrichment rows with source collection, term, gene ratio, hit count, FDR, and tested background. Each ribbon width is an independent ratio; unlike a Sankey flow, widths are not conserved or summed at the source.",
+    roles: [{ key: "source", label: "Ontology / source", kind: "category", required: true }, { key: "term", label: "Term", kind: "label", required: true }, { key: "ratio", label: "Gene ratio", kind: "number", required: true }, { key: "count", label: "Hit count", kind: "number", required: true }, { key: "pValue", label: "FDR", kind: "number", required: true }, { key: "background", label: "Tested background size", kind: "number", required: true }],
+    defaultMapping: { source: "source", term: "term", ratio: "geneRatio", count: "count", pValue: "FDR", background: "background" }, sampleData: samples.sankeyBubble,
+  },
+  {
+    id: "geographic-map", name: "Geographic point map", family: "Specialized", summary: "Approximate equirectangular site locations with value-sized points.", inputHint: "One row per site with decimal latitude, longitude, non-negative value, and optional group. This is a locator map, not a boundary, distance, or area analysis.",
+    roles: [{ key: "label", label: "Site", kind: "label", required: true }, { key: "latitude", label: "Latitude", kind: "number", required: true }, { key: "longitude", label: "Longitude", kind: "number", required: true }, { key: "value", label: "Magnitude", kind: "number", required: true }, { key: "group", label: "Group", kind: "category", required: false }],
+    defaultMapping: { label: "site", latitude: "latitude", longitude: "longitude", value: "value", group: "group" }, sampleData: samples.geographicMap,
+  },
+  {
+    id: "petal", name: "Petal", family: "Specialized", summary: "Decorative radial ranking with value-proportional petal lengths.", inputHint: "One row per category with a non-negative value. Use bars or dots when accurate magnitude comparison is required.",
+    roles: [{ key: "label", label: "Category", kind: "label", required: true }, { key: "value", label: "Value", kind: "number", required: true }],
+    defaultMapping: { label: "category", value: "value" }, sampleData: samples.petal,
+  },
+  {
+    id: "word-cloud", name: "Word cloud", family: "Specialized", summary: "Deterministic word-size overview for qualitative prominence.", inputHint: "One row per unique term with a strictly positive weight. Font size supports approximate prominence only; position and color are non-quantitative.",
+    roles: [{ key: "label", label: "Term", kind: "label", required: true }, { key: "value", label: "Positive weight", kind: "number", required: true }],
+    defaultMapping: { label: "term", value: "weight" }, sampleData: samples.wordCloud,
   },
   {
     id: "km",
@@ -2410,6 +2804,11 @@ export const plotReferences = {
   corrgram: { citation: "Friendly, 2002. Corrgrams: Exploratory Displays for Correlation Matrices. The American Statistician.", href: "https://doi.org/10.1198/000313002533" },
   enrichment: { citation: "Yu et al., 2012. clusterProfiler: an R package for comparing biological themes among gene clusters. OMICS.", href: "https://doi.org/10.1089/omi.2011.0118" },
   gsea: { citation: "Subramanian et al., 2005. Gene set enrichment analysis: a knowledge-based approach. PNAS.", href: "https://doi.org/10.1073/pnas.0506580102" },
+  geneOntology: { citation: "Ashburner et al., 2000. Gene Ontology: tool for the unification of biology. Nature Genetics.", href: "https://doi.org/10.1038/75556" },
+  kegg: { citation: "Kanehisa & Goto, 2000. KEGG: Kyoto Encyclopedia of Genes and Genomes. Nucleic Acids Research.", href: "https://doi.org/10.1093/nar/28.1.27" },
+  pathwayImpact: { citation: "Tarca et al., 2009. A novel signaling pathway impact analysis. Bioinformatics.", href: "https://doi.org/10.1093/bioinformatics/btn577" },
+  wordCloud: { citation: "Viegas, Wattenberg & Feinberg, 2009. Participatory Visualization with Wordle. IEEE TVCG.", href: "https://doi.org/10.1109/TVCG.2009.171" },
+  mapProjection: { citation: "Snyder, 1987. Map Projections—A Working Manual. US Geological Survey Professional Paper 1395.", href: "https://doi.org/10.3133/pp1395" },
   kaplanMeier: { citation: "Kaplan & Meier, 1958. Nonparametric Estimation from Incomplete Observations. JASA.", href: "https://doi.org/10.1080/01621459.1958.10501452" },
   forest: { citation: "Lewis & Clarke, 2001. Forest plots: trying to see the wood and the trees. BMJ.", href: "https://doi.org/10.1136/bmj.322.7300.1479" },
   roc: { citation: "Hanley & McNeil, 1982. The meaning and use of the area under a ROC curve. Radiology.", href: "https://doi.org/10.1148/radiology.143.1.7063747" },
@@ -2625,14 +3024,14 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
   },
   enrichment: {
     definition: "每个功能条目用一个点表示，通常以位置编码富集比例、点大小编码命中数、颜色编码校正 P 值。",
-    suitableData: "富集结果表，包含条目、富集比例、命中数量和校正 P 值。",
+    suitableData: "预计算富集结果表，包含条目、明确测试背景、富集比例、命中数量和 FDR；数据库版本与多重校正方法应保存在分析记录中。",
     answers: "哪些功能条目同时具有较强统计证据、较高富集比例和足够命中数量。",
     origin: "这种多通道编码随着 clusterProfiler 等富集分析工具普及，用一个点同时压缩展示效应、规模和统计证据。",
     references: [plotReferences.enrichment],
   },
   "enrichment-bar": {
     definition: "每个功能条目对应一根横向或纵向柱，柱长编码富集比例、计数或效应量，主要用于清晰排序。",
-    suitableData: "可排序的富集结果表，至少包含条目、富集比例或效应值及统计证据。",
+    suitableData: "可排序的预计算富集结果表，至少包含条目、明确测试背景、富集比例和 FDR。",
     answers: "最主要的富集条目如何排序，其效应或富集程度有多大。",
     references: [plotReferences.enrichment],
   },
@@ -2643,6 +3042,17 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     origin: "Subramanian 等人在 2005 年系统提出 GSEA，目的是避免只依赖任意显著性阈值截取基因列表。",
     references: [plotReferences.gsea],
   },
+  "go-circle": { definition: "把预计算 GO 条目排列在装饰性圆周上，以颜色表示 FDR、圆面积近似表示命中数，并保留 BP、CC、MF 本体分组。", suitableData: "具有明确背景基因数、Gene ratio、命中数和 FDR 的 GO 富集结果；本模块不执行富集检验。", answers: "哪些 GO 条目在三个本体分支中具有更强证据或更多命中；圆周位置不表示条目相似度。", references: [plotReferences.geneOntology, plotReferences.enrichment, plotReferences.graphicalPerception] },
+  "kegg-circle": { definition: "把预计算 KEGG 通路以圆形概览展示，颜色、面积分别编码 FDR 与命中数。", suitableData: "具有明确测试背景、Gene ratio、命中数和 FDR 的 KEGG 富集结果。", answers: "哪些通路兼具统计证据和命中规模；圆周顺序与距离没有定量含义。", references: [plotReferences.kegg, plotReferences.enrichment, plotReferences.graphicalPerception] },
+  "go-chord": { definition: "以圆形节点和弦线展示 GO term 与成员基因的多对多关系，线宽只编码明确提供的基因效应绝对值。", suitableData: "预计算 GO term–gene membership 长表，并在同一 term 的各行一致重复背景、ratio、count 与 FDR。", answers: "哪些基因同时连接多个富集条目，成员效应方向如何；曲率和弧顺序不代表统计距离。", references: [plotReferences.geneOntology, plotReferences.chord, plotReferences.enrichment] },
+  "pathway-impact": { definition: "把上游拓扑感知方法给出的 pathway impact 与 −log10(FDR) 放在正交坐标上，并以点面积表示命中数。", suitableData: "已由明确算法计算的 pathway impact、FDR、Gene ratio、命中数和背景；不能把普通富集比例伪装成 impact。", answers: "哪些通路同时有较高拓扑影响和统计证据；影响分数的定义取决于上游方法。", references: [plotReferences.pathwayImpact, plotReferences.kegg] },
+  "nes-fdr": { definition: "以共同零基线显示带方向的 NES，并独立披露 FDR。", suitableData: "由 GSEA 或兼容 ranked-set 方法预计算的 NES、FDR、Gene ratio、集合来源和排序背景。", answers: "哪些基因集富集于排序列表上端或下端，以及证据强弱如何。", references: [plotReferences.gsea, plotReferences.enrichment] },
+  "multi-gsea": { definition: "在同一完整共同排序坐标中叠加多个预计算 running-ES 轨迹，并显示各自命中位置、NES 和 FDR。", suitableData: "每个集合在从 0 到共同 background 端点、足够密集且递增的 rank 网格上的 running ES 与 0/1 hits；两端 ES=0，集合内 NES/FDR 恒定。", answers: "多个集合的富集方向、峰位置和 hit density 如何在同一排序尺度上比较；曲线只显示上游结果，不重算统计量。", references: [plotReferences.gsea] },
+  "enrichment-ridge": { definition: "按富集条目分层绘制成员级排序统计量的核密度，每一条密度独立归一化。", suitableData: "每个预计算富集条目下的成员基因及其排名统计量，并一致重复 term 的 FDR、ratio 与背景。", answers: "不同条目的成员统计量主要位于排序的哪一侧、分布是否集中；ridge 高度不能跨条目比较总量。", references: [plotReferences.gsea, plotReferences.kernelDensity] },
+  "sankey-bubble": { definition: "用非守恒 relationship ribbon 连接来源本体与条目，以每条独立 ribbon 的宽度表示 ratio、bubble 面积近似表示 count；它不是满足流量守恒的 Sankey 图。", suitableData: "每个预计算富集条目的来源、背景、ratio、count 与 FDR；各 ratio 不要求在来源内相加为固定总量。", answers: "不同来源关联哪些条目以及单条关联的相对规模如何；面积和宽度不适合精确读数，也不能解释成来源总流量的分配。", references: [plotReferences.enrichment, plotReferences.sankey, plotReferences.graphicalPerception] },
+  "geographic-map": { definition: "以等距圆柱投影近似定位经纬度站点，并用点面积表示非负量值。", suitableData: "十进制度纬度、经度、站点名称与量值；不包含行政边界推断。", answers: "观察站点大致位于何处、哪些区域量值更大；投影会扭曲距离和面积。", references: [plotReferences.mapProjection, plotReferences.graphicalPerception] },
+  petal: { definition: "以花瓣长度近似编码类别值的装饰性径向排名图。", suitableData: "少量类别及非负汇总值，适合概览或海报式摘要。", answers: "哪些维度相对突出；角度与花瓣形状降低精确比较能力，正式定量比较优先使用 bar/dot。", references: [plotReferences.graphicalPerception] },
+  "word-cloud": { definition: "以字号近似表示词项权重，并采用确定性网格避免随机位置漂移。", suitableData: "唯一词项及严格正权重，例如文本频次或主题权重。", answers: "哪些词更突出；位置、方向和颜色没有数量含义，字号也不适合精确比值判断。", references: [plotReferences.wordCloud, plotReferences.graphicalPerception] },
   km: {
     definition: "一种处理删失数据的非参数阶梯估计，每个事件时点按条件存活概率的乘积更新生存曲线。",
     suitableData: "个体级随访时间、事件状态和可选分组，包含正确记录的删失。",
@@ -2886,6 +3296,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 const advancedRendererIds = new Set<PlotType>([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
+  "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud",
   "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score",
   "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos",
   "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
@@ -2897,7 +3308,7 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
   "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ];
-const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"]);
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score", "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
@@ -2922,6 +3333,8 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   "clustered-heatmap": ["heatmapScale", "heatmapColorMode", "heatmapDisplay", "clusterRows", "clusterColumns", "heatmapDistance", "heatmapLinkage", "heatmapShowDendrograms", "heatmapRowClusters", "heatmapColumnClusters", "heatmapShowValues", "heatmapShowSidePlot", "heatmapSidePlotStatistic", "heatmapLabelDensity", "heatmapRowAnnotationData", "heatmapColumnAnnotationData", "continuousLow", "continuousHigh", "divergingLow", "divergingMid", "divergingHigh"],
   "correlation-heatmap": ["correlationMethod", "heatmapDisplay", "heatmapTriangle", "clusterRows", "clusterColumns", "heatmapDistance", "heatmapLinkage", "heatmapShowDendrograms", "heatmapRowClusters", "heatmapColumnClusters", "heatmapShowValues", "heatmapShowSidePlot", "heatmapSidePlotStatistic", "heatmapLabelDensity", "heatmapRowAnnotationData", "heatmapColumnAnnotationData", "divergingLow", "divergingMid", "divergingHigh"],
   enrichment: ["continuousLow", "continuousHigh"], "enrichment-bar": ["continuousLow", "continuousHigh"],
+  "go-circle": ["showLabels", "continuousLow", "continuousHigh"], "kegg-circle": ["showLabels", "continuousLow", "continuousHigh"], "go-chord": ["showLabels"],
+  "pathway-impact": ["showLabels", "continuousLow", "continuousHigh"], "nes-fdr": ["continuousLow", "continuousHigh"], "multi-gsea": [], "enrichment-ridge": [], "sankey-bubble": ["showLabels"], "geographic-map": ["showLabels"], petal: ["showLabels"], "word-cloud": [],
   km: ["showRiskTable"], "survival-forest": ["forestReferenceValue"],
   roc: ["rocInputMode"],
   calibration: ["calibrationBinCount"],
@@ -2964,6 +3377,17 @@ const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof Visuali
   "lasso-path": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors"]),
   "km-cutoff": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors"]),
   "risk-score": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "dataLineWidth", "pointSize", "categoricalColors"]),
+  "go-circle": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "continuousLow", "continuousHigh", "showLabels"]),
+  "kegg-circle": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "continuousLow", "continuousHigh", "showLabels"]),
+  "go-chord": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "dataLineWidth", "categoricalColors", "showLabels"]),
+  "pathway-impact": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "pointSize", "opacity", "grid", "continuousLow", "continuousHigh", "showLabels"]),
+  "nes-fdr": new Set(["title", "fontFamily", "xLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "grid", "continuousLow", "continuousHigh"]),
+  "multi-gsea": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors"]),
+  "enrichment-ridge": new Set(["title", "fontFamily", "xLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "grid", "categoricalColors"]),
+  "sankey-bubble": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
+  "geographic-map": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "pointSize", "opacity", "categoricalColors", "showLabels"]),
+  petal: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
+  "word-cloud": new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "categoricalColors"]),
   venn: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "dataLineWidth", "opacity", "categoricalColors", "setInputMode", "vennLayout", "vennProportional"]),
   upset: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "opacity", "categoricalColors", "setInputMode", "upsetMaxIntersections"]),
   sankey: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
@@ -3022,7 +3446,7 @@ function numericAxesFor(type: PlotType): Array<"x" | "y"> {
 }
 
 export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation" | "associationVariant" | "ordinationView">): Array<"x" | "y"> {
-  if (["funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"].includes(type)) return [];
+  if (["funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score", "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud"].includes(type)) return [];
   if (type === "bar") {
     if (settings.barVariant === "polar") return [];
     return settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant) ? ["x"] : ["y"];
@@ -3337,19 +3761,24 @@ const mappingAliases: Record<string, string[]> = {
   target: ["target", "reference", "goal", "benchmark", "to", "receiver"],
   facet: ["facet", "panel", "stratum", "cohort"],
   subject: ["subject", "subjectid", "pair", "pairid", "participant", "sample", "sampleid"],
-  group: ["group", "class", "condition", "cluster", "ontology", "model", "predictor", "feature"],
+  group: ["group", "class", "condition", "cluster", "ontology", "pathwaygroup", "set", "collection", "model", "predictor", "feature"],
   series: ["series", "group", "condition", "class"],
   x: ["x", "time", "dose", "lambda", "pc1", "dim1", "dimension1", "umap1", "tsne1", "nmds1"],
   y: ["y", "response", "coefficient", "pc2", "dim2", "dimension2", "umap2", "tsne2", "nmds2"],
   z: ["z", "pc3", "dim3", "dimension3", "umap3", "tsne3", "nmds3"],
   shape: ["shape", "batch", "cohort", "site", "sex"],
   error: ["error", "sd", "sem", "se", "stderr", "standarddeviation", "standarderror"],
-  label: ["label", "gene", "feature", "id", "name", "study", "sample", "level"],
+  label: ["label", "gene", "feature", "id", "name", "study", "sample", "site", "level", "term", "category"],
   effect: ["log2fc", "logfc", "effect", "estimate"],
   pValue: ["padj", "fdr", "adjustedpvalue", "pvalue", "p"],
   term: ["term", "pathway", "description", "name"],
   ratio: ["generatio", "ratio", "richfactor", "foldenrichment"],
   count: ["count", "genes", "hits", "size"],
+  background: ["background", "backgroundsize", "universe", "universesize", "testedgenes"],
+  impact: ["impact", "pathwayimpact", "topologyimpact"],
+  nes: ["nes", "normalizedenrichmentscore"],
+  latitude: ["latitude", "lat"],
+  longitude: ["longitude", "lon", "lng"],
   mean: ["mean", "basemean", "meanexpression", "averagelogexpression"],
   rank: ["rank", "position", "index"],
   hit: ["hit", "member", "membership", "ingeneset"],
@@ -3561,7 +3990,7 @@ export function validatePlotDataset(
     if (column && role.kind === "number") {
       const invalidCount = dataset.rows.filter((row) => {
         if (["network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "circos"].includes(definition.id) && !role.required && !row[column]?.trim()) return false;
-        const value = (definition.id === "enrichment" || definition.id === "enrichment-bar") && role.key === "ratio"
+        const value = (["enrichment", "enrichment-bar", "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "enrichment-ridge", "sankey-bubble"].includes(definition.id)) && role.key === "ratio"
           ? parseRatioValue(row[column])
           : parseNumericValue(row[column]);
         return value === null;
@@ -3573,6 +4002,174 @@ export function validatePlotDataset(
       if (blankCount > 0) errors.push(`${role.label} contains ${blankCount} blank value${blankCount === 1 ? "" : "s"}.`);
     }
   });
+
+  const precomputedEnrichmentTypes: PlotType[] = ["enrichment", "enrichment-bar", "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble"];
+  if (precomputedEnrichmentTypes.includes(definition.id)) {
+    if (mapping.pValue) {
+      const invalid = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping.pValue]); return value === null || value <= 0 || value > 1; }).length;
+      if (invalid > 0) errors.push(`FDR must be in (0, 1] for every precomputed enrichment row; invalid rows: ${invalid}.`);
+    }
+    if (mapping.ratio) {
+      const invalid = dataset.rows.filter((row) => { const value = parseRatioValue(row[mapping.ratio]); return value === null || value < 0 || value > 1; }).length;
+      if (invalid > 0) errors.push(`Gene ratio must be a fraction or decimal in [0, 1]; invalid rows: ${invalid}.`);
+    }
+    if (mapping.background) {
+      const invalid = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping.background]); return value === null || !Number.isInteger(value) || value <= 0; }).length;
+      if (invalid > 0) errors.push(`Tested background size must be a strictly positive integer; invalid rows: ${invalid}.`);
+    }
+    if (mapping.count) {
+      const invalid = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping.count]); return value === null || !Number.isInteger(value) || value <= 0; }).length;
+      if (invalid > 0) errors.push(`Hit count must be a strictly positive integer; invalid rows: ${invalid}.`);
+    }
+    if (mapping.count && mapping.ratio && mapping.background) {
+      dataset.rows.forEach((row, index) => {
+        const count = parseNumericValue(row[mapping.count]);
+        const ratio = parseRatioValue(row[mapping.ratio]);
+        const background = parseNumericValue(row[mapping.background]);
+        if (count !== null && background !== null && count > background) errors.push(`Row ${index + 1} has hit count ${count} greater than tested background ${background}.`);
+        if (count !== null && count > 0 && ratio === 0) errors.push(`Row ${index + 1} has a positive hit count but zero gene ratio.`);
+        const fractionMatch = row[mapping.ratio]?.trim().match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*\/\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/);
+        if (fractionMatch && count !== null && Number(fractionMatch[1]) !== count) errors.push(`Row ${index + 1} has fraction numerator ${fractionMatch[1]} but hit count ${count}; these must agree.`);
+      });
+    }
+    warnings.push("This view displays results precomputed by an upstream enrichment or ranked-set method. Preserve the tested background, database/version, multiple-testing procedure, and complete result table outside the figure.");
+  }
+  if (["go-circle", "kegg-circle"].includes(definition.id)) {
+    const terms = dataset.rows.map((row) => row[mapping.term]?.trim());
+    if (new Set(terms).size !== terms.length) errors.push(`${definition.name} requires unique term rows; aggregate duplicate terms upstream.`);
+    if (definition.id === "go-circle" && mapping.group) {
+      const allowed = new Set(["BP", "CC", "MF"]); const invalid = [...new Set(dataset.rows.map((row) => row[mapping.group]?.trim().toUpperCase()))].filter((group) => !allowed.has(group));
+      if (invalid.length > 0) errors.push(`GO ontology must use BP, CC, or MF; unsupported values: ${invalid.join(", ")}.`);
+    }
+    if (settings) {
+      const groupLabels = [...new Set(dataset.rows.map((row) => row[mapping.group]?.trim()).filter(Boolean))];
+      const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length, groupCount: groupLabels.length, maximumGroupLabelWidth: Math.max(0, ...groupLabels.map((label) => estimateLegendTextWidth(label, Math.max(7, settings.tickSize - 2)))) });
+      if (layout.circleSpacing < layout.circleMinimum) errors.push(`${definition.name} terms would have only ${layout.circleSpacing.toFixed(1)} px of circular spacing, below the ${layout.circleMinimum.toFixed(1)} px mark/label budget; increase figure size, hide labels, or filter terms.`);
+      if (layout.groupCellWidth < layout.groupLegendMinimum) errors.push(`${definition.name} group legend cells have ${layout.groupCellWidth.toFixed(1)} px, but the longest group needs ${layout.groupLegendMinimum.toFixed(1)} px; increase width or shorten group labels.`);
+    }
+    warnings.push("Terms are grouped into contiguous ontology/pathway sectors, but angular position within a sector remains decorative and does not encode semantic similarity, ontology distance, or pathway topology.");
+  }
+  if (definition.id === "go-chord") {
+    const terms = new Set(dataset.rows.map((row) => row[mapping.term])); const genes = new Set(dataset.rows.map((row) => row[mapping.label]));
+    const groups = [...new Set(dataset.rows.map((row) => row[mapping.group]?.trim().toUpperCase()))];
+    const invalidGroups = groups.filter((group) => !new Set(["BP", "CC", "MF"]).has(group));
+    if (invalidGroups.length > 0) errors.push(`GO chord ontology must use BP, CC, or MF; unsupported values: ${invalidGroups.join(", ")}.`);
+    const memberships = dataset.rows.map((row) => `${row[mapping.term]}\u0000${row[mapping.label]}`);
+    if (new Set(memberships).size !== memberships.length) errors.push("GO chord requires unique term–gene membership rows; aggregate duplicate memberships upstream.");
+    if (terms.size > 8 || genes.size > 16 || dataset.rows.length > 40) errors.push(`GO chord compact limits are 8 terms, 16 genes, and 40 links; received ${terms.size}, ${genes.size}, and ${dataset.rows.length}.`);
+    if (groups.length > 4) errors.push(`GO chord compact footer supports at most four ontology groups; received ${groups.length}.`);
+    if (settings) {
+      const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length, termCount: terms.size, geneCount: genes.size });
+      if (layout.termArcSpacing < layout.chordMinimum || layout.geneArcSpacing < layout.chordMinimum) errors.push(`GO chord node spacing is unsafe at ${settings.width} × ${settings.height}: terms ${layout.termArcSpacing.toFixed(1)} px, genes ${layout.geneArcSpacing.toFixed(1)} px, required ${layout.chordMinimum.toFixed(1)} px; increase size, hide labels, or reduce nodes.`);
+    }
+    terms.forEach((term) => {
+      const rows = dataset.rows.filter((row) => row[mapping.term] === term);
+      ["ratio", "count", "pValue", "group", "background"].forEach((role) => {
+        const values = rows.map((row) => role === "ratio" ? parseRatioValue(row[mapping[role]]) : ["count", "pValue", "background"].includes(role) ? parseNumericValue(row[mapping[role]]) : row[mapping[role]]?.trim().toUpperCase());
+        if (mapping[role] && new Set(values).size !== 1) errors.push(`GO chord term “${term}” must repeat one consistent ${role} value across member genes.`);
+      });
+    });
+    warnings.push("Effect sign is encoded by color/dash and absolute effect by line width; chord curvature and circular order remain layout choices and do not encode biological distance.");
+  }
+  if (definition.id === "pathway-impact") {
+    const invalid = dataset.rows.filter((row) => (parseNumericValue(row[mapping.impact]) ?? -1) < 0).length;
+    if (invalid > 0) errors.push(`Pathway impact must be non-negative; invalid rows: ${invalid}.`);
+    const terms = dataset.rows.map((row) => row[mapping.term]?.trim());
+    const groups = [...new Set(dataset.rows.map((row) => row[mapping.group]?.trim()))];
+    if (new Set(terms).size !== terms.length) errors.push("Pathway impact requires unique pathway rows; aggregate duplicate pathways upstream.");
+    if (dataset.rows.length > 20) errors.push("Pathway impact compact view supports at most 20 pathways; filter using a documented rule.");
+    if (groups.length > 4) errors.push(`Pathway impact compact footer supports at most four pathway groups; received ${groups.length}.`);
+    if (settings) {
+      const layout = pathwayImpactLayout(settings, dataset.rows.map((row) => ({ term: row[mapping.term], impact: parseNumericValue(row[mapping.impact]) ?? 0, fdr: parseNumericValue(row[mapping.pValue]) ?? 1, count: parseNumericValue(row[mapping.count]) ?? 1 })));
+      if (layout.markCollisionPairs > 0) errors.push(`Pathway impact has ${layout.markCollisionPairs} overlapping point pair${layout.markCollisionPairs === 1 ? "" : "s"} at the current size; increase dimensions, reduce point size, or aggregate indistinguishable pathways.`);
+      if (settings.showLabels && layout.labelCollisionCount > 0) errors.push(`Pathway impact cannot place ${layout.labelCollisionCount} pathway label${layout.labelCollisionCount === 1 ? "" : "s"} without overlap at the current size; increase dimensions, shorten or hide labels, or filter pathways.`);
+    }
+  }
+  if (definition.id === "nes-fdr") {
+    const terms = dataset.rows.map((row) => row[mapping.term]?.trim());
+    if (new Set(terms).size !== terms.length) errors.push("NES / FDR summary requires unique gene-set rows; aggregate duplicates upstream.");
+    if (settings) {
+      const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length });
+      if (layout.rowSpacing < layout.nesMinimum) errors.push(`NES / FDR rows would be ${layout.rowSpacing.toFixed(1)} px apart, below the ${layout.nesMinimum.toFixed(1)} px point/text budget; increase height, reduce point or tick size, or filter gene sets.`);
+    }
+  }
+  if (definition.id === "multi-gsea") {
+    const sets = new Set(dataset.rows.map((row) => row[mapping.group]));
+    if (sets.size > 6) errors.push("Multi-GSEA supports at most six curves in the compact figure.");
+    const sharedBackgrounds = new Set(dataset.rows.map((row) => parseNumericValue(row[mapping.background])));
+    if (sharedBackgrounds.size !== 1) errors.push("Multi-GSEA curves must use one common ranked background so their horizontal positions are comparable.");
+    sets.forEach((set) => {
+      const rows = dataset.rows.filter((row) => row[mapping.group] === set); const ranks = rows.map((row) => parseNumericValue(row[mapping.rank]) ?? Number.NaN); const background = parseNumericValue(rows[0]?.[mapping.background]) ?? Number.NaN;
+      const invalidHits = rows.filter((row) => ![0, 1].includes(parseNumericValue(row[mapping.hit]) ?? Number.NaN)).length;
+      if (rows.length < 20) errors.push(`Multi-GSEA set “${set}” requires at least 20 representative ranked positions.`);
+      if (new Set(ranks).size !== ranks.length) errors.push(`Multi-GSEA set “${set}” contains duplicate rank positions.`);
+      if (ranks.some((rank) => !Number.isInteger(rank) || rank < 0 || rank > background)) errors.push(`Multi-GSEA set “${set}” ranks must be non-negative integers no greater than its ranked background (${background}).`);
+      const minimumRank = Math.min(...ranks); const maximumRank = Math.max(...ranks);
+      if (minimumRank !== 0 || maximumRank !== background) errors.push(`Multi-GSEA set “${set}” must cover the common ranked list from 0 through background ${background}; received ${minimumRank}–${maximumRank}.`);
+      const endpoints = rows.filter((row) => { const rank = parseNumericValue(row[mapping.rank]); return rank === 0 || rank === background; }).map((row) => Math.abs(parseNumericValue(row[mapping.score]) ?? Number.POSITIVE_INFINITY));
+      if (endpoints.length !== 2 || endpoints.some((score) => score > 1e-6)) errors.push(`Multi-GSEA set “${set}” must supply running ES=0 at both rank endpoints (0 and ${background}).`);
+      if (invalidHits > 0) errors.push(`Multi-GSEA set “${set}” contains ${invalidHits} hit values other than 0 or 1.`);
+      if (rows.filter((row) => parseNumericValue(row[mapping.hit]) === 1).length < 3) warnings.push(`Multi-GSEA set “${set}” has fewer than three displayed hits; verify that representative hit density was not over-thinned.`);
+      ["nes", "pValue", "background"].forEach((role) => { if (new Set(rows.map((row) => parseNumericValue(row[mapping[role]]))).size !== 1) errors.push(`Multi-GSEA set “${set}” must repeat one constant ${role} value.`); });
+    });
+    if (settings) {
+      const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length, groupCount: sets.size });
+      if (layout.gseaLabelBlock > layout.gseaLabelCapacity) errors.push(`Multi-GSEA legend needs ${layout.gseaLabelBlock.toFixed(1)} px but only ${layout.gseaLabelCapacity.toFixed(1)} px is safely available inside the curve panel; increase height, reduce legend size, or show fewer sets.`);
+    }
+  }
+  if (definition.id === "enrichment-ridge") {
+    const terms = new Set(dataset.rows.map((row) => row[mapping.term]));
+    const memberships = dataset.rows.map((row) => `${row[mapping.term]}\u0000${row[mapping.label]}`);
+    if (new Set(memberships).size !== memberships.length) errors.push("Enrichment ridge requires unique term–gene rows; duplicate member statistics would be counted more than once.");
+    terms.forEach((term) => { const rows = dataset.rows.filter((row) => row[mapping.term] === term); if (rows.length < 5) errors.push(`Enrichment ridge term “${term}” requires at least five member-level statistics.`); ["pValue", "ratio", "background"].forEach((role) => { const values = rows.map((row) => role === "ratio" ? parseRatioValue(row[mapping[role]]) : parseNumericValue(row[mapping[role]])); if (new Set(values).size !== 1) errors.push(`Enrichment ridge term “${term}” must repeat one constant ${role} value.`); }); });
+    if (settings) { const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: terms.size }); if (layout.rowSpacing < layout.ridgeMinimum) errors.push(`Enrichment ridge rows would be ${layout.rowSpacing.toFixed(1)} px apart, below the ${layout.ridgeMinimum.toFixed(1)} px label/density budget; increase height, reduce tick size, or filter terms.`); }
+    warnings.push("Each ridge is normalized separately; density height cannot be used to compare total membership across terms.");
+  }
+  if (definition.id === "sankey-bubble") {
+    const duplicated = dataset.rows.map((row) => `${row[mapping.source]}\u0000${row[mapping.term]}`).filter((key, index, keys) => keys.indexOf(key) !== index);
+    if (duplicated.length > 0) errors.push("Sankey–bubble requires unique source–term rows; aggregate or distinguish duplicate terms upstream.");
+    if (settings) { const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length }); if (layout.rowSpacing < layout.sankeyMinimum) errors.push(`Sankey–bubble terms would be ${layout.rowSpacing.toFixed(1)} px apart, below the ${layout.sankeyMinimum.toFixed(1)} px bubble/label budget; increase height, hide labels, or filter terms.`); }
+    warnings.push("These are non-conserved relationship ribbons: each width is an independent enrichment ratio and widths do not sum to a source total. Bubble area is approximate; exact ratio, count, FDR, and background remain authoritative in the input table.");
+  }
+  if (definition.id === "geographic-map") {
+    const invalidLatitudes = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping.latitude]); return value === null || value < -90 || value > 90; }).length;
+    const invalidLongitudes = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping.longitude]); return value === null || value < -180 || value > 180; }).length;
+    const invalidValues = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? -1) < 0).length;
+    if (invalidLatitudes > 0 || invalidLongitudes > 0) errors.push(`Geographic coordinates must satisfy latitude [-90, 90] and longitude [-180, 180]; invalid latitude rows: ${invalidLatitudes}, longitude rows: ${invalidLongitudes}.`);
+    if (invalidValues > 0) errors.push(`Geographic magnitude must be non-negative; invalid rows: ${invalidValues}.`);
+    const sites = dataset.rows.map((row) => row[mapping.label]?.trim());
+    const mappedGroups = mapping.group ? dataset.rows.map((row) => row[mapping.group]?.trim()) : ["Sites"];
+    if (mapping.group && mappedGroups.some((group) => !group)) errors.push("Mapped geographic groups must be non-empty on every row; remove the mapping or supply a group for each site.");
+    if (new Set(sites).size !== sites.length) errors.push("Geographic point map requires unique site labels; distinguish or aggregate duplicate sites upstream.");
+    if (dataset.rows.length > 30) errors.push("Geographic point map supports at most 30 labelled sites in the compact figure.");
+    if (settings) {
+      const groups = [...new Set(mappedGroups.filter(Boolean))];
+      const footer = categoryFooterLayoutMetrics(definition.id, settings, groups);
+      if (!footer.bottomFits) errors.push(`Geographic group legend needs ${footer.rows} footer rows, which does not fit the ${footer.frame.bottom} px compact footer; reduce tick size or merge groups into fewer rows.`);
+      if (!footer.labelsFit) errors.push("Geographic group names cannot fit their compact legend cells; increase width or shorten the group labels.");
+      const layout = geographicPointLayout(settings, dataset.rows.map((row) => ({ label: row[mapping.label], latitude: parseNumericValue(row[mapping.latitude]) ?? 0, longitude: parseNumericValue(row[mapping.longitude]) ?? 0, value: parseNumericValue(row[mapping.value]) ?? 0 })));
+      if (layout.markCollisionPairs > 0) errors.push(`Geographic point map has ${layout.markCollisionPairs} overlapping point pair${layout.markCollisionPairs === 1 ? "" : "s"} at the current size; increase figure dimensions, reduce point size, or aggregate/offset nearby sites.`);
+      if (settings.showLabels && layout.labelCollisionCount > 0) errors.push(`Geographic point map cannot place ${layout.labelCollisionCount} site label${layout.labelCollisionCount === 1 ? "" : "s"} without overlap at the current size; increase dimensions, shorten labels, hide labels, or filter sites.`);
+    }
+    warnings.push("The equirectangular locator map distorts distance and area and does not establish geographic causation or administrative membership.");
+  }
+  if (definition.id === "petal") {
+    const invalid = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? -1) < 0).length;
+    if (invalid > 0) errors.push(`Petal values must be non-negative; invalid rows: ${invalid}.`);
+    const labels = dataset.rows.map((row) => row[mapping.label]?.trim());
+    if (new Set(labels).size !== labels.length) errors.push("Petal categories must be unique; aggregate duplicate categories upstream.");
+    if (dataset.rows.length < 3 || dataset.rows.length > 12) errors.push("Petal view requires 3–12 categories.");
+    if (settings) { const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length }); if (layout.petalArcSpacing < layout.petalMinimum) errors.push(`Petal labels have ${layout.petalArcSpacing.toFixed(1)} px of arc spacing, below the ${layout.petalMinimum.toFixed(1)} px text budget; increase size, hide labels, or reduce categories.`); }
+    warnings.push("Petal length is a decorative approximate encoding; use a common-baseline bar or dot plot for precise comparison.");
+  }
+  if (definition.id === "word-cloud") {
+    const invalid = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? 0) <= 0).length; const labels = dataset.rows.map((row) => row[mapping.label]?.trim());
+    if (invalid > 0) errors.push(`Word-cloud weights must be strictly positive; invalid rows: ${invalid}.`);
+    if (new Set(labels).size !== labels.length) errors.push("Word-cloud terms must be unique; aggregate duplicate labels upstream.");
+    if (dataset.rows.length < 3 || dataset.rows.length > 40) errors.push("Word cloud requires 3–40 unique terms.");
+    if (settings) { const layout = enrichmentSpecializedLayoutMetrics(definition.id, settings, { rowCount: dataset.rows.length }); if (layout.cloudCellHeight < 30 || layout.cloudCellWidth < 34) errors.push(`Word-cloud cells would be ${layout.cloudCellWidth.toFixed(1)} × ${layout.cloudCellHeight.toFixed(1)} px, too small for the 28 px maximum word size; increase figure size or reduce terms.`); }
+    warnings.push("Font size supports approximate prominence only; position and color have no quantitative meaning.");
+  }
 
   const pointCoordinateTypes: PlotType[] = ["manhattan"];
   const intervalCoordinateTypes: PlotType[] = ["chromosome-ideogram", "snp-density", "genome-tracks"];

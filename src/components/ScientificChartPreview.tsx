@@ -773,7 +773,7 @@ export function ScientificChartPreview({ svgRef, type, dataset, mapping, setting
       <desc>{definition.summary} Generated in LabNest Visualization Studio.</desc>
       <rect width={frame.width} height={frame.height} fill="#FFFFFF" />
       <defs><clipPath id={`plot-area-${type}`}><rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} /></clipPath></defs>
-      <style>{`[data-plot-data] path,[data-plot-data] circle,[data-plot-data] rect,[data-plot-data] line,[data-plot-data] polyline,[data-plot-data] polygon,[data-plot-data] text[data-plot-label]{clip-path:url(#plot-area-${type})}`}</style>
+      <style>{`[data-plot-data] path:not([data-no-clip]),[data-plot-data] circle:not([data-no-clip]),[data-plot-data] rect:not([data-no-clip]),[data-plot-data] line:not([data-no-clip]),[data-plot-data] polyline:not([data-no-clip]),[data-plot-data] polygon:not([data-no-clip]),[data-plot-data] text[data-plot-label]:not([data-no-clip]){clip-path:url(#plot-area-${type})}`}</style>
       <ChartTitle frame={frame} settings={settings} color={CHART_TEXT_COLOR} />
       {content}
     </svg>

@@ -76,6 +76,14 @@ export type PlotType =
   | "km"
   | "survival-forest"
   | "roc"
+  | "funnel"
+  | "precision-recall"
+  | "calibration"
+  | "decision-curve"
+  | "nomogram"
+  | "lasso-path"
+  | "km-cutoff"
+  | "risk-score"
   | "venn"
   | "upset"
   | "sankey"
@@ -185,6 +193,7 @@ export type PlotDataExample = {
   data: string;
   mapping?: Record<string, string>;
   metadata?: string;
+  settings?: Partial<VisualizationSettings>;
 };
 
 export type PlotReference = {
@@ -349,6 +358,11 @@ export type VisualizationSettings = {
   networkEdgeOpacity: number;
   treeOrientation: "vertical" | "horizontal";
   setInputMode: "auto" | "membership" | "peak-overlap";
+  rocInputMode: "raw" | "precomputed-time";
+  calibrationBinCount: number;
+  decisionThresholdMinimum: number;
+  decisionThresholdMaximum: number;
+  decisionThresholdStep: number;
   vennLayout: "auto" | "classic" | "radial";
   vennProportional: boolean;
   upsetMaxIntersections: number;
@@ -482,6 +496,11 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   networkEdgeOpacity: 0.62,
   treeOrientation: "vertical",
   setInputMode: "auto",
+  rocInputMode: "raw",
+  calibrationBinCount: 8,
+  decisionThresholdMinimum: 0.05,
+  decisionThresholdMaximum: 0.8,
+  decisionThresholdStep: 0.01,
   vennLayout: "auto",
   vennProportional: false,
   upsetMaxIntersections: 10,
@@ -1020,9 +1039,25 @@ function buildRocExample() {
     const score = truth
       ? model.positiveBase + model.positiveSpan * (1 - rank) + wave
       : model.negativeBase + model.negativeSpan * (1 - rank) - wave;
-    return `${truth}\t${Math.max(0.01, Math.min(0.99, score)).toFixed(4)}\t${model.name}`;
+    return `S${String(index + 1).padStart(2, "0")}\t${truth}\t${Math.max(0.01, Math.min(0.99, score)).toFixed(4)}\t${model.name}`;
   }));
-  return `truth\tscore\tmodel\n${rows.join("\n")}`;
+  return `sample\ttruth\tscore\tmodel\n${rows.join("\n")}`;
+}
+
+function buildTimeDependentRocExample() {
+  const curves = [
+    { model: "Clinical model", horizon: 12, auc: 0.742, lower: 0.681, upper: 0.803, lift: 0.66 },
+    { model: "Clinical model", horizon: 36, auc: 0.781, lower: 0.724, upper: 0.838, lift: 0.74 },
+    { model: "Integrated model", horizon: 12, auc: 0.816, lower: 0.764, upper: 0.868, lift: 0.83 },
+    { model: "Integrated model", horizon: 36, auc: 0.847, lower: 0.799, upper: 0.895, lift: 0.91 },
+  ];
+  const rows = curves.flatMap((curve) => Array.from({ length: 11 }, (_, index) => {
+    const fpr = index / 10;
+    const tpr = Math.min(1, Math.pow(fpr, 1 / (1 + curve.lift * 3.2)));
+    const halfWidth = index === 0 || index === 10 ? 0 : 0.035 + Math.sin(Math.PI * fpr) * 0.025;
+    return [fpr, tpr, Math.max(0, tpr - halfWidth), Math.min(1, tpr + halfWidth), curve.horizon, curve.model, curve.auc, curve.lower, curve.upper].map((value) => typeof value === "number" ? value.toFixed(3) : value).join("\t");
+  }));
+  return `fpr\ttpr\ttpr_lower\ttpr_upper\thorizon\tgroup\tauc\tauc_lower\tauc_upper\n${rows.join("\n")}`;
 }
 
 const demoChromosomeLengths = [249_250_621, 243_199_373, 198_022_430, 191_154_276, 180_915_260, 171_115_067, 159_138_663, 146_364_022, 141_213_431, 135_534_747, 135_006_516, 133_851_895];
@@ -1284,6 +1319,62 @@ Male vs female\t1.11\t0.84\t1.47\tClinical
 Stage III-IV\t2.08\t1.45\t2.98\tClinical
 High signature\t1.73\t1.20\t2.49\tMolecular`,
   roc: buildRocExample(),
+  rocTimeDependent: buildTimeDependentRocExample(),
+  funnel: `study\teffect\tse
+Study A\t0.42\t0.11
+Study B\t0.31\t0.16
+Study C\t0.58\t0.13
+Study D\t0.27\t0.22
+Study E\t0.49\t0.09
+Study F\t0.18\t0.25
+Study G\t0.55\t0.18`,
+  nomogram: `predictor\tlevel\tpoints
+Age\t40\t8
+Age\t60\t24
+Age\t80\t42
+Stage\tI\t0
+Stage\tII\t28
+Stage\tIII\t61
+Biomarker\tLow\t0
+Biomarker\tHigh\t54`,
+  lasso: `lambda\tcoefficient\tfeature
+1\t0\tGene A
+0.3\t0.12\tGene A
+0.1\t0.31\tGene A
+0.03\t0.48\tGene A
+1\t0\tGene B
+0.3\t-0.08\tGene B
+0.1\t-0.21\tGene B
+0.03\t-0.38\tGene B
+1\t0\tClinical score
+0.3\t0.18\tClinical score
+0.1\t0.26\tClinical score
+0.03\t0.29\tClinical score`,
+  kmCutoff: `time\tevent\tscore\tcutoff
+4\t1\t0.82\t0.50
+7\t0\t0.31\t0.50
+9\t1\t0.74\t0.50
+12\t1\t0.65\t0.50
+14\t0\t0.42\t0.50
+18\t1\t0.58\t0.50
+20\t0\t0.22\t0.50
+24\t0\t0.37\t0.50
+28\t1\t0.91\t0.50
+32\t0\t0.48\t0.50
+36\t0\t0.18\t0.50
+40\t1\t0.69\t0.50`,
+  riskScore: `sample\tscore\toutcome
+S01\t0.12\t0
+S02\t0.19\t0
+S03\t0.25\t1
+S04\t0.31\t0
+S05\t0.39\t0
+S06\t0.47\t1
+S07\t0.54\t0
+S08\t0.62\t1
+S09\t0.71\t1
+S10\t0.83\t1
+S11\t0.91\t1`,
   sets: `item\tset
 TP53\tRNA-seq
 EGFR\tRNA-seq
@@ -1910,15 +2001,54 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id: "roc",
     name: "ROC",
     family: "Model evaluation",
-    summary: "ROC curves and trapezoidal AUC calculated directly from binary outcomes and continuous scores.",
-    inputHint: "Truth must be 0/1. Use held-out or externally validated prediction scores to avoid optimistic performance.",
+    summary: "Raw multi-model ROC or supplied time-dependent ROC curves with explicit uncertainty and evaluation horizons.",
+    inputHint: "Raw mode calculates ROC/AUC from 0/1 outcomes and held-out scores. Time-dependent mode displays upstream estimates and pointwise 95% confidence limits without recomputing censoring-aware statistics.",
     roles: [
       { key: "truth", label: "True class (0 / 1)", kind: "number", required: true },
       { key: "score", label: "Prediction score", kind: "number", required: true },
       { key: "group", label: "Model", kind: "category", required: false },
+      { key: "fpr", label: "False-positive rate", kind: "number", required: true },
+      { key: "tpr", label: "True-positive rate", kind: "number", required: true },
+      { key: "tprLower", label: "TPR lower 95% CI", kind: "number", required: true },
+      { key: "tprUpper", label: "TPR upper 95% CI", kind: "number", required: true },
+      { key: "horizon", label: "Evaluation horizon", kind: "number", required: true },
+      { key: "auc", label: "AUC", kind: "number", required: true },
+      { key: "aucLower", label: "AUC lower 95% CI", kind: "number", required: true },
+      { key: "aucUpper", label: "AUC upper 95% CI", kind: "number", required: true },
     ],
-    defaultMapping: { truth: "truth", score: "score", group: "model" },
+    defaultMapping: { truth: "truth", score: "score", group: "model", fpr: "", tpr: "", tprLower: "", tprUpper: "", horizon: "", auc: "", aucLower: "", aucUpper: "" },
     sampleData: samples.roc,
+    examples: [
+      { label: "Example 1 · Raw predictions", description: "Two models evaluated on binary outcomes; ROC and trapezoidal AUC are calculated in-browser.", data: samples.roc, mapping: { truth: "truth", score: "score", group: "model", fpr: "", tpr: "", tprLower: "", tprUpper: "", horizon: "", auc: "", aucLower: "", aucUpper: "" } },
+      { label: "Example 2 · Time-dependent + CI", description: "Censoring-aware time-dependent ROC coordinates, pointwise TPR intervals, horizons, and AUC intervals supplied by an upstream survival model.", data: samples.rocTimeDependent, mapping: { truth: "", score: "", group: "group", fpr: "fpr", tpr: "tpr", tprLower: "tpr_lower", tprUpper: "tpr_upper", horizon: "horizon", auc: "auc", aucLower: "auc_lower", aucUpper: "auc_upper" }, settings: { rocInputMode: "precomputed-time" } },
+    ],
+  },
+  {
+    id: "funnel", name: "Funnel", family: "Evidence synthesis", summary: "Study effects against precision with inverse-variance center and pseudo 95% funnel limits.", inputHint: "One row per independent study estimate. SE must be positive and on the same effect scale; asymmetry is not by itself proof of publication bias.",
+    roles: [{ key: "label", label: "Study", kind: "label", required: true }, { key: "estimate", label: "Effect estimate", kind: "number", required: true }, { key: "error", label: "Standard error", kind: "number", required: true }], defaultMapping: { label: "study", estimate: "effect", error: "se" }, sampleData: samples.funnel,
+  },
+  ...(["precision-recall", "calibration", "decision-curve"] as const).map((id) => ({
+    id, name: id === "precision-recall" ? "Precision–recall" : id === "calibration" ? "Calibration" : "Decision curve", family: "Model evaluation",
+    summary: id === "precision-recall" ? "Precision–recall curves and average precision from binary outcomes and held-out scores." : id === "calibration" ? "Grouped observed-versus-predicted calibration with Wilson 95% intervals and identity reference." : "Net benefit across threshold probabilities with treat-all and treat-none references.",
+    inputHint: id === "precision-recall" ? "One row per subject per model. Outcome must be 0/1; any continuous held-out ranking score is accepted. Average precision is prevalence-dependent." : "One row per subject per model. Outcome must be 0/1; prediction must be a held-out probability in [0,1]. Repeated subjects across model names are allowed.",
+    roles: [{ key: "subject", label: "Subject ID", kind: "label" as const, required: false }, { key: "truth", label: "Observed outcome (0 / 1)", kind: "number" as const, required: true }, { key: "score", label: id === "precision-recall" ? "Prediction / ranking score" : "Predicted probability", kind: "number" as const, required: true }, { key: "group", label: "Model", kind: "category" as const, required: false }],
+    defaultMapping: { subject: "sample", truth: "truth", score: "score", group: "model" }, sampleData: samples.roc,
+  })),
+  {
+    id: "nomogram", name: "Nomogram", family: "Clinical prediction", summary: "Aligned predictor-level point assignments supplied by a documented fitted model.", inputHint: "Provide predictor, displayed level, and already-derived points. This renderer does not fit a model or infer individual risk.",
+    roles: [{ key: "group", label: "Predictor", kind: "category", required: true }, { key: "label", label: "Level", kind: "label", required: true }, { key: "value", label: "Assigned points", kind: "number", required: true }], defaultMapping: { group: "predictor", label: "level", value: "points" }, sampleData: samples.nomogram,
+  },
+  {
+    id: "lasso-path", name: "LASSO path", family: "Model development", summary: "Coefficient trajectories across positive regularization parameters from an upstream penalized model.", inputHint: "Provide one row per feature and lambda. Paths are descriptive; model selection and cross-validation must be performed upstream without test-set leakage.",
+    roles: [{ key: "x", label: "Lambda", kind: "number", required: true }, { key: "y", label: "Coefficient", kind: "number", required: true }, { key: "group", label: "Feature", kind: "category", required: true }], defaultMapping: { x: "lambda", y: "coefficient", group: "feature" }, sampleData: samples.lasso,
+  },
+  {
+    id: "km-cutoff", name: "Cutoff KM", family: "Survival", summary: "Kaplan–Meier curves stratified by a single supplied risk-score cutoff.", inputHint: "Provide subject-level follow-up, event, risk score, and one constant cutoff derived upstream. Optimizing and evaluating the cutoff in the same cohort is exploratory and optimistic.",
+    roles: [{ key: "time", label: "Follow-up time", kind: "number", required: true }, { key: "event", label: "Event (0 / 1)", kind: "number", required: true }, { key: "score", label: "Risk score", kind: "number", required: true }, { key: "cutoff", label: "Supplied cutoff", kind: "number", required: true }], defaultMapping: { time: "time", event: "event", score: "score", cutoff: "cutoff" }, sampleData: samples.kmCutoff,
+  },
+  {
+    id: "risk-score", name: "Risk-score panel", family: "Model evaluation", summary: "Subjects ranked by supplied risk score with an aligned binary-outcome strip.", inputHint: "One row per subject with a score and observed 0/1 outcome. This descriptive panel does not estimate discrimination, calibration, or clinical utility.",
+    roles: [{ key: "label", label: "Subject", kind: "label", required: true }, { key: "score", label: "Risk score", kind: "number", required: true }, { key: "truth", label: "Observed outcome (0 / 1)", kind: "number", required: true }], defaultMapping: { label: "sample", score: "score", truth: "outcome" }, sampleData: samples.riskScore,
   },
   ...(["venn", "upset"] as const).map((id) => ({
     id,
@@ -2283,6 +2413,14 @@ export const plotReferences = {
   kaplanMeier: { citation: "Kaplan & Meier, 1958. Nonparametric Estimation from Incomplete Observations. JASA.", href: "https://doi.org/10.1080/01621459.1958.10501452" },
   forest: { citation: "Lewis & Clarke, 2001. Forest plots: trying to see the wood and the trees. BMJ.", href: "https://doi.org/10.1136/bmj.322.7300.1479" },
   roc: { citation: "Hanley & McNeil, 1982. The meaning and use of the area under a ROC curve. Radiology.", href: "https://doi.org/10.1148/radiology.143.1.7063747" },
+  funnel: { citation: "Egger et al., 1997. Bias in meta-analysis detected by a simple, graphical test. BMJ.", href: "https://doi.org/10.1136/bmj.315.7109.629" },
+  precisionRecall: { citation: "Saito & Rehmsmeier, 2015. The Precision-Recall Plot Is More Informative than the ROC Plot When Evaluating Binary Classifiers on Imbalanced Datasets. PLoS ONE.", href: "https://doi.org/10.1371/journal.pone.0118432" },
+  calibration: { citation: "Van Calster et al., 2019. Calibration: the Achilles heel of predictive analytics. BMC Medicine.", href: "https://doi.org/10.1186/s12916-019-1466-7" },
+  decisionCurve: { citation: "Vickers & Elkin, 2006. Decision curve analysis: a novel method for evaluating prediction models. Medical Decision Making.", href: "https://doi.org/10.1177/0272989X06295361" },
+  nomogram: { citation: "Iasonos et al., 2008. How to build and interpret a nomogram for cancer prognosis. Journal of Clinical Oncology.", href: "https://doi.org/10.1200/JCO.2007.12.9791" },
+  lasso: { citation: "Tibshirani, 1996. Regression Shrinkage and Selection via the Lasso. Journal of the Royal Statistical Society B.", href: "https://doi.org/10.1111/j.2517-6161.1996.tb02080.x" },
+  cutoff: { citation: "Altman et al., 1994. Dangers of using optimal cutpoints in the evaluation of prognostic factors. Journal of the National Cancer Institute.", href: "https://doi.org/10.1093/jnci/86.11.829" },
+  tripod: { citation: "Collins et al., 2015. Transparent Reporting of a multivariable prediction model for Individual Prognosis Or Diagnosis (TRIPOD). Annals of Internal Medicine.", href: "https://doi.org/10.7326/M14-0697" },
   venn: { citation: "Venn, 1880. On the Diagrammatic and Mechanical Representation of Propositions and Reasonings. Philosophical Magazine.", href: "https://doi.org/10.1080/14786448008626877" },
   upset: { citation: "Lex et al., 2014. UpSet: Visualization of Intersecting Sets. IEEE TVCG.", href: "https://doi.org/10.1109/TVCG.2014.2346248" },
   sankeyHistory: { citation: "Schmidt, 2008. The Sankey Diagram in Energy and Material Flow Management: Part I. J Ind Ecol.", href: "https://doi.org/10.1111/j.1530-9290.2008.00004.x" },
@@ -2520,12 +2658,20 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     references: [plotReferences.forest],
   },
   roc: {
-    definition: "遍历二分类预测阈值，以假阳性率为 X、真阳性率为 Y，展示敏感度与特异度之间的权衡。",
-    suitableData: "二分类真实标签与连续预测分数，最好来自验证集或外部队列。",
-    answers: "模型区分两类对象的能力和不同阈值下敏感度/特异度权衡如何；不能说明校准。",
+    definition: "普通模式遍历二分类预测阈值；时间依赖模式显示上游删失感知方法提供的 FPR、TPR、逐点区间、评价时点和 AUC 区间。",
+    suitableData: "验证集或外部队列的二分类真实标签与连续预测分数，或由明确生存方法计算的时间依赖 ROC 坐标与不确定性。",
+    answers: "模型区分两类对象的能力和不同阈值下敏感度/特异度权衡如何；时间依赖模式还比较指定时点，但两种模式都不能说明校准或临床效用。",
     origin: "ROC 的思想源自信号检测问题，随后进入诊断检验和预测模型评价；AUC 可解释为随机阳性样本得分高于随机阴性样本的概率。",
     references: [plotReferences.roc],
   },
+  funnel: { definition: "把独立研究的效应量放在横轴、精度 1/SE 放在纵轴，并叠加逆方差中心与伪 95% 漏斗边界。", suitableData: "同一效应尺度上的研究级估计与正标准误。", answers: "研究结果是否围绕汇总效应近似对称；不对称也可能来自异质性、小样本效应或方法差异，不能单独证明发表偏倚。", origin: "漏斗图源于荟萃分析中用于观察小样本效应和结果不对称性的图形诊断方法。", references: [plotReferences.funnel] },
+  "precision-recall": { definition: "遍历分类阈值，以召回率为横轴、阳性预测值为纵轴，并计算 average precision。", suitableData: "二分类结局与独立验证或交叉验证得到的连续分数。", answers: "在类别不平衡时，模型找回阳性与保持阳性预测值之间的权衡。", references: [plotReferences.precisionRecall, plotReferences.tripod] },
+  calibration: { definition: "按预测概率分箱，比较每箱平均预测概率与实际事件比例，并显示 Wilson 95% 区间和理想对角线。", suitableData: "0/1 观察结局和真正概率尺度的预测值。", answers: "预测概率是否系统性过高或过低；分箱图不能替代校准截距、斜率和外部验证。", references: [plotReferences.calibration, plotReferences.tripod] },
+  "decision-curve": { definition: "在一系列阈值概率下计算模型净获益，并与 treat-all 和 treat-none 策略比较。", suitableData: "0/1 结局与验证集预测概率；阈值范围应有临床意义。", answers: "在给定错判权衡下使用模型是否比全做或全不做更有净获益；不是治疗建议。", references: [plotReferences.decisionCurve, plotReferences.tripod] },
+  nomogram: { definition: "把已拟合模型中不同预测变量水平转换成对齐的积分标尺。", suitableData: "上游模型已经给出的 predictor-level points。", answers: "各变量水平如何贡献模型积分；本图不重新拟合模型，也不能证明临床有效性。", references: [plotReferences.nomogram, plotReferences.tripod] },
+  "lasso-path": { definition: "展示 L1 正则化参数变化时各特征系数从零进入并收缩的轨迹。", suitableData: "上游 penalized regression 输出的 lambda、feature、coefficient 长表。", answers: "不同正则化强度下模型稀疏性和系数稳定性如何；最终 lambda 必须在训练流程内选择。", references: [plotReferences.lasso, plotReferences.tripod] },
+  "km-cutoff": { definition: "使用一个明确提供的风险分数截点把受试者分组，再计算 Kaplan–Meier 曲线。", suitableData: "随访时间、删失事件、连续风险分数和同一常数截点。", answers: "该预先指定或上游优化截点下两组生存经验分布如何；同队列寻优再评价会夸大差异。", references: [plotReferences.kaplanMeier, plotReferences.cutoff] },
+  "risk-score": { definition: "按风险分数排序受试者，并对齐显示二分类结局条带。", suitableData: "每位受试者一个风险分数和0/1观察结局。", answers: "分数排序与结局分布的描述性关系；不能替代 ROC、校准、DCA 或外部验证。", references: [plotReferences.tripod] },
   venn: {
     definition: "用经典圆形（2–3 集合）或径向精确交集索引（4–7 集合）表示观察到的集合组合；径向模式不是闭合曲线 Venn 图。",
     suitableData: "2–7 个集合的 item–set 成员长表，或带 set、chromosome、start、end 的 genomic peak 区间。",
@@ -2740,6 +2886,7 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
 const advancedRendererIds = new Set<PlotType>([
   "line", "scatter", "correlation", "pca", "pcoa", "umap", "tsne", "nmds", "box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "ma", "quadrant", "errorbar", "area", "lollipop",
   "heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "gsea", "km", "survival-forest", "roc", "venn",
+  "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score",
   "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos",
   "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram",
   "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo",
@@ -2750,7 +2897,7 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
   "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "opacity", "grid",
   "categoricalColors",
 ];
-const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap"]);
+const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
   line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
@@ -2776,6 +2923,9 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
   "correlation-heatmap": ["correlationMethod", "heatmapDisplay", "heatmapTriangle", "clusterRows", "clusterColumns", "heatmapDistance", "heatmapLinkage", "heatmapShowDendrograms", "heatmapRowClusters", "heatmapColumnClusters", "heatmapShowValues", "heatmapShowSidePlot", "heatmapSidePlotStatistic", "heatmapLabelDensity", "heatmapRowAnnotationData", "heatmapColumnAnnotationData", "divergingLow", "divergingMid", "divergingHigh"],
   enrichment: ["continuousLow", "continuousHigh"], "enrichment-bar": ["continuousLow", "continuousHigh"],
   km: ["showRiskTable"], "survival-forest": ["forestReferenceValue"],
+  roc: ["rocInputMode"],
+  calibration: ["calibrationBinCount"],
+  "decision-curve": ["decisionThresholdMinimum", "decisionThresholdMaximum", "decisionThresholdStep"],
   pie: ["compositionLabelMode"], donut: ["compositionLabelMode", "donutHole"], waffle: ["compositionLabelMode", "waffleCells"],
   rose: ["compositionLabelMode", "radialMaximum"], treemap: ["compositionLabelMode", "hierarchyGap"], sunburst: ["compositionLabelMode", "hierarchyGap"],
   radar: ["radarFillOpacity", "radialMaximum"], "polar-profile": ["radarFillOpacity", "radialMaximum"],
@@ -2806,6 +2956,14 @@ const specializedSettingKeys: Partial<Record<PlotType, Array<keyof Visualization
 };
 
 const newAxislessSettingKeys: Partial<Record<PlotType, ReadonlySet<keyof VisualizationSettings>>> = {
+  funnel: new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "grid", "categoricalColors"]),
+  "precision-recall": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors"]),
+  calibration: new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "pointSize", "grid", "categoricalColors", "calibrationBinCount"]),
+  "decision-curve": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors", "decisionThresholdMinimum", "decisionThresholdMaximum", "decisionThresholdStep"]),
+  nomogram: new Set(["title", "fontFamily", "xLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "pointSize", "categoricalColors"]),
+  "lasso-path": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors"]),
+  "km-cutoff": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "gridLineWidth", "dataLineWidth", "grid", "categoricalColors"]),
+  "risk-score": new Set(["title", "fontFamily", "xLabel", "yLabel", "width", "height", "titleSize", "axisLabelSize", "tickSize", "legendSize", "axisLineWidth", "dataLineWidth", "pointSize", "categoricalColors"]),
   venn: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "dataLineWidth", "opacity", "categoricalColors", "setInputMode", "vennLayout", "vennProportional"]),
   upset: new Set(["title", "fontFamily", "width", "height", "titleSize", "axisLabelSize", "tickSize", "axisLineWidth", "opacity", "categoricalColors", "setInputMode", "upsetMaxIntersections"]),
   sankey: new Set(["title", "fontFamily", "width", "height", "titleSize", "tickSize", "opacity", "categoricalColors", "showLabels"]),
@@ -2864,6 +3022,7 @@ function numericAxesFor(type: PlotType): Array<"x" | "y"> {
 }
 
 export function activeNumericAxes(type: PlotType, settings: Pick<VisualizationSettings, "swapAxes" | "barVariant" | "distributionOrientation" | "associationVariant" | "ordinationView">): Array<"x" | "y"> {
+  if (["funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"].includes(type)) return [];
   if (type === "bar") {
     if (settings.barVariant === "polar") return [];
     return settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant) ? ["x"] : ["y"];
@@ -2882,6 +3041,11 @@ export function isPlotRoleActive(type: PlotType, roleKey: string, settings: Visu
   if (type === "venn" || type === "upset") {
     if (roleKey === "item") return settings.setInputMode !== "peak-overlap";
     if (["chromosome", "start", "end"].includes(roleKey)) return settings.setInputMode !== "membership";
+  }
+  if (type === "roc") {
+    const precomputedRoles = ["fpr", "tpr", "tprLower", "tprUpper", "horizon", "auc", "aucLower", "aucUpper"];
+    if (["truth", "score"].includes(roleKey)) return settings.rocInputMode === "raw";
+    if (precomputedRoles.includes(roleKey)) return settings.rocInputMode === "precomputed-time";
   }
   if (type !== "bar") return true;
   if (roleKey === "secondary") return ["dual-axis", "overlay"].includes(settings.barVariant);
@@ -3168,19 +3332,19 @@ export function parseRatioValue(value: string | undefined) {
 
 const mappingAliases: Record<string, string[]> = {
   category: ["category", "condition", "sample", "name", "term"],
-  value: ["value", "weight", "mean", "expression", "score", "abundance", "count", "variantcount", "density"],
+  value: ["value", "weight", "mean", "expression", "score", "points", "abundance", "count", "variantcount", "density"],
   secondary: ["secondary", "secondaryvalue", "comparison", "overlay", "value2"],
   target: ["target", "reference", "goal", "benchmark", "to", "receiver"],
   facet: ["facet", "panel", "stratum", "cohort"],
-  subject: ["subject", "subjectid", "pair", "pairid", "participant", "sampleid"],
-  group: ["group", "class", "condition", "cluster", "ontology"],
+  subject: ["subject", "subjectid", "pair", "pairid", "participant", "sample", "sampleid"],
+  group: ["group", "class", "condition", "cluster", "ontology", "model", "predictor", "feature"],
   series: ["series", "group", "condition", "class"],
-  x: ["x", "time", "dose", "pc1", "dim1", "dimension1", "umap1", "tsne1", "nmds1"],
-  y: ["y", "response", "pc2", "dim2", "dimension2", "umap2", "tsne2", "nmds2"],
+  x: ["x", "time", "dose", "lambda", "pc1", "dim1", "dimension1", "umap1", "tsne1", "nmds1"],
+  y: ["y", "response", "coefficient", "pc2", "dim2", "dimension2", "umap2", "tsne2", "nmds2"],
   z: ["z", "pc3", "dim3", "dimension3", "umap3", "tsne3", "nmds3"],
   shape: ["shape", "batch", "cohort", "site", "sex"],
   error: ["error", "sd", "sem", "se", "stderr", "standarddeviation", "standarderror"],
-  label: ["label", "gene", "feature", "id", "name"],
+  label: ["label", "gene", "feature", "id", "name", "study", "sample", "level"],
   effect: ["log2fc", "logfc", "effect", "estimate"],
   pValue: ["padj", "fdr", "adjustedpvalue", "pvalue", "p"],
   term: ["term", "pathway", "description", "name"],
@@ -3191,11 +3355,12 @@ const mappingAliases: Record<string, string[]> = {
   hit: ["hit", "member", "membership", "ingeneset"],
   time: ["time", "followuptime", "survivaltime", "os", "pfs"],
   event: ["event", "status", "death", "outcome"],
-  estimate: ["estimate", "hr", "hazardratio", "or", "oddsratio"],
+  estimate: ["estimate", "effect", "hr", "hazardratio", "or", "oddsratio"],
   lower: ["lower", "lowerci", "cilower", "lcl"],
   upper: ["upper", "upperci", "ciupper", "ucl"],
   truth: ["truth", "class", "outcome", "label", "event"],
   score: ["score", "prediction", "probability", "risk", "runninges", "enrichmentscore", "es"],
+  cutoff: ["cutoff", "threshold"],
   item: ["item", "gene", "feature", "id"],
   set: ["set", "geneset", "list", "collection"],
   source: ["source", "from", "sender"],
@@ -4003,11 +4168,164 @@ export function validatePlotDataset(
     if (invalidTimes > 0) errors.push(`Follow-up time contains ${invalidTimes} negative value${invalidTimes === 1 ? "" : "s"}.`);
   }
 
-  if (definition.id === "roc" && mapping.truth) {
+  if (definition.id === "roc" && (settings?.rocInputMode ?? "raw") === "raw" && mapping.truth) {
     const invalidTruth = dataset.rows.filter((row) => ![0, 1].includes(parseNumericValue(row[mapping.truth]) ?? Number.NaN)).length;
     if (invalidTruth > 0) errors.push(`True class contains ${invalidTruth} value${invalidTruth === 1 ? "" : "s"} other than 0 or 1.`);
-    const classes = new Set(dataset.rows.map((row) => parseNumericValue(row[mapping.truth])));
-    if (invalidTruth === 0 && classes.size < 2) errors.push("ROC calculation requires both outcome classes (0 and 1).");
+    const groups = [...new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "Model" : "Model"))];
+    if (invalidTruth === 0) groups.forEach((group) => {
+      const classes = new Set(dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group).map((row) => parseNumericValue(row[mapping.truth])));
+      if (classes.size < 2) errors.push(groups.length === 1 ? "ROC calculation requires both outcome classes (0 and 1)." : `ROC model “${group}” requires both outcome classes (0 and 1).`);
+    });
+    warnings.push("ROC/AUC describe discrimination in the supplied predictions. They are not evidence of calibration, clinical utility, or external validation.");
+  }
+  if (definition.id === "roc" && settings) {
+    if ((settings.xMin !== null && settings.xMin > 0) || (settings.xMax !== null && settings.xMax < 1) || (settings.yMin !== null && settings.yMin > 0) || (settings.yMax !== null && settings.yMax < 1)) errors.push("ROC manual axis limits must contain the full [0, 1] false-positive and true-positive range so curve endpoints and confidence bands are not clipped.");
+  }
+
+  if (definition.id === "roc" && settings?.rocInputMode === "precomputed-time" && mapping.fpr && mapping.tpr) {
+    const probabilityRoles = ["fpr", "tpr", "tprLower", "tprUpper", "auc", "aucLower", "aucUpper"] as const;
+    probabilityRoles.forEach((role) => {
+      if (!mapping[role]) return;
+      const invalid = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping[role]]); return value === null || value < 0 || value > 1; }).length;
+      if (invalid > 0) errors.push(`${role} contains ${invalid} value${invalid === 1 ? "" : "s"} outside [0, 1].`);
+    });
+    const invalidHorizon = mapping.horizon ? dataset.rows.filter((row) => (parseNumericValue(row[mapping.horizon]) ?? 0) <= 0).length : 0;
+    if (invalidHorizon > 0) errors.push(`Evaluation horizon contains ${invalidHorizon} non-positive or missing value${invalidHorizon === 1 ? "" : "s"}.`);
+    const curveKeys = new Set(dataset.rows.map((row) => `${mapping.group ? row[mapping.group] || "Model" : "Model"}\u0000${parseNumericValue(row[mapping.horizon])}`));
+    const maximumCurves = settings.legendPosition === "bottom" ? 4 : settings.legendPosition === "right" ? Math.max(2, Math.floor((settings.height - (settings.title ? 48 : 24) - 58) / (settings.legendSize * 2 + 11))) : 12;
+    if (curveKeys.size > maximumCurves) errors.push(`The ${settings.legendPosition} time-dependent ROC layout can display ${maximumCurves} model × horizon curves at this height; reduce curves, hide the legend, or increase height.`);
+    curveKeys.forEach((key) => {
+      const [group, horizon] = key.split("\u0000");
+      const numericHorizon = Number(horizon);
+      const rows = dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group && parseNumericValue(row[mapping.horizon]) === numericHorizon).sort((a, b) => (parseNumericValue(a[mapping.fpr]) ?? 0) - (parseNumericValue(b[mapping.fpr]) ?? 0));
+      const monotone = rows.every((row, index) => index === 0 || (parseNumericValue(row[mapping.tpr]) ?? 0) >= (parseNumericValue(rows[index - 1][mapping.tpr]) ?? 0));
+      const startsAtOrigin = (parseNumericValue(rows[0]?.[mapping.fpr]) ?? -1) === 0 && (parseNumericValue(rows[0]?.[mapping.tpr]) ?? -1) === 0;
+      const endsAtOne = (parseNumericValue(rows.at(-1)?.[mapping.fpr]) ?? -1) === 1 && (parseNumericValue(rows.at(-1)?.[mapping.tpr]) ?? -1) === 1;
+      if (!monotone || !startsAtOrigin || !endsAtOne) errors.push(`ROC curve “${group} · ${horizon}” must be monotone and include (0,0) and (1,1).`);
+      const invalidIntervals = rows.filter((row) => {
+        const tpr = parseNumericValue(row[mapping.tpr]); const lower = parseNumericValue(row[mapping.tprLower]); const upper = parseNumericValue(row[mapping.tprUpper]);
+        const auc = parseNumericValue(row[mapping.auc]); const aucLower = parseNumericValue(row[mapping.aucLower]); const aucUpper = parseNumericValue(row[mapping.aucUpper]);
+        return tpr === null || lower === null || upper === null || lower > tpr || tpr > upper || auc === null || aucLower === null || aucUpper === null || aucLower > auc || auc > aucUpper;
+      }).length;
+      if (invalidIntervals > 0) errors.push(`ROC curve “${group} · ${horizon}” has ${invalidIntervals} unordered TPR or AUC confidence interval row${invalidIntervals === 1 ? "" : "s"}.`);
+      const aucTriples = new Set(rows.map((row) => [mapping.auc, mapping.aucLower, mapping.aucUpper].map((role) => row[role]).join("\u0000")));
+      if (aucTriples.size !== 1) errors.push(`ROC curve “${group} · ${horizon}” must repeat one consistent AUC and confidence interval across its coordinates.`);
+    });
+    warnings.push("Time-dependent ROC estimates are displayed as supplied. Document the censoring method, evaluation cohort, prediction horizon, and uncertainty procedure in the upstream analysis.");
+  }
+
+  if (["precision-recall", "calibration", "decision-curve", "risk-score"].includes(definition.id) && mapping.truth) {
+    const invalidTruth = dataset.rows.filter((row) => ![0, 1].includes(parseNumericValue(row[mapping.truth]) ?? Number.NaN)).length;
+    if (invalidTruth > 0) errors.push(`Observed outcome contains ${invalidTruth} value${invalidTruth === 1 ? "" : "s"} other than 0 or 1.`);
+    const groups = [...new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "Model" : "Model"))];
+    if (invalidTruth === 0) groups.forEach((group) => {
+      const classes = new Set(dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group).map((row) => parseNumericValue(row[mapping.truth])));
+      if (classes.size < 2) errors.push(`${definition.name} model “${group}” requires both observed outcome classes (0 and 1).`);
+    });
+    if (["calibration", "decision-curve"].includes(definition.id) && mapping.score) {
+      const outside = dataset.rows.filter((row) => { const value = parseNumericValue(row[mapping.score]); return value === null || value < 0 || value > 1; }).length;
+      if (outside > 0) errors.push(`Predicted probability contains ${outside} value${outside === 1 ? "" : "s"} outside [0, 1].`);
+    }
+  }
+  if (settings && ["precision-recall", "calibration", "decision-curve"].includes(definition.id)) {
+    const groups = new Set(dataset.rows.map((row) => mapping.group ? row[mapping.group] || "Model" : "Model"));
+    const plotHeight = Math.max(90, settings.height - (settings.title ? 48 : 24) - 58);
+    const maximumModels = Math.max(2, Math.min(12, Math.floor(plotHeight * 0.35 / (settings.legendSize + 4))));
+    if (groups.size > maximumModels) errors.push(`${definition.name} can display ${maximumModels} model labels in this compact ${settings.height}px-high figure; reduce models or increase height.`);
+    if (definition.id === "calibration") groups.forEach((group) => {
+      const count = dataset.rows.filter((row) => (mapping.group ? row[mapping.group] || "Model" : "Model") === group).length;
+      if (count < 20) warnings.push(`Calibration model “${group}” has only ${count} observations; grouped observed proportions and Wilson intervals will be unstable.`);
+    });
+  }
+  if (definition.id === "decision-curve" && mapping.group) {
+    const groups = [...new Set(dataset.rows.map((row) => row[mapping.group] || "Model"))];
+    if (groups.length > 1) {
+      if (!mapping.subject) errors.push("Multi-model decision curves require a Subject ID column so every model can be verified on the same cohort and outcomes.");
+      else {
+        const expectedGroups = [...groups].sort(); const subjectRows = new Map<string, typeof dataset.rows>();
+        const blankSubjects = dataset.rows.filter((row) => !row[mapping.subject]?.trim()).length;
+        if (blankSubjects > 0) errors.push(`Decision-curve Subject ID contains ${blankSubjects} blank value${blankSubjects === 1 ? "" : "s"}; every prediction must identify its subject.`);
+        dataset.rows.forEach((row) => { const subject = row[mapping.subject]; const rows = subjectRows.get(subject) ?? []; rows.push(row); subjectRows.set(subject, rows); });
+        subjectRows.forEach((rows, subject) => {
+          const observedGroups = [...new Set(rows.map((row) => row[mapping.group] || "Model"))].sort(); const truths = new Set(rows.map((row) => parseNumericValue(row[mapping.truth])));
+          if (observedGroups.length !== expectedGroups.length || observedGroups.some((group, index) => group !== expectedGroups[index]) || rows.length !== expectedGroups.length) errors.push(`Subject “${subject || "(blank)"}” must have exactly one prediction from every decision-curve model.`);
+          if (truths.size !== 1) errors.push(`Subject “${subject}” has inconsistent observed outcomes across decision-curve models.`);
+        });
+      }
+    }
+  }
+
+  if (definition.id === "funnel" && mapping.error) {
+    const invalid = dataset.rows.filter((row) => (parseNumericValue(row[mapping.error]) ?? 0) <= 0).length;
+    if (invalid > 0) errors.push(`Standard error must be strictly positive in every study; invalid rows: ${invalid}.`);
+  }
+  if (definition.id === "calibration" && settings && (!Number.isInteger(settings.calibrationBinCount) || settings.calibrationBinCount < 3 || settings.calibrationBinCount > 15)) errors.push("Calibration equal-frequency bins must be an integer from 3 to 15.");
+  if (definition.id === "decision-curve" && settings) {
+    const { decisionThresholdMinimum: minimum, decisionThresholdMaximum: maximum, decisionThresholdStep: step } = settings;
+    if (![minimum, maximum, step].every(Number.isFinite) || minimum <= 0 || minimum >= maximum || maximum >= 1) errors.push("Decision-curve thresholds must satisfy 0 < minimum < maximum < 1.");
+    if (!Number.isFinite(step) || step < 0.005 || step > 0.05) errors.push("Decision-curve grid resolution must be between 0.005 and 0.05.");
+    const gridCount = Number.isFinite(step) && step > 0 ? Math.ceil((maximum - minimum) / step) + 1 : Number.POSITIVE_INFINITY;
+    if (gridCount < 5 || gridCount > 200) errors.push(`Decision-curve threshold grid contains ${Number.isFinite(gridCount) ? gridCount : "an invalid number of"} points; choose 5–200 points by adjusting the interval or resolution.`);
+  }
+  if (definition.id === "lasso-path" && mapping.x) {
+    const invalid = dataset.rows.filter((row) => (parseNumericValue(row[mapping.x]) ?? 0) <= 0).length;
+    if (invalid > 0) errors.push(`LASSO lambda must be strictly positive before the log₁₀ transform; invalid rows: ${invalid}.`);
+    const features = new Set(dataset.rows.map((row) => row[mapping.group]));
+    if (features.size > 12) errors.push("The compact LASSO path view supports at most 12 identified coefficient paths; filter to interpretable features or increase upstream sparsity.");
+    if (settings) {
+      const plotHeight = Math.max(90, settings.height - (settings.title ? 48 : 24) - 58);
+      const labelFont = Math.max(8, settings.legendSize - 1); const labelStep = labelFont + 3;
+      const maximumLabels = Math.max(1, Math.floor((plotHeight - labelFont - 4) / labelStep) + 1);
+      if (features.size > maximumLabels) errors.push(`LASSO labels need more vertical space at ${settings.legendSize} pt: ${features.size} paths supplied, ${maximumLabels} fit without overlap. Increase height, reduce legend size, or filter features.`);
+    }
+    const referenceGrid = new Set<number>(); let referenceFeature = "";
+    features.forEach((feature) => {
+      const rows = dataset.rows.filter((row) => row[mapping.group] === feature); const byLambda = new Map<number, number[]>();
+      rows.forEach((row) => { const lambda = parseNumericValue(row[mapping.x]); const coefficient = parseNumericValue(row[mapping.y]); if (lambda === null || coefficient === null) return; const values = byLambda.get(lambda) ?? []; values.push(coefficient); byLambda.set(lambda, values); });
+      if (byLambda.size < 2) errors.push(`LASSO feature “${feature}” requires at least two unique lambda values to form a path.`);
+      byLambda.forEach((coefficients, lambda) => { if (coefficients.length !== 1) errors.push(`LASSO feature “${feature}” has ${coefficients.length} rows at lambda ${lambda}; each feature × lambda pair must be unique.`); });
+      const grid = new Set(byLambda.keys());
+      if (!referenceFeature) { referenceFeature = feature; grid.forEach((lambda) => referenceGrid.add(lambda)); }
+      else if (grid.size !== referenceGrid.size || [...grid].some((lambda) => !referenceGrid.has(lambda))) errors.push(`LASSO feature “${feature}” does not use the same lambda grid as “${referenceFeature}”.`);
+    });
+  }
+  if (definition.id === "nomogram" && mapping.value) {
+    const invalid = dataset.rows.filter((row) => (parseNumericValue(row[mapping.value]) ?? -1) < 0).length;
+    if (invalid > 0) errors.push(`Nomogram points must be non-negative; invalid rows: ${invalid}.`);
+    if (settings) {
+      const predictors = new Set(dataset.rows.map((row) => row[mapping.group]));
+      const plotHeight = Math.max(90, settings.height - (settings.title ? 48 : 24) - 58);
+      const maximumPredictors = Math.max(2, Math.floor(plotHeight / Math.max(settings.tickSize + 9, settings.pointSize * 1.1 + 9)));
+      if (predictors.size > maximumPredictors) errors.push(`Nomogram predictor rows need more vertical space: ${predictors.size} supplied, ${maximumPredictors} fit at the current height and text size.`);
+      const maximum = Math.max(...dataset.rows.map((row) => parseNumericValue(row[mapping.value]) ?? 0), 1); const scaleEnd = maximum * 1.03; const laneWidth = Math.max(30, Math.max(100, settings.width - 88) - 70); const labelFont = Math.max(7, settings.tickSize - 2);
+      predictors.forEach((predictor) => {
+        const levels = dataset.rows.filter((row) => row[mapping.group] === predictor).map((row) => { const label = compactLegendLabel(row[mapping.label], labelFont, 42, 10); const width = estimateLegendTextWidth(label, labelFont); const pointX = (parseNumericValue(row[mapping.value]) ?? 0) / scaleEnd * laneWidth; const x = Math.min(laneWidth - width / 2 - 2, Math.max(width / 2 + 2, pointX)); return { label, fullLabel: row[mapping.label], x, width }; }).sort((left, right) => left.x - right.x);
+        for (let index = 1; index < levels.length; index += 1) if (levels[index].x - levels[index - 1].x < (levels[index].width + levels[index - 1].width) / 2 + 4) { errors.push(`Nomogram levels “${levels[index - 1].fullLabel}” and “${levels[index].fullLabel}” overlap within predictor “${predictor}” at the current width; increase width or supply separated point assignments.`); break; }
+      });
+    }
+  }
+  if (definition.id === "km-cutoff") {
+    const invalidEvents = dataset.rows.filter((row) => ![0, 1].includes(parseNumericValue(row[mapping.event]) ?? Number.NaN)).length;
+    const invalidTimes = dataset.rows.filter((row) => (parseNumericValue(row[mapping.time]) ?? -1) < 0).length;
+    if (invalidEvents > 0) errors.push(`Event contains ${invalidEvents} value${invalidEvents === 1 ? "" : "s"} other than 0 or 1.`);
+    if (invalidTimes > 0) errors.push(`Follow-up time contains ${invalidTimes} negative or missing value${invalidTimes === 1 ? "" : "s"}.`);
+    const cutoffs = new Set(dataset.rows.map((row) => parseNumericValue(row[mapping.cutoff])));
+    if (cutoffs.size !== 1 || cutoffs.has(null)) errors.push("Cutoff KM requires one constant numeric cutoff repeated across all rows.");
+    const cutoff = [...cutoffs][0];
+    if (typeof cutoff === "number" && mapping.score) {
+      const low = dataset.rows.filter((row) => (parseNumericValue(row[mapping.score]) ?? cutoff) < cutoff).length; const high = dataset.rows.length - low;
+      if (low < 2 || high < 2) errors.push("The supplied cutoff must create two groups with at least two subjects each.");
+    }
+    warnings.push("Cutoff KM displays a supplied threshold only. If the cutoff was optimized and evaluated in the same cohort, treat the separation as exploratory and validate it independently.");
+  }
+  if (definition.id === "risk-score" && settings) {
+    const subjects = dataset.rows.map((row) => row[mapping.label]?.trim()); const blankSubjects = subjects.filter((subject) => !subject).length; const duplicateSubjects = subjects.filter((subject, index) => Boolean(subject) && subjects.indexOf(subject) !== index);
+    if (blankSubjects > 0) errors.push(`Risk-score Subject contains ${blankSubjects} blank identifier${blankSubjects === 1 ? "" : "s"}.`);
+    if (duplicateSubjects.length > 0) errors.push(`Risk-score Subject IDs must be unique; duplicated: ${[...new Set(duplicateSubjects)].slice(0, 8).join(", ")}.`);
+    const plotWidth = Math.max(100, settings.width - 88);
+    const minimumSubjectSpacing = Math.max(2.5, settings.pointSize * 0.7);
+    const maximumSubjects = Math.max(10, Math.floor(plotWidth / minimumSubjectSpacing));
+    if (dataset.rows.length > maximumSubjects) errors.push(`Risk-score marks would overlap at ${settings.width}px: ${dataset.rows.length} subjects supplied, ${maximumSubjects} fit at the current point size. Increase width or reduce point size.`);
   }
 
   if (definition.id === "survival-forest") {

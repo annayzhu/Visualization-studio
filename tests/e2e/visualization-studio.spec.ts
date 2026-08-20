@@ -4,7 +4,11 @@ import { readFile } from "node:fs/promises";
 async function expectStablePreviewScreenshot(page: Page, locator: Locator, name: string, options: { maxDiffPixels?: number } = {}) {
   await page.addStyleTag({ content: "[data-visualization-sticky-header]{position:static!important}" });
   await locator.scrollIntoViewIfNeeded();
-  await expect(locator).toHaveScreenshot(name, { animations: "disabled", ...options });
+  // Linux Chromium rasterizes the same portable font stack with slightly different
+  // antialiasing from macOS. Keep macOS baselines exact while allowing only the
+  // observed sub-1.5% edge-pixel variance in GitHub Actions.
+  const maxDiffPixels = process.platform === "linux" ? Math.max(1200, options.maxDiffPixels ?? 0) : options.maxDiffPixels;
+  await expect(locator).toHaveScreenshot(name, { animations: "disabled", ...options, ...(maxDiffPixels ? { maxDiffPixels } : {}) });
 }
 
 test.describe("Visualization Studio browser acceptance", () => {

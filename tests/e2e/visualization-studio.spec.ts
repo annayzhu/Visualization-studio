@@ -873,4 +873,78 @@ test.describe("Visualization Studio browser acceptance", () => {
     await expect(page.getByText(/scatter diameter within its track band/i)).toBeVisible();
     await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
   });
+
+  test("counts, lays out, and downloads exact Venn and UpSet intersections", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop set-intersection acceptance");
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /^Venn/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const venn = page.locator("svg[aria-label='Venn scientific figure preview']");
+    await expect(venn.locator("[data-plot-family='venn-classic']")).toHaveCount(1);
+    await expect(venn.locator("[data-plot-element='set-region-label']")).toHaveCount(7);
+    await expect(venn.locator("[data-intersection-signature='RNA-seq\u0001Proteomics\u0001CRISPR']")).toContainText("1");
+
+    await page.getByRole("button", { name: /Example 2.*Peak overlap/ }).click();
+    await expect(page.getByRole("combobox", { name: "Input structure" })).toHaveValue("peak-overlap");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(venn.locator("[data-plot-family='venn-radial'][data-input-mode='peak-overlap']")).toHaveCount(1);
+
+    const sevenSetRows = ["item\tset", ...Array.from({ length: 7 }, (_, index) => `only${index + 1}\tSet ${index + 1}`), ...Array.from({ length: 7 }, (_, index) => `shared\tSet ${index + 1}`)].join("\n");
+    await page.getByRole("combobox", { name: "Input structure" }).selectOption("membership");
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(sevenSetRows);
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(venn.locator("[data-layout='radial-exact-intersections'] [data-plot-element='radial-intersection-region']")).toHaveCount(8);
+    const radialSafety = await venn.evaluate((element) => {
+      const clip = element.querySelector("clipPath rect")!;
+      const left = Number(clip.getAttribute("x")); const top = Number(clip.getAttribute("y")); const right = left + Number(clip.getAttribute("width")); const bottom = top + Number(clip.getAttribute("height"));
+      const labels = [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element='set-region-label']")];
+      const boxes = labels.map((label) => label.getBBox());
+      let collisions = 0;
+      for (let first = 0; first < boxes.length; first += 1) for (let second = first + 1; second < boxes.length; second += 1) { const a = boxes[first]; const b = boxes[second]; if (a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y) collisions += 1; }
+      return { collisions, outside: boxes.filter((box) => box.x < left || box.x + box.width > right || box.y < top || box.y + box.height > bottom).length };
+    });
+    expect(radialSafety).toEqual({ collisions: 0, outside: 0 });
+
+    await page.getByRole("button", { name: /^UpSet/ }).click();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const upset = page.locator("svg[aria-label='UpSet scientific figure preview']");
+    await expect(upset.locator("[data-plot-element='upset-set-summary']")).toHaveCount(3);
+    const visibleSetSummary = await upset.evaluate((element) => {
+      const marks = [...element.querySelectorAll<SVGGraphicsElement>("[data-plot-element='upset-set-summary'] rect, [data-plot-element='upset-set-summary'] text")];
+      return { clipped: marks.filter((mark) => getComputedStyle(mark).clipPath !== "none").length, empty: marks.filter((mark) => { const box = mark.getBoundingClientRect(); return box.width <= 0 || box.height <= 0; }).length };
+    });
+    expect(visibleSetSummary).toEqual({ clipped: 0, empty: 0 });
+    const bottomGap = await upset.evaluate((element) => {
+      const clip = element.querySelector("clipPath rect")!;
+      const bottom = Number(clip.getAttribute("y")) + Number(clip.getAttribute("height"));
+      const circles = [...element.querySelectorAll<SVGCircleElement>("[data-plot-element='upset-intersection'] circle")];
+      return bottom - Math.max(...circles.map((circle) => Number(circle.getAttribute("cy"))));
+    });
+    expect(bottomGap).toBeLessThanOrEqual(14);
+    expect(bottomGap).toBeGreaterThanOrEqual(10);
+
+    await page.getByRole("combobox", { name: "Exact intersection to download" }).selectOption({ label: "RNA-seq ∩ Proteomics ∩ CRISPR · n=1" });
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download selected members" }).click();
+    const downloaded = await download;
+    expect(downloaded.suggestedFilename()).toMatch(/upset-rna-seq-and-proteomics-and-crispr-exact-members\.tsv/);
+    const path = await downloaded.path();
+    expect(path).not.toBeNull();
+    expect(await readFile(path!, "utf8")).toBe("item\texact_intersection\nTP53\tRNA-seq & Proteomics & CRISPR");
+
+    const longSetRows = "item\tset\na\tExtremely long transcriptomic discovery cohort\nb\tExtremely long proteomic validation cohort\nc\tExtremely long CRISPR perturbation cohort\nd\tExtremely long transcriptomic discovery cohort\nd\tExtremely long proteomic validation cohort";
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(longSetRows);
+    const tickSize = page.getByRole("textbox", { name: "Tick size value", exact: true });
+    await tickSize.fill("16");
+    await tickSize.press("Enter");
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    const summaryCollisions = await upset.evaluate((element) => [...element.querySelectorAll<SVGGElement>("[data-plot-element='upset-set-summary']")].filter((summary) => {
+      const label = summary.querySelector<SVGTextElement>("[data-plot-element='upset-set-label']")!.getBoundingClientRect();
+      const bar = summary.querySelector<SVGRectElement>("[data-plot-element='upset-set-bar']")!.getBoundingClientRect();
+      return label.right > bar.left - 1;
+    }).length);
+    expect(summaryCollisions).toBe(0);
+  });
 });

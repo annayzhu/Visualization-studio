@@ -6,6 +6,7 @@ import { ScientificRelationshipPlot, isRelationshipPlotType } from "@/components
 import { ScientificFlowCircularPlot } from "@/components/ScientificFlowCircularChartPreview";
 import { ScientificSetPlot } from "@/components/ScientificSetChartPreview";
 import { ScientificClinicalPlot, type ClinicalPlotType } from "@/components/ScientificClinicalChartPreview";
+import { ScientificEnrichmentSpecializedPlot, type EnrichmentSpecializedPlotType } from "@/components/ScientificEnrichmentSpecializedPreview";
 import { genomicFrameMetrics } from "@/lib/visualization-genomics";
 import { networkFrameMetrics } from "@/lib/visualization-network";
 import {
@@ -29,6 +30,7 @@ import {
   deterministicBeeswarmLayout,
   deterministicHistogram,
   divergingColor,
+  enrichmentSpecializedFrameMetrics,
   figureFontPresets,
   formatTick,
   getPlotDefinition,
@@ -75,11 +77,12 @@ const TEXT = "#23242A";
 function frameFor(type: PlotType, settings: VisualizationSettings): Frame {
   if (isGenomicPlotType(type)) return genomicFrameMetrics(type, settings);
   if (isRelationshipPlotType(type)) return networkFrameMetrics(settings);
-  const noAxes = ["venn", "sankey", "alluvial", "chord", "ligand-receptor", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density"].includes(type);
+  if (["go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud"].includes(type)) return enrichmentSpecializedFrameMetrics(type, settings);
+  const noAxes = ["venn", "sankey", "alluvial", "chord", "ligand-receptor", "network", "ppi", "cerna", "mirna-target", "cnet", "enrichment-map", "tree", "dendrogram", "circos", "pie", "donut", "rose", "waffle", "treemap", "sunburst", "radar", "polar-profile", "population-pyramid", "chromosome-ideogram", "snp-density", "go-circle", "kegg-circle", "go-chord", "sankey-bubble", "geographic-map", "petal", "word-cloud"].includes(type);
   const heatmapType = ["heatmap", "clustered-heatmap", "correlation-heatmap"].includes(type);
   const hasHeatmapAnnotationLegend = heatmapType && Boolean(settings.heatmapRowAnnotationData.trim() || settings.heatmapColumnAnnotationData.trim());
   const labelHeavy = ["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment-bar", "survival-forest", "upset", "genome-tracks", "oncoplot"].includes(type);
-  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"].includes(type);
+  const hasLegend = !["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "treemap", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score", "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud"].includes(type);
   const compactRadialLegend = ["pie", "donut", "rose", "waffle", "sunburst", "radar", "polar-profile", "population-pyramid"].includes(type);
   const legend = hasLegend && settings.legendPosition === "right" ? (compactRadialLegend ? 110 : 145) : 0;
   if (heatmapType) return heatmapLayoutMetrics(settings, { hasAnnotationLegend: hasHeatmapAnnotationLegend, rowAnnotationTracks: 0, columnAnnotationTracks: 0, showRowCut: false, showColumnCut: false, showRowDendrogram: false, showColumnDendrogram: false, showSidePlot: false, rowCount: 1, columnCount: 1, maxColumnLabelCharacters: 0, maxCutClusters: 0 }).frame;
@@ -1066,6 +1069,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   else if (type === "survival-forest") content = <ForestPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (type === "roc") content = <RocPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
   else if (["funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score"].includes(type)) content = <ScientificClinicalPlot type={type as ClinicalPlotType} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} gridColor={theme.grid} />;
+  else if (["go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud"].includes(type)) content = <ScientificEnrichmentSpecializedPlot type={type as EnrichmentSpecializedPlotType} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} sequential={sequential} gridColor={theme.grid} />;
   else if (type === "venn" || type === "upset") content = <ScientificSetPlot type={type} frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "sankey") content = <SankeyPlot frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
   else if (type === "alluvial") content = <ScientificFlowCircularPlot type="alluvial" frame={frame} dataset={dataset} mapping={mapping} settings={settings} colors={colors} />;
@@ -1083,7 +1087,7 @@ export function ScientificAdvancedChartPreview({ svgRef, type, dataset, mapping,
   return <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${frame.width} ${frame.height}`} width={frame.width} height={frame.height} role="img" data-plot-renderer="advanced" data-chart-text-color={TEXT} aria-label={`${definition.name} scientific figure preview`} style={{ fontFamily: figureFontPresets[settings.fontFamily].family, background: "white", maxWidth: "100%", height: "auto" }}>
     <title>{settings.title || `${definition.name} figure`}</title><desc>{definition.summary} Generated in LabNest Visualization Studio.</desc><rect width={frame.width} height={frame.height} fill="#FFFFFF" />
     <defs><clipPath id={`plot-area-${type}`}><rect x={frame.left} y={frame.top} width={frame.plotWidth} height={frame.plotHeight} /></clipPath></defs>
-    <style>{`[data-plot-data] path:not([data-no-clip]),[data-plot-data] circle:not([data-no-clip]),[data-plot-data] rect:not([data-no-clip]),[data-plot-data] line:not([data-no-clip]),[data-plot-data] polyline:not([data-no-clip]),[data-plot-data] polygon:not([data-no-clip]),[data-plot-data] text[data-plot-label]{clip-path:url(#plot-area-${type})}`}</style>
+    <style>{`[data-plot-data] path:not([data-no-clip]),[data-plot-data] circle:not([data-no-clip]),[data-plot-data] rect:not([data-no-clip]),[data-plot-data] line:not([data-no-clip]),[data-plot-data] polyline:not([data-no-clip]),[data-plot-data] polygon:not([data-no-clip]),[data-plot-data] text[data-plot-label]:not([data-no-clip]){clip-path:url(#plot-area-${type})}`}</style>
     {settings.title ? <text x={frame.left} y={24} fill={TEXT} fontSize={settings.titleSize} fontWeight={700}>{settings.title}</text> : null}
     {content}
   </svg>;

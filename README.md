@@ -5,7 +5,7 @@ A browser-local scientific visualization workspace for creating compact, publica
 ## Highlights
 
 - Publication-oriented defaults with Arial typography and compact figure dimensions
-- Sixty-one registry-owned modules, including categorical comparison, distribution, dimension reduction, enrichment, survival, set, typed relationship networks, genomic association/context, cancer alteration, sequence motif, composition, rooted hierarchy, cyclic profile, and paired-distribution families
+- Eighty-two registry-owned modules spanning comparison, distribution, association, dimension reduction, matrix, enrichment, survival, clinical prediction, sets, flow/circular views, typed biological networks, genomic context, cancer alteration, sequence motifs, composition, hierarchy, and specialized omics displays
 - Distinct pie, donut, rose, waffle, treemap, sunburst, radar, polar-profile, and population-pyramid contracts with scientific suitability guidance and references
 - A unified Box, Violin, Beeswarm, Raincloud, Histogram, Density, and Ridge layer system with deterministic binning, KDE, quartiles, SD, SEM, Student t confidence intervals, pairing, facets, and orientation controls
 - Line uncertainty as pointwise SD, SEM, or supplied 95% CI half-widths, displayed as bars or ribbons
@@ -22,11 +22,13 @@ A browser-local scientific visualization workspace for creating compact, publica
 ## Run locally
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+For production deployment, reverse-proxy integration, a standalone runtime, or embedding the unchanged interface inside another application, see [Engineering integration](docs/engineering-integration.md).
 
 ## Validation
 
@@ -34,8 +36,14 @@ Open [http://localhost:3000](http://localhost:3000).
 npm run typecheck
 npm test
 npm run test:e2e
-npm run build
+npm run build:webpack
 ```
+
+`npm run verify` runs type checking, linting, unit tests, and the production webpack build. Browser acceptance remains a separate `npm run test:e2e` step because it starts a real Chromium instance. The complete release gate is documented in [Release verification](docs/release-verification.md).
+
+## Module contract
+
+Every plot type is registered through one module contract containing its input roles, one or more resettable examples, downloadable template data, adjustable settings, validation rules, renderer, basic definition, suitable data, intended scientific question, and methodological references. Method boundaries are stated in the guidance, input hints, and actionable validation warnings. The browser test suite renders every bundled example, while registry tests prevent an incomplete module from shipping.
 
 ## Scientific scope
 

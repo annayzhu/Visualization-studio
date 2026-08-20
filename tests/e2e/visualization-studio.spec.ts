@@ -4,7 +4,11 @@ import { readFile } from "node:fs/promises";
 async function expectStablePreviewScreenshot(page: Page, locator: Locator, name: string, options: { maxDiffPixels?: number } = {}) {
   await page.addStyleTag({ content: "[data-visualization-sticky-header]{position:static!important}" });
   await locator.scrollIntoViewIfNeeded();
-  await expect(locator).toHaveScreenshot(name, { animations: "disabled", ...options });
+  // Linux Chromium rasterizes the same portable font stack with slightly different
+  // antialiasing from macOS. Keep macOS baselines exact while allowing only the
+  // observed sub-1.5% edge-pixel variance in GitHub Actions.
+  const maxDiffPixels = process.platform === "linux" ? Math.max(1200, options.maxDiffPixels ?? 0) : options.maxDiffPixels;
+  await expect(locator).toHaveScreenshot(name, { animations: "disabled", ...options, ...(maxDiffPixels ? { maxDiffPixels } : {}) });
 }
 
 test.describe("Visualization Studio browser acceptance", () => {
@@ -148,6 +152,52 @@ test.describe("Visualization Studio browser acceptance", () => {
       });
     });
     expect(escapedLabels).toEqual([]);
+  });
+
+  test("keeps the desktop workbench aligned and brings a distant selection fully into view", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop navigation and panel geometry");
+    await page.goto("/");
+
+    const panelTops = await page.locator("[data-visualization-panel]").evaluateAll((panels) => Object.fromEntries(
+      panels.map((panel) => [panel.getAttribute("data-visualization-panel"), panel.getBoundingClientRect().top]),
+    ));
+    expect(Math.abs(panelTops.plots - panelTops.preview)).toBeLessThanOrEqual(1);
+    expect(Math.abs(panelTops.parameters - panelTops.preview)).toBeLessThanOrEqual(1);
+
+    await page.getByRole("button", { name: /^Word cloud/ }).click();
+    const previewHeading = page.getByRole("heading", { name: "Word cloud preview" });
+    await expect(previewHeading).toBeVisible();
+    const preview = page.locator('[data-visualization-panel="preview"]');
+    const stickyHeader = page.locator("[data-visualization-sticky-header]");
+    await expect.poll(async () => {
+      const [previewBox, headerBox] = await Promise.all([preview.boundingBox(), stickyHeader.boundingBox()]);
+      if (!previewBox || !headerBox) return false;
+      const visibleTop = Math.max(previewBox.y, headerBox.y + headerBox.height);
+      return previewBox.y >= headerBox.y + headerBox.height - 2
+        && visibleTop + Math.min(180, previewBox.height) <= (page.viewportSize()?.height ?? 0);
+    }).toBe(true);
+
+    const widthInput = page.getByRole("textbox", { name: "Width value", exact: true });
+    await widthInput.fill("360");
+    await widthInput.press("Enter");
+    await expect(page.locator("svg[aria-label='Word cloud scientific figure preview']")).toHaveAttribute("width", "360");
+    await expect(page.getByRole("button", { name: /apply/i })).toHaveCount(0);
+
+    const guidance = page.locator('[data-plot-guidance="word-cloud"]');
+    await expect(guidance).toContainText("基本定义");
+    await expect(guidance).toContainText("适合的数据");
+    await expect(guidance).toContainText("适合说明的问题");
+    await guidance.locator("[data-plot-references='word-cloud'] summary").click();
+    await expect(guidance.locator("[data-plot-references='word-cloud'] a")).not.toHaveCount(0);
+  });
+
+  test("exposes every module through the compact mobile selector", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile-chromium", "Mobile registry completeness");
+    await page.goto("/");
+    const plotSelect = page.getByRole("combobox", { name: "Plot type" });
+    await expect(plotSelect.locator("option")).toHaveCount(82);
+    await expect(plotSelect).toHaveValue("bar");
+    await expect(page.getByRole("button", { name: "柴染棕" }).first()).toHaveAttribute("aria-expanded", "false");
   });
 
   test("configures reproducible heatmap structure without clipping the compact export", async ({ page }, testInfo) => {

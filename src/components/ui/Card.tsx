@@ -1,15 +1,16 @@
-import type { ReactNode, Ref } from "react";
+import type { HTMLAttributes, ReactNode, Ref } from "react";
 import { cn } from "@/lib/cn";
 
 export function Card({
   children,
   className,
-}: {
+  ...props
+}: HTMLAttributes<HTMLElement> & {
   children: ReactNode;
-  className?: string;
 }) {
   return (
     <section
+      {...props}
       className={cn(
         "rounded-[var(--ln-radius-panel)] border border-hairline bg-surface",
         className,

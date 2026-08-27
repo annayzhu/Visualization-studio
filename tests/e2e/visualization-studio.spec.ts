@@ -56,6 +56,44 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(source).toContain("H596");
   });
 
+  test("uses actual time points and calculates adjusted line significance", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop line-statistics regression");
+    await page.goto("/");
+    await page.getByRole("button", { name: /^Line/ }).click();
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`time\tvalue\tsd\tsem\tn\tseries
+0\t0.2292416667\t0.0456901316\t0.0263792098\t3\tMock
+1\t0.2277416667\t0.0061745614\t0.0035648847\t3\tMock
+2\t0.6077083333\t0.0611888828\t0.0353274179\t3\tMock
+3\t0.9141\t0.1925812994\t0.1111868650\t3\tMock
+0\t0.2025666667\t0.0125768637\t0.0072612556\t3\tNC
+1\t0.2676833333\t0.0132398074\t0.0076440064\t3\tNC
+2\t0.6331333333\t0.0476931795\t0.0275356700\t3\tNC
+3\t1.0819666667\t0.0700105810\t0.0404206278\t3\tNC
+0\t0.196475\t0.0145138368\t0.0083795676\t3\tsiFBN2-1224
+1\t0.217675\t0.0182540464\t0.0105389786\t3\tsiFBN2-1224
+2\t0.43765\t0.0376459687\t0.0217349102\t3\tsiFBN2-1224
+3\t0.6097083333\t0.0203331984\t0.0117393776\t3\tsiFBN2-1224
+0\t0.1690416667\t0.0026113933\t0.0015076886\t3\tsiFBN2-9706
+1\t0.2015083333\t0.0251189296\t0.0145024208\t3\tsiFBN2-9706
+2\t0.420225\t0.0086766329\t0.0050094563\t3\tsiFBN2-9706
+3\t0.7469583333\t0.0106625024\t0.0061559987\t3\tsiFBN2-9706`);
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await page.getByRole("combobox", { name: "Error representation" }).selectOption("sd");
+
+    const svg = page.locator("svg[aria-label='Line scientific figure preview']");
+    await expect(svg.locator("[data-axis-tick='x']")).toHaveText(["0", "1", "2", "3"]);
+    await expect(svg.locator("[data-axis-label='x']")).toHaveCount(0);
+    await expect(svg.locator("[data-axis-label='y']")).toHaveCount(0);
+
+    await page.getByRole("checkbox", { name: "Calculate significance" }).check({ force: true });
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await page.getByRole("combobox", { name: "Reference series" }).selectOption("Mock");
+    const annotations = svg.locator("[data-plot-element='line-significance']");
+    await expect(annotations).toHaveCount(12);
+    const adjusted = await annotations.evaluateAll((elements) => elements.map((element) => Number(element.getAttribute("data-adjusted-p"))));
+    expect(adjusted.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)).toBe(true);
+  });
+
   test("selects, resets, remaps, adjusts, and exports a representative plot", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop interaction baseline");
     await page.goto("/");

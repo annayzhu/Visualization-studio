@@ -552,6 +552,9 @@ export function VisualizationStudio() {
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
   const pcaAnalysis = useMemo(() => plotType === "pca" && pcaInputMode === "matrix" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, pcaInputMode, rawData, pcaObservationMetadata, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
+  const lineSeriesOptions = useMemo(() => plotType === "line" && mapping.series
+    ? [...new Set(dataset.rows.map((row) => row[mapping.series]).filter(Boolean))]
+    : [], [dataset.rows, mapping.series, plotType]);
   const setAnalysis = useMemo(
     () => (plotType === "venn" || plotType === "upset") ? analyzeSetIntersections(dataset.rows, mapping, settings.setInputMode) : null,
     [dataset.rows, mapping, plotType, settings.setInputMode],
@@ -1167,6 +1170,16 @@ export function VisualizationStudio() {
             {plotType === "line" || (plotType === "bar" && !["stacked", "percentage", "polar"].includes(settings.barVariant)) ? <ControlGroup title={`${plotType === "bar" ? "Bar" : "Line"} uncertainty`}>
               <SelectControl label="Error representation" value={plotType === "bar" ? settings.barErrorType : settings.lineErrorType} onChange={(value) => selectErrorType(plotType === "bar" ? "barErrorType" : "lineErrorType", value as VisualizationSettings["barErrorType"] | VisualizationSettings["lineErrorType"])}><option value="none">None</option><option value="sd">Mean ± SD</option><option value="sem">Mean ± SEM</option>{plotType === "line" ? <option value="ci95">95% CI half-width</option> : null}</SelectControl>
               {(plotType === "bar" ? settings.barErrorType : settings.lineErrorType) !== "none" ? <>{plotType === "line" ? <SelectControl label="Display style" value={settings.lineUncertaintyStyle} onChange={(value) => updateSetting("lineUncertaintyStyle", value as VisualizationSettings["lineUncertaintyStyle"])}><option value="bars">Pointwise bars</option><option value="band">Ribbon</option></SelectControl> : null}{plotType === "line" && settings.lineUncertaintyStyle === "band" ? <RangeControl label="Ribbon opacity" value={settings.lineBandOpacity} minimum={0.04} maximum={0.5} step={0.01} onChange={(value) => updateSetting("lineBandOpacity", value)} /> : <><RangeControl label="Error line" value={settings.errorBarLineWidth} minimum={0.8} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("errorBarLineWidth", value)} /><RangeControl label="Cap width" value={settings.errorBarCapSize} minimum={4} maximum={30} step={1} unit=" px" onChange={(value) => updateSetting("errorBarCapSize", value)} /></>}<p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Map an already-calculated non-negative half-width. SD describes spread, SEM describes mean precision, and a 95% CI half-width describes an interval around the estimate. A ribbon changes only the display, not the statistic.</p></> : null}
+            </ControlGroup> : null}
+
+            {plotType === "line" ? <ControlGroup title="Pointwise significance">
+              <ToggleControl label="Calculate significance" checked={settings.showSignificance} onChange={(value) => updateSetting("showSignificance", value)} />
+              {settings.showSignificance ? <>
+                <SelectControl label="Reference series" value={settings.lineReferenceSeries || lineSeriesOptions[0] || ""} onChange={(value) => updateSetting("lineReferenceSeries", value)}>{lineSeriesOptions.map((series) => <option key={series} value={series}>{series}</option>)}</SelectControl>
+                <SelectControl label="Multiple-testing correction" value={settings.linePAdjustment} onChange={(value) => updateSetting("linePAdjustment", value as VisualizationSettings["linePAdjustment"])}><option value="bh">Benjamini–Hochberg FDR</option><option value="none">None</option></SelectControl>
+                <RangeControl label="Adjusted P threshold" value={settings.significanceThreshold} minimum={0.001} maximum={0.1} step={0.001} onChange={(value) => updateSetting("significanceThreshold", value)} />
+                <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">At each X value, every non-reference series is compared with the selected reference using an independent-samples Welch t test. Map mean, SD or SEM, and an explicit integer n ≥ 2. BH correction is applied across all displayed pointwise comparisons. Do not use this calculation for paired or repeated-measures data; supply results from the appropriate upstream model instead.</p>
+              </> : null}
             </ControlGroup> : null}
 
             {plotType === "bar" ? <>

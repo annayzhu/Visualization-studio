@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   alignHeatmapAnnotations,
   barCategoryAxisLayoutMetrics,
+  benjaminiHochbergAdjust,
   analysisProvenanceForPlot,
   categoricalColorForIndex,
   boxStatistics,
@@ -26,6 +27,7 @@ import {
   loessSmooth,
   meanErrorStatistics,
   numericExtent,
+  observedAxisTicks,
   ordinationLoadingLayout,
   ordinationLegendLayout,
   parseDelimitedData,
@@ -33,10 +35,12 @@ import {
   polynomialRegression,
   resolveAxisDomain,
   studentTCritical95,
+  studentTTwoSidedPValue,
   plotDefinitions,
   plotGuidance,
   plotReferences,
   validatePlotDataset,
+  welchSummaryPValue,
 } from "./visualization-studio";
 
 function relativeLuminance(hex: string) {
@@ -51,6 +55,38 @@ function rgbChroma(hex: string) {
 }
 
 describe("Visualization Studio data contracts", () => {
+  it("uses actual ordered sampling times when a line axis can display them clearly", () => {
+    expect(observedAxisTicks([0, 1, 2, 3, 0, 1, 2, 3], 8)).toEqual([0, 1, 2, 3]);
+    expect(observedAxisTicks([3, 1, 2, 0], 8)).toEqual([0, 1, 2, 3]);
+    expect(observedAxisTicks(Array.from({ length: 20 }, (_, index) => index), 8)).toBeUndefined();
+  });
+
+  it("calculates Welch summary P values and BH-adjusted pointwise comparisons", () => {
+    expect(studentTTwoSidedPValue(2.228, 10)).toBeCloseTo(0.05, 3);
+    expect(welchSummaryPValue(1, 0.2, 3, 1, 0.3, 3)).toBe(1);
+    expect((welchSummaryPValue(1, 0.2, 3, 2, 0.2, 3) ?? 1) < 0.01).toBe(true);
+    expect(benjaminiHochbergAdjust([0.01, 0.04, 0.03])).toEqual([0.03, 0.04, 0.04]);
+  });
+
+  it("requires explicit n and SD or SEM for line significance calculation", () => {
+    const definition = getPlotDefinition("line");
+    const withoutN = validatePlotDataset(
+      definition,
+      parseDelimitedData("time\tvalue\tsd\tseries\n0\t1\t0.1\tA\n0\t2\t0.2\tB"),
+      { x: "time", value: "value", error: "sd", n: "", series: "series" },
+      { ...defaultVisualizationSettings, lineErrorType: "sd", showSignificance: true },
+    );
+    expect(withoutN.errors).toContain("Map an explicit sample-size (n) column before calculating line significance.");
+
+    const valid = validatePlotDataset(
+      definition,
+      parseDelimitedData("time\tvalue\tsd\tn\tseries\n0\t1\t0.1\t3\tA\n0\t2\t0.2\t3\tB"),
+      { x: "time", value: "value", error: "sd", n: "n", series: "series" },
+      { ...defaultVisualizationSettings, lineErrorType: "sd", showSignificance: true },
+    );
+    expect(valid.errors).toEqual([]);
+  });
+
   it("reports whether analysis results were supplied or calculated in Studio", () => {
     expect(analysisProvenanceForPlot("pca", defaultVisualizationSettings, "scores")?.source).toBe("supplied");
     expect(analysisProvenanceForPlot("pca", defaultVisualizationSettings, "matrix")?.source).toBe("calculated-in-studio");

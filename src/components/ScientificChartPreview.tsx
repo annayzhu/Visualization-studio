@@ -4,6 +4,7 @@ import type { ReactNode, RefObject } from "react";
 import { ScientificAdvancedChartPreview } from "@/components/ScientificAdvancedChartPreview";
 import {
   BAR_CATEGORY_LABEL_ANGLE,
+  benjaminiHochbergAdjust,
   barCategoryAxisLayoutMetrics,
   barCategoryLabelText,
   boxStatistics,
@@ -19,10 +20,12 @@ import {
   linearRegression,
   meanErrorStatistics,
   numericExtent,
+  observedAxisTicks,
   parseNumericValue,
   parseRatioValue,
   resolveAxisDomain,
   scaleLinear,
+  welchSummaryPValue,
   type JournalThemeId,
   type ParsedDataset,
   type PlotType,
@@ -154,7 +157,7 @@ function NumericAxes({
         return (
           <g key={`xt-${value}`}>
             <line x1={x} x2={x} y1={xBottom} y2={xBottom + 5} stroke={ink} strokeWidth={settings.axisLineWidth} />
-            <text x={x} y={xBottom + 19} textAnchor="middle" fill={muted} fontSize={settings.tickSize}>{formatTick(value)}</text>
+            <text data-axis-tick="x" x={x} y={xBottom + 19} textAnchor="middle" fill={muted} fontSize={settings.tickSize}>{formatTick(value)}</text>
           </g>
         );
       }) : null}
@@ -163,7 +166,7 @@ function NumericAxes({
         return (
           <g key={`yt-${value}`}>
             <line x1={frame.left - 5} x2={frame.left} y1={y} y2={y} stroke={ink} strokeWidth={settings.axisLineWidth} />
-            <text x={frame.left - 9} y={y + settings.tickSize * 0.34} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{formatTick(value)}</text>
+            <text data-axis-tick="y" x={frame.left - 9} y={y + settings.tickSize * 0.34} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{formatTick(value)}</text>
           </g>
         );
       }) : null}
@@ -395,7 +398,9 @@ function renderLineOrScatter(
     return {
       x: settings.swapAxes ? rawY : rawX,
       y: settings.swapAxes ? rawX : rawY,
+      mean: rawY,
       error: lineErrorsEnabled && mapping.error ? Math.max(0, parseNumericValue(row[mapping.error]) ?? 0) : 0,
+      n: mapping.n ? parseNumericValue(row[mapping.n]) : null,
       group: row[type === "line" ? mapping.series : mapping.group] || "All",
       label: type !== "line" && mapping.label ? row[mapping.label] : "",
       index,
@@ -410,12 +415,32 @@ function renderLineOrScatter(
     : points.map((point) => point.y)), settings.yMin, settings.yMax);
   const groups = [...new Set(points.map((point) => point.group))];
   const colorMap = paletteForGroups(groups, colors);
+  const referenceSeries = settings.lineReferenceSeries && groups.includes(settings.lineReferenceSeries) ? settings.lineReferenceSeries : groups[0];
+  const rawLineComparisons = type === "line" && settings.showSignificance && (settings.lineErrorType === "sd" || settings.lineErrorType === "sem")
+    ? points.flatMap((point) => {
+        if (point.group === referenceSeries || point.n === null) return [];
+        const reference = points.find((candidate) => candidate.group === referenceSeries && candidate.order === point.order && candidate.n !== null);
+        if (!reference || reference.n === null) return [];
+        const pointSd = settings.lineErrorType === "sem" ? point.error * Math.sqrt(point.n) : point.error;
+        const referenceSd = settings.lineErrorType === "sem" ? reference.error * Math.sqrt(reference.n) : reference.error;
+        const pValue = welchSummaryPValue(point.mean, pointSd, point.n, reference.mean, referenceSd, reference.n);
+        return pValue === null ? [] : [{ pointIndex: point.index, pValue }];
+      })
+    : [];
+  const adjustedLinePValues = settings.linePAdjustment === "bh"
+    ? benjaminiHochbergAdjust(rawLineComparisons.map((comparison) => comparison.pValue))
+    : rawLineComparisons.map((comparison) => comparison.pValue);
+  const lineSignificance = new Map(rawLineComparisons.map((comparison, index) => [comparison.pointIndex, { ...comparison, adjustedPValue: adjustedLinePValues[index] }]));
+  const maximumObservedTicks = Math.max(2, Math.min(12, Math.floor((settings.swapAxes ? frame.plotHeight : frame.plotWidth) / Math.max(24, settings.tickSize * 2.2))));
+  const lineTimeTicks = type === "line"
+    ? observedAxisTicks(points.map((point) => settings.swapAxes ? point.y : point.x), maximumObservedTicks)
+    : undefined;
   const xLabel = settings.swapAxes
-    ? settings.yLabel || (type === "line" ? "Value" : "Y")
-    : settings.xLabel || "X";
+    ? settings.yLabel.trim()
+    : settings.xLabel.trim();
   const yLabel = settings.swapAxes
-    ? settings.xLabel || "X"
-    : settings.yLabel || (type === "line" ? "Value" : "Y");
+    ? settings.xLabel.trim()
+    : settings.yLabel.trim();
   const scaled = points.map((point) => ({
     ...point,
     sx: scaleLinear(point.x, xDomain, [frame.left, frame.left + frame.plotWidth]),
@@ -424,7 +449,7 @@ function renderLineOrScatter(
 
   return (
     <>
-      <NumericAxes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={xLabel} yLabel={yLabel} ink={ink} muted={muted} gridColor={gridColor} />
+      <NumericAxes frame={frame} settings={settings} xDomain={xDomain} yDomain={yDomain} xLabel={xLabel} yLabel={yLabel} ink={ink} muted={muted} gridColor={gridColor} xTickValues={type === "line" && !settings.swapAxes ? lineTimeTicks : undefined} yTickValues={type === "line" && settings.swapAxes ? lineTimeTicks : undefined} />
       <g data-plot-data>
       {lineErrorsEnabled
         ? scaled.map((point) => {
@@ -484,6 +509,15 @@ function renderLineOrScatter(
           {settings.showLabels && point.label ? <text data-plot-label x={point.x > (xDomain[0] + xDomain[1]) / 2 ? point.sx - settings.pointSize - 2 : point.sx + settings.pointSize + 2} y={point.y > (yDomain[0] + yDomain[1]) / 2 ? point.sy + settings.tickSize + 2 + (point.index % 2) * 3 : point.sy - 3 - (point.index % 2) * 3} textAnchor={point.x > (xDomain[0] + xDomain[1]) / 2 ? "end" : "start"} fill={ink} fontSize={settings.tickSize}>{truncate(point.label, 12)}</text> : null}
         </g>
       ))}
+      {type === "line" ? scaled.map((point) => {
+        const comparison = lineSignificance.get(point.index);
+        if (!comparison) return null;
+        const mark = comparison.adjustedPValue <= 0.001 ? "***" : comparison.adjustedPValue <= 0.01 ? "**" : comparison.adjustedPValue <= settings.significanceThreshold ? "*" : "ns";
+        const offset = settings.pointSize + settings.errorBarCapSize / 2 + settings.tickSize;
+        const x = settings.swapAxes ? Math.min(frame.left + frame.plotWidth - 4, point.sx + offset) : point.sx;
+        const y = settings.swapAxes ? point.sy + settings.tickSize * 0.3 : Math.max(frame.top + settings.tickSize, point.sy - offset);
+        return <text key={`line-significance-${point.index}`} data-plot-element="line-significance" data-adjusted-p={comparison.adjustedPValue.toPrecision(5)} x={x} y={y} textAnchor={settings.swapAxes ? "start" : "middle"} fill={ink} fillOpacity={comparison.adjustedPValue <= settings.significanceThreshold ? 1 : 0.62} fontSize={settings.tickSize} fontWeight={700}><title>{`${point.group} vs ${referenceSeries}; ${settings.linePAdjustment === "bh" ? "BH-adjusted " : ""}P=${comparison.adjustedPValue.toPrecision(4)}`}</title>{mark}</text>;
+      }) : null}
       </g>
       <Legend frame={frame} settings={settings} ink={ink} items={groups.map((group) => ({ label: group, color: colorMap.get(group) ?? colors[0], shape: type === "line" ? "line" : "circle" }))} />
     </>

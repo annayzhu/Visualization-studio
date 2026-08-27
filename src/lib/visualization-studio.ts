@@ -355,6 +355,8 @@ export type VisualizationSettings = {
   lineErrorType: "none" | "sd" | "sem" | "ci95";
   lineUncertaintyStyle: "bars" | "band";
   lineBandOpacity: number;
+  lineReferenceSeries: string;
+  linePAdjustment: "none" | "bh";
   associationVariant: "points" | "marginal" | "density" | "hexbin" | "ellipse" | "hull" | "pair-matrix" | "3d" | "ternary";
   associationFit: "none" | "linear" | "polynomial" | "loess";
   associationPolynomialDegree: 2 | 3;
@@ -493,6 +495,8 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   lineErrorType: "none",
   lineUncertaintyStyle: "bars",
   lineBandOpacity: 0.16,
+  lineReferenceSeries: "",
+  linePAdjustment: "bh",
   associationVariant: "points",
   associationFit: "none",
   associationPolynomialDegree: 2,
@@ -1566,15 +1570,15 @@ Day 7\t7.2\t0.54\tControl\t6.8\t7.5\t0.18\tLate
 Day 7\t7.8\t0.61\tTreatment A\t7.4\t8.1\t0.041\tLate
 Day 7\t8.4\t0.66\tTreatment B\t8.0\t8.8\t0.006\tLate
 Day 7\t9.0\t0.72\tTreatment C\t8.6\t9.4\t0.0007\tLate`,
-  line: `time\tvalue\tsd\tsem\tseries
-0\t1.0\t0.12\t0.05\tControl
-1\t1.3\t0.16\t0.07\tControl
-2\t1.6\t0.18\t0.08\tControl
-3\t1.8\t0.21\t0.09\tControl
-0\t1.0\t0.14\t0.06\tTreatment
-1\t2.1\t0.24\t0.11\tTreatment
-2\t3.5\t0.31\t0.14\tTreatment
-3\t4.4\t0.38\t0.17\tTreatment`,
+  line: `time\tvalue\tsd\tsem\tn\tseries
+0\t1.0\t0.12\t0.069\t3\tControl
+1\t1.3\t0.16\t0.092\t3\tControl
+2\t1.6\t0.18\t0.104\t3\tControl
+3\t1.8\t0.21\t0.121\t3\tControl
+0\t1.0\t0.14\t0.081\t3\tTreatment
+1\t2.1\t0.24\t0.139\t3\tTreatment
+2\t3.5\t0.31\t0.179\t3\tTreatment
+3\t4.4\t0.38\t0.219\t3\tTreatment`,
   lineNoError: `time\tvalue\tseries
 0\t1.0\tControl
 1\t1.3\tControl
@@ -2160,18 +2164,19 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     name: "Line",
     family: "Trend",
     summary: "Time-course or ordered trend with multiple series and visible markers.",
-    inputHint: "One row per ordered estimate. Map an optional non-negative SD, SEM, or 95% CI half-width column and display it as bars or a ribbon.",
+    inputHint: "One row per ordered estimate. Map SD or SEM plus sample size to calculate reference-series Welch tests at each X value, or display uncertainty without testing.",
     roles: [
       { key: "x", label: "X", kind: "number", required: true },
       { key: "value", label: "Value", kind: "number", required: true },
       { key: "error", label: "Uncertainty half-width (SD / SEM / 95% CI)", kind: "number", required: false },
+      { key: "n", label: "Sample size (n)", kind: "number", required: false },
       { key: "series", label: "Series", kind: "category", required: false },
     ],
-    defaultMapping: { x: "time", value: "value", error: "sd", series: "series" },
+    defaultMapping: { x: "time", value: "value", error: "sd", n: "n", series: "series" },
     sampleData: samples.line,
     examples: [
-      { label: "Example 1", description: "Ordered means with SD and SEM columns.", data: samples.line, mapping: { x: "time", value: "value", error: "sd", series: "series" } },
-      { label: "Example 2", description: "Ordered observations without an error column.", data: samples.lineNoError, mapping: { x: "time", value: "value", error: "", series: "series" } },
+      { label: "Example 1", description: "Ordered means with SD, SEM, and explicit sample size for optional Welch tests.", data: samples.line, mapping: { x: "time", value: "value", error: "sd", n: "n", series: "series" } },
+      { label: "Example 2", description: "Ordered estimates without uncertainty or significance calculation.", data: samples.lineNoError, mapping: { x: "time", value: "value", error: "", n: "", series: "series" } },
     ],
   },
   {
@@ -3037,9 +3042,9 @@ const plotGuidanceSeeds: Record<PlotType, PlotGuidance> = {
     references: [plotReferences.visualizationHistory, plotReferences.graphicalPerception, plotReferences.errorBars],
   },
   line: {
-    definition: "按 X 的自然顺序连接相邻估计值，以位置和线段方向编码连续变化；可将预先计算的 SD、SEM 或 95% CI 半宽显示为逐点误差棒或连续不确定性带。",
-    suitableData: "具有自然顺序的时间、剂量或阶段数据；每行应是一个估计值，若显示不确定性还需对应的非负半宽。带状区域不会自动把 SD 或 SEM 变成置信区间。",
-    answers: "指标随顺序如何变化，不同序列的方向、速度或响应模式是否不同，以及已给定的不确定性范围有多大。",
+    definition: "按实际 X 采样值的自然顺序连接相邻估计值，以位置和线段方向编码连续变化；可将预先计算的 SD、SEM 或 95% CI 半宽显示为逐点误差棒或连续不确定性带。",
+    suitableData: "具有自然顺序的时间、剂量或阶段数据；每行应是一个估计值。若计算逐时间点显著性，必须提供均值、SD 或 SEM、显式样本量 n 和分组，并明确数据不是配对或重复测量。",
+    answers: "指标随顺序如何变化，不同序列的方向、速度或响应模式是否不同，以及已给定的不确定性范围有多大。可选 Welch 检验只回答各时间点相对参考组的独立样本差异，不检验整体时间×组交互。",
     origin: "Playfair 同样在 1786 年用时间序列折线展示贸易变化，使“随时间阅读趋势”成为统计图形的核心用途。",
     references: [plotReferences.visualizationHistory, plotReferences.graphicalPerception, plotReferences.errorBars],
   },
@@ -3485,7 +3490,7 @@ const commonSettingKeys: Array<keyof VisualizationSettings> = [
 const hiddenLegendIds = new Set<PlotType>(["box", "violin", "beeswarm", "raincloud", "histogram", "density", "ridge", "heatmap", "clustered-heatmap", "correlation-heatmap", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos", "manhattan", "qq", "chromosome-ideogram", "snp-density", "genome-tracks", "waterfall", "oncoplot", "motif-logo", "treemap", "funnel", "precision-recall", "calibration", "decision-curve", "nomogram", "lasso-path", "km-cutoff", "risk-score", "go-circle", "kegg-circle", "go-chord", "pathway-impact", "nes-fdr", "multi-gsea", "enrichment-ridge", "sankey-bubble", "geographic-map", "petal", "word-cloud"]);
 const specializedSettingKeys: Partial<Record<PlotType, Array<keyof VisualizationSettings>>> = {
   bar: ["swapAxes", "barErrorType", "barVariant", "barInputMode", "barOverlayType", "secondaryAxisLabel", "showSignificance", "significanceThreshold", "axisBreakStart", "axisBreakEnd", "barGap", "barBorderWidth", "barBorderColor", "errorBarLineWidth", "errorBarCapSize"],
-  line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "errorBarLineWidth", "errorBarCapSize"],
+  line: ["swapAxes", "showPoints", "lineErrorType", "lineUncertaintyStyle", "lineBandOpacity", "showSignificance", "significanceThreshold", "lineReferenceSeries", "linePAdjustment", "errorBarLineWidth", "errorBarCapSize"],
   scatter: ["swapAxes", "showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"],
   correlation: ["showLabels", "correlationMethod", "associationVariant", "associationFit", "associationPolynomialDegree", "associationLoessSpan", "associationShowConfidenceBand", "associationShowPValue", "associationGroupMode", "associationHexbinSize", "associationDensityBandwidth"],
   pca: ["swapAxes", "showLabels", "ordinationView", "ordinationShowEllipse", "ordinationShowHull", "ordinationShowCentroids", "ordinationShowLoadings", "ordinationLoadingCount", "ordinationUseShapes", "ordinationPermanovaR2", "ordinationPermanovaP", "ordinationPermanovaPermutations", "ordinationMethodNote"],
@@ -4725,6 +4730,24 @@ export function validatePlotDataset(
       }).length;
       if (negativeErrors > 0) errors.push(`Error magnitude contains ${negativeErrors} negative value${negativeErrors === 1 ? "" : "s"}; SD and SEM must be non-negative, as must all uncertainty half-widths.`);
     }
+    if (definition.id === "line" && settings?.showSignificance) {
+      if (settings.lineErrorType !== "sd" && settings.lineErrorType !== "sem") errors.push("Line significance calculation requires Mean ± SD or Mean ± SEM.");
+      if (!mapping.n) errors.push("Map an explicit sample-size (n) column before calculating line significance.");
+      if (!mapping.series) errors.push("Map a series column before calculating line significance.");
+      if (mapping.n) {
+        const invalidSampleSizes = dataset.rows.filter((row) => {
+          const sampleSize = parseNumericValue(row[mapping.n]);
+          return sampleSize === null || !Number.isInteger(sampleSize) || sampleSize < 2;
+        }).length;
+        if (invalidSampleSizes > 0) errors.push(`Sample size contains ${invalidSampleSizes} invalid value${invalidSampleSizes === 1 ? "" : "s"}; Welch tests require an integer n ≥ 2 for every estimate.`);
+      }
+      if (mapping.x && mapping.series) {
+        const duplicatePairs = dataset.rows.map((row) => `${row[mapping.x]}\u0000${row[mapping.series] || "All"}`);
+        if (new Set(duplicatePairs).size !== duplicatePairs.length) errors.push("Summary-mode line significance requires exactly one mean per X and series pair.");
+        const series = [...new Set(dataset.rows.map((row) => row[mapping.series]).filter(Boolean))];
+        if (series.length < 2) errors.push("Line significance calculation requires at least two series.");
+      }
+    }
   }
 
   if ((definition.id === "scatter" || definition.id === "correlation") && settings) {
@@ -5753,6 +5776,84 @@ export function numericExtent(values: number[], includeZero = false): [number, n
   }
   const padding = (maximum - minimum) * 0.08;
   return [minimum - padding, maximum + padding];
+}
+
+/** Prefer the actual ordered sampling values for compact time-course axes. */
+export function observedAxisTicks(values: number[], maximumCount: number) {
+  const ticks = [...new Set(values.filter(Number.isFinite))].sort((a, b) => a - b);
+  return ticks.length >= 2 && ticks.length <= Math.max(2, maximumCount) ? ticks : undefined;
+}
+
+function logGamma(value: number): number {
+  const coefficients = [676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406, 12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7];
+  if (value < 0.5) return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - logGamma(1 - value);
+  const shifted = value - 1;
+  let series = 0.9999999999998099;
+  coefficients.forEach((coefficient, index) => { series += coefficient / (shifted + index + 1); });
+  const t = shifted + coefficients.length - 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (shifted + 0.5) * Math.log(t) - t + Math.log(series);
+}
+
+function betaContinuedFraction(a: number, b: number, x: number) {
+  const maximumIterations = 200;
+  const epsilon = 3e-12;
+  const floor = 1e-300;
+  const qab = a + b; const qap = a + 1; const qam = a - 1;
+  let c = 1; let d = 1 - qab * x / qap;
+  if (Math.abs(d) < floor) d = floor;
+  d = 1 / d;
+  let result = d;
+  for (let iteration = 1; iteration <= maximumIterations; iteration += 1) {
+    const twice = 2 * iteration;
+    let aa = iteration * (b - iteration) * x / ((qam + twice) * (a + twice));
+    d = 1 + aa * d; if (Math.abs(d) < floor) d = floor;
+    c = 1 + aa / c; if (Math.abs(c) < floor) c = floor;
+    d = 1 / d; result *= d * c;
+    aa = -(a + iteration) * (qab + iteration) * x / ((a + twice) * (qap + twice));
+    d = 1 + aa * d; if (Math.abs(d) < floor) d = floor;
+    c = 1 + aa / c; if (Math.abs(c) < floor) c = floor;
+    d = 1 / d;
+    const delta = d * c; result *= delta;
+    if (Math.abs(delta - 1) < epsilon) break;
+  }
+  return result;
+}
+
+function regularizedIncompleteBeta(x: number, a: number, b: number) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2)
+    ? front * betaContinuedFraction(a, b, x) / a
+    : 1 - front * betaContinuedFraction(b, a, 1 - x) / b;
+}
+
+export function studentTTwoSidedPValue(tStatistic: number, degreesOfFreedom: number) {
+  if (!Number.isFinite(tStatistic) || !Number.isFinite(degreesOfFreedom) || degreesOfFreedom <= 0) return null;
+  const squared = tStatistic * tStatistic;
+  return Math.min(1, Math.max(0, regularizedIncompleteBeta(degreesOfFreedom / (degreesOfFreedom + squared), degreesOfFreedom / 2, 0.5)));
+}
+
+export function welchSummaryPValue(meanA: number, sdA: number, nA: number, meanB: number, sdB: number, nB: number) {
+  if (![meanA, sdA, nA, meanB, sdB, nB].every(Number.isFinite) || sdA < 0 || sdB < 0 || nA < 2 || nB < 2) return null;
+  const varianceA = sdA * sdA / nA;
+  const varianceB = sdB * sdB / nB;
+  const variance = varianceA + varianceB;
+  if (variance === 0) return meanA === meanB ? 1 : 0;
+  const degreesOfFreedom = variance * variance / (varianceA * varianceA / (nA - 1) + varianceB * varianceB / (nB - 1));
+  return studentTTwoSidedPValue(Math.abs(meanA - meanB) / Math.sqrt(variance), degreesOfFreedom);
+}
+
+export function benjaminiHochbergAdjust(pValues: number[]) {
+  const indexed = pValues.map((pValue, index) => ({ pValue: Math.min(1, Math.max(0, pValue)), index })).sort((a, b) => a.pValue - b.pValue);
+  const adjusted = Array<number>(pValues.length).fill(1);
+  let runningMinimum = 1;
+  for (let rankIndex = indexed.length - 1; rankIndex >= 0; rankIndex -= 1) {
+    const entry = indexed[rankIndex];
+    runningMinimum = Math.min(runningMinimum, entry.pValue * indexed.length / (rankIndex + 1));
+    adjusted[entry.index] = Math.min(1, runningMinimum);
+  }
+  return adjusted;
 }
 
 export function resolveAxisDomain(

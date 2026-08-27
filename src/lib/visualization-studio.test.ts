@@ -6,7 +6,6 @@ import {
   analysisProvenanceForPlot,
   categoricalColorForIndex,
   boxStatistics,
-  brightenScientificPaletteColor,
   confidenceInterval95,
   compactLegendLabel,
   covarianceEllipsePoints,
@@ -746,22 +745,14 @@ describe("Visualization Studio data contracts", () => {
       expect(colors.every((color) => /^#[0-9A-F]{6}$/i.test(color))).toBe(true);
       expect(Math.abs(relativeLuminance(theme.sequential[0]) - relativeLuminance(theme.sequential[1]))).toBeGreaterThan(theme.series === "chinese-traditional" ? 0.25 : 0.35);
       expect(relativeLuminance(theme.diverging[1])).toBeGreaterThan(Math.max(relativeLuminance(theme.diverging[0]), relativeLuminance(theme.diverging[2])));
-      expect(theme.categorical.reduce((sum, color) => sum + relativeLuminance(color), 0) / theme.categorical.length).toBeGreaterThan(0.18);
-      expect(theme.categorical.every((color) => relativeLuminance(color) > 0.085)).toBe(true);
+      expect(theme.categorical.reduce((sum, color) => sum + relativeLuminance(color), 0) / theme.categorical.length).toBeGreaterThan(0.15);
+      expect(theme.categorical.some((color) => relativeLuminance(color) > 0.35)).toBe(true);
     });
     Object.values(journalThemes).filter((theme) => theme.series === "chinese-traditional").forEach((theme) => {
       expect(relativeLuminance(theme.diverging[1])).toBeGreaterThan(0.85);
-      expect(relativeLuminance(theme.diverging[0])).toBeGreaterThan(0.3);
-      expect(relativeLuminance(theme.diverging[2])).toBeGreaterThan(0.3);
-      expect(rgbChroma(theme.diverging[0])).toBeLessThan(0.3);
-      expect(rgbChroma(theme.diverging[2])).toBeLessThan(0.3);
+      expect(relativeLuminance(theme.diverging[1]) - relativeLuminance(theme.diverging[0])).toBeGreaterThan(0.35);
+      expect(relativeLuminance(theme.diverging[1]) - relativeLuminance(theme.diverging[2])).toBeGreaterThan(0.35);
     });
-  });
-
-  it("brightens built-in plot colors without changing user-supplied invalid values", () => {
-    expect(brightenScientificPaletteColor("#315C86")).toBe("#527699");
-    expect(relativeLuminance(brightenScientificPaletteColor("#355F61"))).toBeGreaterThan(relativeLuminance("#355F61"));
-    expect(brightenScientificPaletteColor("custom-color")).toBe("custom-color");
   });
 
   it("keeps minimal palettes within a single restrained hue family", () => {
@@ -771,16 +762,29 @@ describe("Visualization Studio data contracts", () => {
       expect(theme.categorical).toHaveLength(8);
       const luminances = theme.categorical.slice(0, 4).map(relativeLuminance);
       expect(luminances.every((value, index) => index === 0 || value > luminances[index - 1])).toBe(true);
-      expect(rgbChroma(theme.categorical[0])).toBeLessThan(0.38);
+      expect(rgbChroma(theme.categorical[0])).toBeLessThan(0.6);
       expect(theme.categorical.slice(4).every((color) => rgbChroma(color) < 0.09)).toBe(true);
-      expect(theme.categorical.every((color) => relativeLuminance(color) < 0.55)).toBe(true);
+      expect(theme.categorical.every((color) => relativeLuminance(color) < 0.72)).toBe(true);
     });
   });
 
-  it("uses brighter low-saturation Chinese-traditional palettes", () => {
-    Object.values(journalThemes).filter((theme) => theme.series === "chinese-traditional").forEach((theme) => {
-      expect(theme.categorical.every((color) => rgbChroma(color) < 0.48)).toBe(true);
-    });
+  it("uses the named Pixso source colors for Chinese-traditional palettes", () => {
+    expect(journalThemes["cn-beihai"].categorical).toEqual(["#957454", "#1D4C50", "#D4A278", "#3F605B"]);
+    expect(journalThemes["cn-imperial-orange"].categorical).toEqual(["#DB5E40", "#2E2F25", "#E68959", "#866040"]);
+    expect(journalThemes["cn-wisteria"].categorical).toEqual(["#F1E7E5", "#1D4C50", "#D3A488", "#BDAEAD"]);
+    expect(journalThemes["cn-sunset"].categorical).toEqual(["#F7CD9B", "#313534", "#F0A72E", "#AE7F77"]);
+    expect(journalThemes["cn-hutong"].categorical).toEqual(["#3E443C", "#D3A488", "#8B6B5B", "#24271E"]);
+    expect(journalThemes["cn-dragon"].categorical).toEqual(["#B5A59B", "#655045", "#AF5F54", "#3B4E3D"]);
+    expect(journalThemes["cn-coral"].categorical).toEqual(["#DB785C", "#283F3E", "#E9A182", "#824E40"]);
+    expect(journalThemes["cn-autumn"].categorical).toEqual(["#E5B552", "#24271E", "#CCD8D0", "#DFBE96"]);
+    expect(journalThemes["cn-vermilion"].categorical).toEqual(["#BF1103", "#580F05", "#970804", "#DFBE96"]);
+  });
+
+  it("uses clear publication-figure color relationships for journal palettes", () => {
+    expect(journalThemes.nature.categorical.slice(0, 7)).toEqual(["#8FCFC9", "#FFBE7A", "#FA7F6F", "#82B0D2", "#BEB8DC", "#E7DAD2", "#999999"]);
+    expect(journalThemes.cell.categorical).toEqual(["#934B43", "#D76364", "#EF7A6D", "#F1D77E", "#B1CE46", "#63CFA0", "#9394E7", "#5F97D2"]);
+    expect(journalThemes.science.categorical.slice(0, 5)).toEqual(["#2878B5", "#9AC9DB", "#F8AC8C", "#C82423", "#FF8884"]);
+    expect(journalThemes.jama.categorical).toEqual(["#A1A9D0", "#F0988C", "#B883D4", "#9E9E9E", "#CFEAF1", "#C4A5DE", "#F6CAE5", "#96CCCB"]);
   });
 
   it("provides portable sans-serif and serif figure-font presets", () => {

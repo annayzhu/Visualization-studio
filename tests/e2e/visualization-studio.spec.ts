@@ -251,7 +251,18 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.getByRole("button", { name: "墨蓝", exact: true }).click();
     const bars = page.locator("svg[aria-label='Bar scientific figure preview'] [data-plot-element='bar']");
     await expect(bars).toHaveCount(8);
-    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#527699", "#6E859B", "#7E90A4", "#9AA7B4"]);
+    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#2878B5", "#5595C3", "#82B0D2", "#B7D5E8"]);
+  });
+
+  test("renders source-faithful traditional and journal colors", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop palette rendering");
+    await page.goto("/");
+    const bars = page.locator("svg[aria-label='Bar scientific figure preview'] [data-plot-element='bar']");
+    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#957454", "#1D4C50", "#D4A278", "#3F605B"]);
+
+    await page.getByRole("button", { name: "期刊配色", exact: true }).click();
+    await page.getByRole("button", { name: "Nature", exact: true }).click();
+    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#8FCFC9", "#FFBE7A", "#FA7F6F", "#82B0D2"]);
   });
 
   test("keeps the desktop workbench aligned and brings a distant selection fully into view", async ({ page }, testInfo) => {

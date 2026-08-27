@@ -251,7 +251,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.getByRole("button", { name: "墨蓝", exact: true }).click();
     const bars = page.locator("svg[aria-label='Bar scientific figure preview'] [data-plot-element='bar']");
     await expect(bars).toHaveCount(8);
-    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#315C86", "#526E88", "#70849A", "#8F9DAC"]);
+    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#527699", "#6E859B", "#7E90A4", "#9AA7B4"]);
   });
 
   test("keeps the desktop workbench aligned and brings a distant selection fully into view", async ({ page }, testInfo) => {

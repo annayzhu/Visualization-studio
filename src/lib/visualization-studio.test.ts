@@ -6,6 +6,7 @@ import {
   analysisProvenanceForPlot,
   categoricalColorForIndex,
   boxStatistics,
+  brightenScientificPaletteColor,
   confidenceInterval95,
   compactLegendLabel,
   covarianceEllipsePoints,
@@ -745,6 +746,8 @@ describe("Visualization Studio data contracts", () => {
       expect(colors.every((color) => /^#[0-9A-F]{6}$/i.test(color))).toBe(true);
       expect(Math.abs(relativeLuminance(theme.sequential[0]) - relativeLuminance(theme.sequential[1]))).toBeGreaterThan(theme.series === "chinese-traditional" ? 0.25 : 0.35);
       expect(relativeLuminance(theme.diverging[1])).toBeGreaterThan(Math.max(relativeLuminance(theme.diverging[0]), relativeLuminance(theme.diverging[2])));
+      expect(theme.categorical.reduce((sum, color) => sum + relativeLuminance(color), 0) / theme.categorical.length).toBeGreaterThan(0.18);
+      expect(theme.categorical.every((color) => relativeLuminance(color) > 0.085)).toBe(true);
     });
     Object.values(journalThemes).filter((theme) => theme.series === "chinese-traditional").forEach((theme) => {
       expect(relativeLuminance(theme.diverging[1])).toBeGreaterThan(0.85);
@@ -753,6 +756,12 @@ describe("Visualization Studio data contracts", () => {
       expect(rgbChroma(theme.diverging[0])).toBeLessThan(0.3);
       expect(rgbChroma(theme.diverging[2])).toBeLessThan(0.3);
     });
+  });
+
+  it("brightens built-in plot colors without changing user-supplied invalid values", () => {
+    expect(brightenScientificPaletteColor("#315C86")).toBe("#527699");
+    expect(relativeLuminance(brightenScientificPaletteColor("#355F61"))).toBeGreaterThan(relativeLuminance("#355F61"));
+    expect(brightenScientificPaletteColor("custom-color")).toBe("custom-color");
   });
 
   it("keeps minimal palettes within a single restrained hue family", () => {
@@ -768,7 +777,7 @@ describe("Visualization Studio data contracts", () => {
     });
   });
 
-  it("uses recalibrated low-saturation Chinese-traditional palettes", () => {
+  it("uses brighter low-saturation Chinese-traditional palettes", () => {
     Object.values(journalThemes).filter((theme) => theme.series === "chinese-traditional").forEach((theme) => {
       expect(theme.categorical.every((color) => rgbChroma(color) < 0.48)).toBe(true);
     });

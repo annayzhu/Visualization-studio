@@ -237,6 +237,38 @@ export type JournalTheme = {
   grid: string;
 };
 
+/**
+ * Lift built-in scientific colors for white figure canvases without changing hue order.
+ * Dark colors receive the largest correction, while already-light colors only move slightly.
+ * Custom user colors intentionally bypass this calibration.
+ */
+export function brightenScientificPaletteColor(hex: string, strength = 1) {
+  const normalized = hex.replace("#", "");
+  if (!/^[0-9A-F]{6}$/i.test(normalized)) return hex;
+  const channels = [0, 2, 4].map((start) => Number.parseInt(normalized.slice(start, start + 2), 16));
+  const perceivedLightness = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  const baseLift = perceivedLightness < 82 ? 0.22 : perceivedLightness < 122 ? 0.16 : perceivedLightness < 166 ? 0.1 : 0.04;
+  const lift = Math.max(0, Math.min(1, baseLift * strength));
+  return `#${channels.map((channel) => Math.round(channel + (255 - channel) * lift).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+}
+
+function brightenScientificPalette(colors: string[], strength = 1) {
+  return colors.map((color) => brightenScientificPaletteColor(color, strength));
+}
+
+function calibrateBuiltInJournalTheme(theme: JournalTheme): JournalTheme {
+  return {
+    ...theme,
+    categorical: brightenScientificPalette(theme.categorical),
+    sequential: [theme.sequential[0], brightenScientificPaletteColor(theme.sequential[1], 0.72)],
+    diverging: [
+      brightenScientificPaletteColor(theme.diverging[0], 0.45),
+      theme.diverging[1],
+      brightenScientificPaletteColor(theme.diverging[2], 0.45),
+    ],
+  };
+}
+
 export function analysisProvenanceForPlot(
   type: PlotType,
   settings: VisualizationSettings,
@@ -578,12 +610,12 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   radarFillOpacity: 0.16,
   radialMaximum: null,
   pyramidDisplayMode: "value",
-  categoricalColors: ["#8A6F58", "#355F61", "#C99573", "#71877C"],
+  categoricalColors: brightenScientificPalette(["#8A6F58", "#355F61", "#C99573", "#71877C"]),
   continuousLow: "#E9D8CB",
-  continuousHigh: "#355F61",
-  divergingLow: "#9AADB0",
+  continuousHigh: brightenScientificPaletteColor("#355F61", 0.72),
+  divergingLow: brightenScientificPaletteColor("#9AADB0", 0.45),
   divergingMid: "#FAF8F4",
-  divergingHigh: "#D5B49E",
+  divergingHigh: brightenScientificPaletteColor("#D5B49E", 0.45),
 };
 
 export type OrdinationType = "pca" | "pcoa" | "umap" | "tsne" | "nmds";
@@ -1041,7 +1073,7 @@ export function ordinationLoadingLayout(
   return { frame, ...domains, originX, originY, fontSize, safetyScale, geometries, minimumArrowLength };
 }
 
-export const journalThemes: Record<JournalThemeId, JournalTheme> = {
+const journalThemeSeeds: Record<JournalThemeId, JournalTheme> = {
   "minimal-ink": {
     id: "minimal-ink",
     series: "minimal",
@@ -1319,6 +1351,10 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     grid: "#F1E7E5",
   },
 };
+
+export const journalThemes = Object.fromEntries(
+  Object.entries(journalThemeSeeds).map(([id, theme]) => [id, calibrateBuiltInJournalTheme(theme)]),
+) as Record<JournalThemeId, JournalTheme>;
 
 function buildUmapExample() {
   const clusters = [

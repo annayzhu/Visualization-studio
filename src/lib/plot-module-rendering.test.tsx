@@ -26,7 +26,7 @@ describe("registered plot-module examples", () => {
   it("parses, maps, validates, and renders every bundled example with finite SVG geometry", () => {
     for (const plotModule of plotModuleRegistry.list()) {
       for (const example of plotModule.examples) {
-        const analysis = plotModule.definition.id === "pca" ? analyzeExpressionMatrix(example.data, undefined, example.metadata ?? "") : null;
+        const analysis = plotModule.definition.id === "pca" && example.pcaInputMode === "matrix" ? analyzeExpressionMatrix(example.data, undefined, example.metadata ?? "") : null;
         const dataset = analysis?.dataset ?? parseDelimitedData(example.data);
         const inferredMapping = analysis ? plotModule.definition.defaultMapping : inferPlotMapping(plotModule.definition, dataset.headers);
         const selectedMapping = example.mapping ?? inferredMapping;
@@ -104,9 +104,10 @@ describe("registered plot-module examples", () => {
 
   it("renders ordination overlays, supplied statistics, scree, loadings, shapes, and 3D views", () => {
     const pcaModule = plotModuleRegistry.get("pca");
-    const pca = analyzeExpressionMatrix(pcaModule.examples[0].data, undefined, pcaModule.examples[0].metadata ?? "");
+    const matrixExample = pcaModule.examples.find((example) => example.pcaInputMode === "matrix")!;
+    const pca = analyzeExpressionMatrix(matrixExample.data, undefined, matrixExample.metadata ?? "");
     expect(pca.dataset.errors).toEqual([]);
-    const pcaMapping = pcaModule.examples[0].mapping ?? pcaModule.definition.defaultMapping;
+    const pcaMapping = matrixExample.mapping ?? pcaModule.definition.defaultMapping;
     const scoreSettings = { ...defaultVisualizationSettings, ordinationShowEllipse: true, ordinationShowHull: true, ordinationShowCentroids: true, ordinationShowLoadings: true, ordinationUseShapes: true };
     expect(validatePlotDataset(pcaModule.definition, pca.dataset, pcaMapping, scoreSettings).errors).toEqual([]);
     const scoreMarkup = renderToStaticMarkup(<ScientificChartPreview svgRef={createRef<SVGSVGElement>()} type="pca" dataset={pca.dataset} mapping={pcaMapping} settings={scoreSettings} themeId={defaultVisualizationThemeId} />);

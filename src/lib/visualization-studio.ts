@@ -129,6 +129,11 @@ export type PlotType =
   | "population-pyramid";
 
 export type JournalThemeId =
+  | "minimal-ink"
+  | "minimal-cobalt"
+  | "minimal-pine"
+  | "minimal-clay"
+  | "minimal-plum"
   | "nature"
   | "cell"
   | "science"
@@ -148,7 +153,7 @@ export type JournalThemeId =
   | "cn-autumn"
   | "cn-vermilion";
 
-export type PaletteSeriesId = "journal" | "curated" | "chinese-traditional" | "custom";
+export type PaletteSeriesId = "minimal" | "journal" | "curated" | "chinese-traditional" | "custom";
 
 export const defaultVisualizationThemeId: JournalThemeId = "cn-beihai";
 export const defaultVisualizationPaletteSeriesId: PaletteSeriesId = "chinese-traditional";
@@ -204,12 +209,19 @@ export type PlotDataExample = {
   data: string;
   mapping?: Record<string, string>;
   metadata?: string;
+  pcaInputMode?: "scores" | "matrix";
   settings?: Partial<VisualizationSettings>;
 };
 
 export type PlotReference = {
   citation: string;
   href: string;
+};
+
+export type AnalysisProvenance = {
+  source: "supplied" | "calculated-in-studio";
+  label: "Supplied" | "Calculated in Studio";
+  detail: string;
 };
 
 export type JournalTheme = {
@@ -225,7 +237,40 @@ export type JournalTheme = {
   grid: string;
 };
 
+export function analysisProvenanceForPlot(
+  type: PlotType,
+  settings: VisualizationSettings,
+  pcaInputMode: "scores" | "matrix" = "scores",
+): AnalysisProvenance | null {
+  if (type === "pca") return pcaInputMode === "matrix"
+    ? { source: "calculated-in-studio", label: "Calculated in Studio", detail: "PCA scores, explained variance, and loadings are calculated locally from the supplied feature matrix." }
+    : { source: "supplied", label: "Supplied", detail: "PCA coordinates are supplied by an upstream analysis; Studio renders them without recomputing PCA." };
+  if (type === "pcoa") return { source: "supplied", label: "Supplied", detail: "PCoA coordinates and any explained-variance values are supplied by an upstream distance analysis; Studio renders them without recomputing PCoA." };
+  if (type === "roc") return settings.rocInputMode === "raw"
+    ? { source: "calculated-in-studio", label: "Calculated in Studio", detail: "Empirical ROC coordinates and trapezoidal AUC are calculated locally from the supplied binary outcomes and prediction scores." }
+    : { source: "supplied", label: "Supplied", detail: "Time-dependent ROC coordinates, confidence intervals, horizons, and AUC estimates are supplied by an upstream censoring-aware method." };
+  if (type === "km") return { source: "calculated-in-studio", label: "Calculated in Studio", detail: "Kaplan–Meier estimates, censor marks, and numbers at risk are calculated locally from the supplied subject-level records." };
+  if (type === "clustered-heatmap") return settings.clusterRows || settings.clusterColumns
+    ? { source: "calculated-in-studio", label: "Calculated in Studio", detail: `Hierarchical clustering is calculated locally for ${settings.clusterRows && settings.clusterColumns ? "rows and columns" : settings.clusterRows ? "rows" : "columns"} using the selected distance and linkage settings.` }
+    : { source: "supplied", label: "Supplied", detail: "Clustering is disabled; matrix values and row/column order are displayed as supplied." };
+  if (type === "correlation-heatmap") return { source: "calculated-in-studio", label: "Calculated in Studio", detail: "The correlation matrix and any enabled hierarchical clustering are calculated locally from paired complete observations." };
+  if (type === "venn" || type === "upset") return {
+    source: "calculated-in-studio",
+    label: "Calculated in Studio",
+    detail: settings.setInputMode === "peak-overlap"
+      ? "Disjoint atomic genomic overlaps and exact set intersections are calculated locally from the supplied genomic intervals."
+      : "Exact set intersections and member lists are calculated locally from the supplied membership records.",
+  };
+  return null;
+}
+
 export const paletteSeries: Record<PaletteSeriesId, { id: PaletteSeriesId; name: string; description: string; themeIds: JournalThemeId[] }> = {
+  minimal: {
+    id: "minimal",
+    name: "极简",
+    description: "单一主色配合中性明度阶梯，减少同图中的色相数量。",
+    themeIds: ["minimal-ink", "minimal-cobalt", "minimal-pine", "minimal-clay", "minimal-plum"],
+  },
   journal: {
     id: "journal",
     name: "期刊配色",
@@ -241,7 +286,7 @@ export const paletteSeries: Record<PaletteSeriesId, { id: PaletteSeriesId; name:
   "chinese-traditional": {
     id: "chinese-traditional",
     name: "中国传统",
-    description: "取自 Pixso 中国传统高级感配色色卡的九套东方配色。",
+    description: "九套低饱和、适合科研图表的中国传统色。",
     themeIds: ["cn-beihai", "cn-imperial-orange", "cn-wisteria", "cn-sunset", "cn-hutong", "cn-dragon", "cn-coral", "cn-autumn", "cn-vermilion"],
   },
   custom: {
@@ -458,7 +503,7 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   associationHexbinSize: 14,
   associationDensityBandwidth: 1,
   barBorderWidth: 0,
-  barBorderColor: "#1D4C50",
+  barBorderColor: "#355F61",
   errorBarLineWidth: 1.5,
   errorBarCapSize: 14,
   violinBandwidth: 1,
@@ -529,12 +574,12 @@ export const defaultVisualizationSettings: VisualizationSettings = {
   radarFillOpacity: 0.16,
   radialMaximum: null,
   pyramidDisplayMode: "value",
-  categoricalColors: ["#957454", "#1D4C50", "#D4A278", "#3F605B"],
-  continuousLow: "#D4A278",
-  continuousHigh: "#1D4C50",
-  divergingLow: "#91A7A6",
-  divergingMid: "#FAF7F2",
-  divergingHigh: "#D3BBA4",
+  categoricalColors: ["#8A6F58", "#355F61", "#C99573", "#71877C"],
+  continuousLow: "#E9D8CB",
+  continuousHigh: "#355F61",
+  divergingLow: "#9AADB0",
+  divergingMid: "#FAF8F4",
+  divergingHigh: "#D5B49E",
 };
 
 export type OrdinationType = "pca" | "pcoa" | "umap" | "tsne" | "nmds";
@@ -632,6 +677,62 @@ export function estimateLegendTextWidth(label: string, fontSize: number) {
     return sum + 0.46;
   }, 0);
   return em * Math.max(1, fontSize);
+}
+
+export const BAR_CATEGORY_LABEL_ANGLE = -30;
+
+/** Keep the visible bar-category text identical in layout and rendering. */
+export function barCategoryLabelText(value: string) {
+  return value.length <= 16 ? value : `${value.slice(0, 15)}…`;
+}
+
+/**
+ * Deterministic bottom-axis geometry for compact vertical bar charts.
+ *
+ * The rotated labels extend below their SVG baseline by roughly half their
+ * text width at -30 degrees. Reserving that footprint before the plot frame is
+ * created keeps preview and exported SVG geometry identical without relying on
+ * a post-render DOM measurement.
+ */
+export function barCategoryAxisLayoutMetrics(settings: VisualizationSettings, labels: string[]) {
+  const isHorizontal = settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant);
+  const applies = !isHorizontal && settings.barVariant !== "polar";
+  const compactHeight = settings.height < 300;
+  const baseBottom = (compactHeight ? 48 : 58) + (settings.legendPosition === "bottom" ? 34 : 0);
+  const top = (compactHeight ? 20 : 24) + (settings.title ? 24 : 0);
+  if (!applies) return {
+    applies,
+    bottom: baseBottom,
+    requiredBottom: baseBottom,
+    labelBottomOffset: 0,
+    xTitleY: settings.height - (settings.legendPosition === "bottom" ? 57 : 13),
+    minimumGap: 4,
+    fits: settings.height - top - baseBottom >= 80,
+  };
+
+  const displayedLabels = labels.map(barCategoryLabelText);
+  const maximumLabelWidth = Math.max(0, ...displayedLabels.map((label) => estimateLegendTextWidth(label, settings.tickSize)));
+  const rotation = Math.abs(BAR_CATEGORY_LABEL_ANGLE) * Math.PI / 180;
+  const labelBaselineOffset = 10;
+  const labelDescent = settings.tickSize * 0.25;
+  const labelBottomOffset = labelBaselineOffset + Math.sin(rotation) * maximumLabelWidth + Math.cos(rotation) * labelDescent;
+  const minimumGap = 4;
+  const hasXTitle = Boolean(settings.xLabel.trim());
+  const xTitleY = settings.height - (settings.legendPosition === "bottom" ? 57 : 13);
+  const contentTopFromBottom = hasXTitle
+    ? settings.height - xTitleY + settings.axisLabelSize * 0.82
+    : settings.legendPosition === "bottom" ? 34 : 4;
+  const requiredBottom = Math.ceil(labelBottomOffset + minimumGap + contentTopFromBottom);
+  const bottom = Math.max(baseBottom, requiredBottom);
+  return {
+    applies,
+    bottom,
+    requiredBottom,
+    labelBottomOffset,
+    xTitleY,
+    minimumGap,
+    fits: settings.height - top - bottom >= 80,
+  };
 }
 
 export type EnrichmentSpecializedLayoutInput = {
@@ -937,14 +1038,74 @@ export function ordinationLoadingLayout(
 }
 
 export const journalThemes: Record<JournalThemeId, JournalTheme> = {
+  "minimal-ink": {
+    id: "minimal-ink",
+    series: "minimal",
+    name: "石墨",
+    description: "近单色石墨阶梯，适合需要最大克制感的比较图。",
+    categorical: ["#31363D", "#555C65", "#747C85", "#949BA3", "#474C52", "#686E75", "#898F95", "#AEB2B6"],
+    sequential: ["#EEF0F1", "#3B4148"],
+    diverging: ["#667784", "#F7F7F5", "#92706B"],
+    ink: "#25292E",
+    muted: "#6C737B",
+    grid: "#E4E6E7",
+  },
+  "minimal-cobalt": {
+    id: "minimal-cobalt",
+    series: "minimal",
+    name: "墨蓝",
+    description: "一组蓝灰明度阶梯，以墨蓝作为唯一强调色。",
+    categorical: ["#315C86", "#526E88", "#70849A", "#8F9DAC", "#49525B", "#68737D", "#89939C", "#ADB4BA"],
+    sequential: ["#EDF2F5", "#315C86"],
+    diverging: ["#55758E", "#F7F7F5", "#9B6B62"],
+    ink: "#26333F",
+    muted: "#687784",
+    grid: "#E2E7EA",
+  },
+  "minimal-pine": {
+    id: "minimal-pine",
+    series: "minimal",
+    name: "松柏",
+    description: "一组松绿色阶梯，安静、自然，适合组学与生态数据。",
+    categorical: ["#35665C", "#55796F", "#738E85", "#91A59E", "#48534F", "#68746F", "#89938F", "#ADB5B2"],
+    sequential: ["#EDF3F0", "#35665C"],
+    diverging: ["#617C82", "#F7F7F4", "#9A7062"],
+    ink: "#293B36",
+    muted: "#6A7A74",
+    grid: "#E2E8E5",
+  },
+  "minimal-clay": {
+    id: "minimal-clay",
+    series: "minimal",
+    name: "陶赭",
+    description: "一组温暖陶赭阶梯，适合临床与实验比较图。",
+    categorical: ["#9A5F4D", "#A97664", "#B88E7E", "#C5A69A", "#554D49", "#746A65", "#948A85", "#B5ACA8"],
+    sequential: ["#F5EEEB", "#9A5F4D"],
+    diverging: ["#647B87", "#F8F7F4", "#A66955"],
+    ink: "#46342E",
+    muted: "#806F68",
+    grid: "#EAE3DF",
+  },
+  "minimal-plum": {
+    id: "minimal-plum",
+    series: "minimal",
+    name: "梅灰",
+    description: "一组克制梅紫阶梯，适合强调单一研究主题。",
+    categorical: ["#77566F", "#8B7084", "#9F8999", "#B2A2AE", "#514B50", "#706970", "#918990", "#B2ABB0"],
+    sequential: ["#F2EEF1", "#77566F"],
+    diverging: ["#627C88", "#F8F7F5", "#8E637D"],
+    ink: "#3E303A",
+    muted: "#786B74",
+    grid: "#E8E2E6",
+  },
   nature: {
     id: "nature",
     series: "journal",
     name: "Nature",
     description: "Cool blue, coral red, and restrained botanical accents.",
-    categorical: ["#3C5488", "#E64B35", "#00A087", "#4DBBD5", "#F39B7F", "#8491B4", "#91D1C2", "#7E6148"],
-    sequential: ["#E8F1F2", "#147A86"],
-    diverging: ["#3C5488", "#F7F7F4", "#E64B35"],
+    categorical: ["#486486", "#C85A48", "#3A8275", "#6A9CB0", "#D58A75", "#75839A", "#8CB4AA", "#7A6655"],
+    sequential: ["#EDF3F4", "#3D7580"],
+    diverging: ["#58738F", "#F7F7F4", "#C76A57"],
     ink: "#23242A",
     muted: "#686A73",
     grid: "#E5E5E1",
@@ -954,9 +1115,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "journal",
     name: "Cell",
     description: "Warm coral, teal, plum, and muted gold for mechanistic figures.",
-    categorical: ["#C44E52", "#4C8B8B", "#8172B3", "#CCB974", "#4C72B0", "#DD8452", "#64A66A", "#937860"],
-    sequential: ["#F4EEE5", "#A65A3A"],
-    diverging: ["#4C72B0", "#FAF7F2", "#C44E52"],
+    categorical: ["#A94E55", "#477A78", "#75698E", "#B59655", "#4F6F98", "#C07850", "#688968", "#836E61"],
+    sequential: ["#F4EEEA", "#98584A"],
+    diverging: ["#5A759B", "#FAF7F2", "#B35F63"],
     ink: "#252427",
     muted: "#6B6768",
     grid: "#E8E2DD",
@@ -966,9 +1127,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "journal",
     name: "Science",
     description: "High-clarity navy, red, green, and purple with strong separation.",
-    categorical: ["#3B4992", "#D64545", "#008B68", "#6A4C93", "#1F7A8C", "#A33D5D", "#7B8F3A", "#6B6D76"],
-    sequential: ["#E9EEF6", "#315B88"],
-    diverging: ["#3B4992", "#F7F7F7", "#D64545"],
+    categorical: ["#465A86", "#B95752", "#3F7A69", "#755F87", "#3F7180", "#985569", "#77804F", "#6C7078"],
+    sequential: ["#EDF0F5", "#405E82"],
+    diverging: ["#53688E", "#F7F7F6", "#BD625C"],
     ink: "#1F2025",
     muted: "#62656D",
     grid: "#E2E4E8",
@@ -978,9 +1139,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "journal",
     name: "NEJM",
     description: "Clinical oxblood, steel blue, muted teal, and restrained ochre.",
-    categorical: ["#8E2C3A", "#356A87", "#4E8174", "#C18A3B", "#71627C", "#7C8F99", "#B96A58", "#8B7A64"],
-    sequential: ["#F5ECEE", "#8E2C3A"],
-    diverging: ["#356A87", "#F8F6F2", "#A33A45"],
+    categorical: ["#81414A", "#466B80", "#58796F", "#AA824B", "#706678", "#788791", "#A56B5D", "#837464"],
+    sequential: ["#F3EDEF", "#81414A"],
+    diverging: ["#57768A", "#F8F6F2", "#9C5660"],
     ink: "#252326",
     muted: "#6E686B",
     grid: "#E8E3E2",
@@ -990,9 +1151,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "journal",
     name: "Lancet",
     description: "Editorial burgundy, deep teal, warm amber, and composed slate.",
-    categorical: ["#8C294A", "#006D77", "#D49A3A", "#536B87", "#816A8D", "#577C67", "#B9654F", "#74777E"],
-    sequential: ["#F5EBEF", "#8C294A"],
-    diverging: ["#006D77", "#FAF7F2", "#A64050"],
+    categorical: ["#82445A", "#397176", "#B28B4D", "#5D7085", "#7A6B82", "#617968", "#A86B5D", "#74777E"],
+    sequential: ["#F3EDF0", "#82445A"],
+    diverging: ["#4E7A7D", "#FAF7F2", "#995667"],
     ink: "#262326",
     muted: "#6D686C",
     grid: "#E7E2E4",
@@ -1002,9 +1163,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "journal",
     name: "JAMA",
     description: "Medical teal, burnished orange, clear cyan, and muted wine.",
-    categorical: ["#374E55", "#DF8F44", "#00A1D5", "#B24745", "#79AF97", "#6A6599", "#80796B", "#5C8290"],
-    sequential: ["#EDF2F2", "#374E55"],
-    diverging: ["#007FA3", "#F7F6F2", "#B24745"],
+    categorical: ["#405961", "#C0814E", "#4B8DA5", "#A25755", "#719382", "#6D6A8C", "#80796B", "#63808B"],
+    sequential: ["#EDF2F2", "#405961"],
+    diverging: ["#4D8093", "#F7F6F2", "#A9615E"],
     ink: "#23282A",
     muted: "#687176",
     grid: "#E2E7E7",
@@ -1014,7 +1175,7 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "curated",
     name: "Nordic",
     description: "Cool navy and fjord teal balanced by clay, straw, and soft violet.",
-    categorical: ["#294C60", "#5B8E8D", "#C7785A", "#A49B62", "#776987", "#688292", "#D0A15F", "#547064"],
+    categorical: ["#355568", "#638885", "#B47760", "#969064", "#756C82", "#6F818C", "#B7905B", "#5F756B"],
     sequential: ["#EAF1F2", "#294C60"],
     diverging: ["#3E7188", "#F7F5EF", "#C7785A"],
     ink: "#22282C",
@@ -1026,7 +1187,7 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "curated",
     name: "Earth",
     description: "Botanical green, terracotta, ochre, aubergine, and mineral blue.",
-    categorical: ["#405D53", "#B86B4B", "#C19745", "#6F5C78", "#718355", "#986A5A", "#4F7880", "#85725B"],
+    categorical: ["#4C625A", "#A97058", "#A98950", "#70637A", "#72805F", "#8C6D61", "#5B767B", "#80715F"],
     sequential: ["#F1EFE5", "#405D53"],
     diverging: ["#4F7880", "#F6F2E8", "#B86B4B"],
     ink: "#292825",
@@ -1038,9 +1199,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "curated",
     name: "Colorblind",
     description: "Okabe–Ito-derived contrasts tuned for legibility on a white background.",
-    categorical: ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#C58A00", "#56B4E9", "#6B6B6B", "#8A6E00"],
-    sequential: ["#E8F2F7", "#0072B2"],
-    diverging: ["#0072B2", "#F7F7F3", "#D55E00"],
+    categorical: ["#356F96", "#B56935", "#3B816A", "#A66F92", "#A9863B", "#6697AD", "#6B6B6B", "#7F7141"],
+    sequential: ["#EAF1F4", "#356F96"],
+    diverging: ["#4F7E9B", "#F7F7F3", "#B97545"],
     ink: "#222426",
     muted: "#666B70",
     grid: "#E2E6E8",
@@ -1050,9 +1211,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "柴染棕",
     description: "北海公园：柴染棕、青灰蓝、薄香橙与飞泉青。",
-    categorical: ["#957454", "#1D4C50", "#D4A278", "#3F605B"],
-    sequential: ["#D4A278", "#1D4C50"],
-    diverging: ["#91A7A6", "#FAF7F2", "#D3BBA4"],
+    categorical: ["#8A6F58", "#355F61", "#C99573", "#71877C"],
+    sequential: ["#E9D8CB", "#355F61"],
+    diverging: ["#9AADB0", "#FAF8F4", "#D5B49E"],
     ink: "#1D4C50",
     muted: "#957454",
     grid: "#F1E7E5",
@@ -1062,9 +1223,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "橙绯红",
     description: "贵气天成：橙绯红、石槲绿、洗柿橙与伽罗褐。",
-    categorical: ["#DB5E40", "#2E2F25", "#E68959", "#866040"],
-    sequential: ["#E68959", "#2E2F25"],
-    diverging: ["#A3A59F", "#FCF8F3", "#D8B09B"],
+    categorical: ["#B95F49", "#48534A", "#D28C64", "#7F6854"],
+    sequential: ["#ECD1C4", "#48534A"],
+    diverging: ["#A7B1AA", "#FCF8F3", "#D8B09B"],
     ink: "#2E2F25",
     muted: "#866040",
     grid: "#F1E7E5",
@@ -1074,9 +1235,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "淡藤萝紫",
     description: "园博园：淡藤萝紫、青灰蓝、赤白橡与芦穗灰。",
-    categorical: ["#F1E7E5", "#1D4C50", "#D3A488", "#BDAEAD"],
-    sequential: ["#F1E7E5", "#1D4C50"],
-    diverging: ["#9AAEAE", "#FCF9F8", "#DFC4B7"],
+    categorical: ["#9A8FA8", "#456A6C", "#C59C87", "#B7ACAD"],
+    sequential: ["#E5DEE8", "#456A6C"],
+    diverging: ["#A1B2B3", "#FCF9F8", "#D9B9B2"],
     ink: "#1D4C50",
     muted: "#BDAEAD",
     grid: "#F1E7E5",
@@ -1086,9 +1247,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "瓜瓤粉",
     description: "夕阳古楼：瓜瓤粉、长石灰、金莺黄与淡玫瑰灰。",
-    categorical: ["#F7CD9B", "#313534", "#F0A72E", "#AE7F77"],
-    sequential: ["#F7CD9B", "#313534"],
-    diverging: ["#A4AAA8", "#FFF9F2", "#D8BDB7"],
+    categorical: ["#D9A97C", "#4B5352", "#C7954F", "#A67873"],
+    sequential: ["#F0DDC8", "#4B5352"],
+    diverging: ["#A8B1AF", "#FFF9F2", "#D5B7B1"],
     ink: "#313534",
     muted: "#AE7F77",
     grid: "#F1E7E5",
@@ -1098,9 +1259,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "蓝墨茶",
     description: "京城胡同：蓝墨茶、赤白橡、中红驼与岩碇黑。",
-    categorical: ["#3E443C", "#D3A488", "#8B6B5B", "#24271E"],
-    sequential: ["#D3A488", "#24271E"],
-    diverging: ["#A4AAA3", "#FAF7F3", "#CBB4A7"],
+    categorical: ["#495550", "#C29D86", "#8F6F60", "#303735"],
+    sequential: ["#E5D2C6", "#303735"],
+    diverging: ["#ABB3AE", "#FAF7F3", "#CDB2A3"],
     ink: "#24271E",
     muted: "#8B6B5B",
     grid: "#F1E7E5",
@@ -1110,9 +1271,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "棉絮灰",
     description: "盘龙纹：棉絮灰、老茶棕、淡红穹与苍灰绿。",
-    categorical: ["#B5A59B", "#655045", "#AF5F54", "#3B4E3D"],
-    sequential: ["#B5A59B", "#3B4E3D"],
-    diverging: ["#9FAC9F", "#FAF7F5", "#D4A8A2"],
+    categorical: ["#A9998F", "#725C50", "#A7655E", "#536B58"],
+    sequential: ["#DED4CF", "#536B58"],
+    diverging: ["#A6B2A8", "#FAF7F5", "#D0AAA5"],
     ink: "#3B4E3D",
     muted: "#655045",
     grid: "#F1E7E5",
@@ -1122,9 +1283,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "珊瑚朱",
     description: "京城脚下：珊瑚朱、铜器青、藏花红与淡土棕。",
-    categorical: ["#DB785C", "#283F3E", "#E9A182", "#824E40"],
-    sequential: ["#E9A182", "#283F3E"],
-    diverging: ["#91A7A4", "#FCF8F4", "#D7AC9D"],
+    categorical: ["#C36F5A", "#3F615F", "#D39A80", "#85584A"],
+    sequential: ["#EDD4C8", "#3F615F"],
+    diverging: ["#9DAEAB", "#FCF8F4", "#D4ABA0"],
     ink: "#283F3E",
     muted: "#824E40",
     grid: "#F1E7E5",
@@ -1134,9 +1295,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "杏叶黄",
     description: "故宫之秋：杏叶黄、岩碇黑、穹灰蓝与鹿角棕。",
-    categorical: ["#E5B552", "#24271E", "#CCD8D0", "#DFBE96"],
-    sequential: ["#CCD8D0", "#24271E"],
-    diverging: ["#9EA8A2", "#FBF9F3", "#DCCB9C"],
+    categorical: ["#C39A4B", "#424A43", "#91A49B", "#B99874"],
+    sequential: ["#E2E9E5", "#424A43"],
+    diverging: ["#A7B1AC", "#FBF9F3", "#D7C18E"],
     ink: "#24271E",
     muted: "#DFBE96",
     grid: "#F1E7E5",
@@ -1146,9 +1307,9 @@ export const journalThemes: Record<JournalThemeId, JournalTheme> = {
     series: "chinese-traditional",
     name: "中国红",
     description: "青铜兽环：中国红、深栗棕、淡枣红与鹿角棕。",
-    categorical: ["#BF1103", "#580F05", "#970804", "#DFBE96"],
-    sequential: ["#DFBE96", "#580F05"],
-    diverging: ["#B69B96", "#FCF7F3", "#D2A29B"],
+    categorical: ["#A93D33", "#673B34", "#C16D60", "#B9996E"],
+    sequential: ["#E7D1C8", "#673B34"],
+    diverging: ["#B0A5A1", "#FCF7F3", "#D2A29B"],
     ink: "#580F05",
     muted: "#970804",
     grid: "#F1E7E5",
@@ -1441,6 +1602,19 @@ Day 7\t9.0\t0.72\tTreatment C\t8.6\t9.4\t0.0007\tLate`,
 0.20\t0.49\t0.31\tTreatment\tS7
 0.16\t0.44\t0.40\tTreatment\tS8
 0.12\t0.38\t0.50\tTreatment\tS9`,
+  pcaScores: `sample\tPC1\tPC2\tPC3\tgroup\tbatch\tlabel
+C1\t-3.42\t0.88\t0.21\tControl\tBatch 1\tControl 1
+C2\t-3.05\t0.22\t-0.36\tControl\tBatch 2\tControl 2
+C3\t-2.61\t1.34\t0.08\tControl\tBatch 1\tControl 3
+C4\t-2.28\t0.61\t0.42\tControl\tBatch 2\tControl 4
+T1\t0.74\t-1.62\t0.31\tTreatment A\tBatch 1\tTreatment A1
+T2\t1.18\t-1.05\t-0.28\tTreatment A\tBatch 2\tTreatment A2
+T3\t1.46\t-2.08\t0.16\tTreatment A\tBatch 1\tTreatment A3
+T4\t0.52\t-0.74\t-0.41\tTreatment A\tBatch 2\tTreatment A4
+R1\t2.15\t1.48\t-0.12\tTreatment B\tBatch 1\tTreatment B1
+R2\t2.63\t0.92\t0.38\tTreatment B\tBatch 2\tTreatment B2
+R3\t3.08\t1.76\t-0.22\tTreatment B\tBatch 1\tTreatment B3
+R4\t2.48\t2.21\t0.09\tTreatment B\tBatch 2\tTreatment B4`,
   pca: `feature_id\tControl_1_count\tControl_2_count\tControl_3_count\tTreatment_1_count\tTreatment_2_count\tTreatment_3_count
 Feature_A\t120\t132\t118\t420\t398\t445
 Feature_B\t560\t585\t542\t190\t205\t178
@@ -2024,8 +2198,8 @@ const plotDefinitionSeeds: PlotDefinition[] = [
     id: "pca",
     name: "PCA",
     family: "Dimension reduction",
-    summary: "Principal component analysis calculated from a wide high-dimensional feature matrix.",
-    inputHint: "Wide matrix: the first column identifies features and remaining columns are observations. Inputs may be counts, non-negative abundance measurements, or already normalized continuous values.",
+    summary: "Plot supplied principal-component coordinates or calculate PCA locally from a wide feature matrix.",
+    inputHint: "Choose supplied coordinates when PCA was calculated upstream, or matrix calculation when the first column identifies features and remaining columns are observations.",
     roles: [
       { key: "x", label: "X component", kind: "number", required: true },
       { key: "y", label: "Y component", kind: "number", required: true },
@@ -2035,10 +2209,10 @@ const plotDefinitionSeeds: PlotDefinition[] = [
       { key: "label", label: "Observation label", kind: "label", required: false },
     ],
     defaultMapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "", label: "sample" },
-    sampleData: samples.pca,
+    sampleData: samples.pcaScores,
     examples: [
-      { label: "Example 1", description: "Wide feature matrix with raw count columns plus sample metadata joined by exact sample ID.", data: samples.pca, metadata: samples.pcaMetadata, mapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "batch", label: "label" } },
-      { label: "Example 2", description: "Wide TPM/abundance matrix plus sample metadata joined by exact sample ID.", data: samples.pcaAbundance, metadata: samples.pcaMetadata, mapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "batch", label: "label" } },
+      { label: "Example 1", description: "Precomputed PC1–PC3 coordinates supplied by an upstream PCA workflow; Studio only renders them.", data: samples.pcaScores, pcaInputMode: "scores", mapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "batch", label: "label" } },
+      { label: "Example 2", description: "Wide feature matrix with raw count columns plus sample metadata; Studio calculates PCA locally.", data: samples.pca, metadata: samples.pcaMetadata, pcaInputMode: "matrix", mapping: { x: "PC1", y: "PC2", z: "PC3", group: "group", shape: "batch", label: "label" } },
     ],
   },
   {
@@ -4641,6 +4815,10 @@ export function validatePlotDataset(
     const needsSecondary = ["dual-axis", "overlay"].includes(settings.barVariant);
     const needsTarget = settings.barVariant === "bullet";
     const needsFacet = settings.barVariant === "faceted";
+    const categoryLayout = barCategoryAxisLayoutMetrics(settings, dataset.rows.map((row) => mapping.category ? row[mapping.category] ?? "" : ""));
+    if (categoryLayout.applies && !categoryLayout.fits) {
+      errors.push(`Category labels and the X-axis title need ${categoryLayout.requiredBottom}px of bottom space at the current text sizes; increase figure height, shorten category labels, or reduce the configured text sizes.`);
+    }
     if (needsSecondary && !mapping.secondary) errors.push(`${settings.barVariant === "dual-axis" ? "Dual-axis" : "Overlay"} bars require a mapped secondary value column.`);
     if (needsTarget && !mapping.target) errors.push("Bullet charts require a mapped target value column.");
     if (needsFacet && !mapping.facet) errors.push("Faceted bars require a mapped facet column.");

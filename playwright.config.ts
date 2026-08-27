@@ -15,7 +15,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 33117",
+    command: "npm run dev:test",
     url: "http://127.0.0.1:33117",
     reuseExistingServer: false,
     timeout: 120_000,

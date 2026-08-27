@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   alignHeatmapAnnotations,
+  barCategoryAxisLayoutMetrics,
+  analysisProvenanceForPlot,
   categoricalColorForIndex,
   boxStatistics,
   confidenceInterval95,
@@ -49,6 +51,21 @@ function rgbChroma(hex: string) {
 }
 
 describe("Visualization Studio data contracts", () => {
+  it("reports whether analysis results were supplied or calculated in Studio", () => {
+    expect(analysisProvenanceForPlot("pca", defaultVisualizationSettings, "scores")?.source).toBe("supplied");
+    expect(analysisProvenanceForPlot("pca", defaultVisualizationSettings, "matrix")?.source).toBe("calculated-in-studio");
+    expect(analysisProvenanceForPlot("pcoa", defaultVisualizationSettings)?.source).toBe("supplied");
+    expect(analysisProvenanceForPlot("roc", defaultVisualizationSettings)?.source).toBe("calculated-in-studio");
+    expect(analysisProvenanceForPlot("roc", { ...defaultVisualizationSettings, rocInputMode: "precomputed-time" })?.source).toBe("supplied");
+    expect(analysisProvenanceForPlot("km", defaultVisualizationSettings)?.source).toBe("calculated-in-studio");
+    expect(analysisProvenanceForPlot("clustered-heatmap", defaultVisualizationSettings)?.source).toBe("calculated-in-studio");
+    expect(analysisProvenanceForPlot("clustered-heatmap", { ...defaultVisualizationSettings, clusterRows: false, clusterColumns: false })?.source).toBe("supplied");
+    expect(analysisProvenanceForPlot("correlation-heatmap", defaultVisualizationSettings)?.source).toBe("calculated-in-studio");
+    expect(analysisProvenanceForPlot("venn", defaultVisualizationSettings)?.source).toBe("calculated-in-studio");
+    expect(analysisProvenanceForPlot("upset", { ...defaultVisualizationSettings, setInputMode: "peak-overlap" })?.detail).toMatch(/genomic overlaps/);
+    expect(analysisProvenanceForPlot("bar", defaultVisualizationSettings)).toBeNull();
+  });
+
   it("uses a compact default canvas without reducing publication text sizes", () => {
     expect(defaultVisualizationSettings.width).toBe(340);
     expect(defaultVisualizationSettings.height).toBe(340);
@@ -124,7 +141,10 @@ describe("Visualization Studio data contracts", () => {
     });
     expect(getPlotExamples(getPlotDefinition("bar"))).toHaveLength(3);
     expect(getPlotExamples(getPlotDefinition("line"))).toHaveLength(2);
-    expect(getPlotExamples(getPlotDefinition("pca"))).toHaveLength(2);
+    const pcaExamples = getPlotExamples(getPlotDefinition("pca"));
+    expect(pcaExamples).toHaveLength(2);
+    expect(pcaExamples.map((example) => example.pcaInputMode)).toEqual(["scores", "matrix"]);
+    expect(parseDelimitedData(pcaExamples[0].data).headers).toEqual(expect.arrayContaining(["sample", "PC1", "PC2", "PC3", "group"]));
   });
 
   it("uses representative demo sizes for dense scientific plots", () => {
@@ -438,6 +458,39 @@ describe("Visualization Studio data contracts", () => {
     expect(negative.errors.join(" ")).toMatch(/SD and SEM must be non-negative/);
   });
 
+  it("reserves dynamic footer space for rotated bar categories and an X-axis title", () => {
+    const labels = ["Mock", "NC", "siFBN2-1224", "siFBN2-7173", "siFBN2-9706"];
+    const titled = barCategoryAxisLayoutMetrics(
+      { ...defaultVisualizationSettings, width: 480, height: 340, xLabel: "H596", legendPosition: "right" },
+      labels,
+    );
+    expect(titled.applies).toBe(true);
+    expect(titled.bottom).toBeGreaterThan(58);
+    expect(titled.fits).toBe(true);
+
+    const untitled = barCategoryAxisLayoutMetrics(
+      { ...defaultVisualizationSettings, width: 480, height: 340, xLabel: "", legendPosition: "right" },
+      labels,
+    );
+    expect(untitled.bottom).toBeLessThan(titled.bottom);
+
+    const horizontal = barCategoryAxisLayoutMetrics(
+      { ...defaultVisualizationSettings, width: 480, height: 340, xLabel: "H596", swapAxes: true },
+      labels,
+    );
+    expect(horizontal.applies).toBe(false);
+
+    const cannotFit = { ...defaultVisualizationSettings, width: 220, height: 140, xLabel: "H596", tickSize: 20, axisLabelSize: 24 };
+    expect(barCategoryAxisLayoutMetrics(cannotFit, labels).fits).toBe(false);
+    const validation = validatePlotDataset(
+      getPlotDefinition("bar"),
+      parseDelimitedData(`category\tvalue\n${labels.map((label, index) => `${label}\t${index + 1}`).join("\n")}`),
+      { category: "category", value: "value", group: "", error: "", secondary: "", target: "", pValue: "", facet: "" },
+      cannotFit,
+    );
+    expect(validation.errors.join(" ")).toMatch(/Category labels and the X-axis title need/);
+  });
+
   it("rejects misleading percentage and axis-break inputs while ignoring hidden uncertainty", () => {
     const definition = getPlotDefinition("bar");
     const signed = parseDelimitedData("category\tvalue\tgroup\nA\t-2\tG1\nA\t5\tG2");
@@ -634,7 +687,8 @@ describe("Visualization Studio data contracts", () => {
   });
 
   it("provides complete publication palettes for categorical and continuous plots", () => {
-    expect(Object.keys(journalThemes)).toHaveLength(18);
+    expect(Object.keys(journalThemes)).toHaveLength(23);
+    expect(paletteSeries.minimal.themeIds).toHaveLength(5);
     expect(paletteSeries.journal.themeIds).toHaveLength(6);
     expect(paletteSeries.curated.themeIds).toHaveLength(3);
     expect(paletteSeries["chinese-traditional"].themeIds).toHaveLength(9);
@@ -665,20 +719,22 @@ describe("Visualization Studio data contracts", () => {
     });
   });
 
-  it("keeps the nine Pixso Chinese-traditional source palettes exact", () => {
-    const sourcePalettes = {
-      "cn-beihai": ["#957454", "#1D4C50", "#D4A278", "#3F605B"],
-      "cn-imperial-orange": ["#DB5E40", "#2E2F25", "#E68959", "#866040"],
-      "cn-wisteria": ["#F1E7E5", "#1D4C50", "#D3A488", "#BDAEAD"],
-      "cn-sunset": ["#F7CD9B", "#313534", "#F0A72E", "#AE7F77"],
-      "cn-hutong": ["#3E443C", "#D3A488", "#8B6B5B", "#24271E"],
-      "cn-dragon": ["#B5A59B", "#655045", "#AF5F54", "#3B4E3D"],
-      "cn-coral": ["#DB785C", "#283F3E", "#E9A182", "#824E40"],
-      "cn-autumn": ["#E5B552", "#24271E", "#CCD8D0", "#DFBE96"],
-      "cn-vermilion": ["#BF1103", "#580F05", "#970804", "#DFBE96"],
-    } as const;
-    Object.entries(sourcePalettes).forEach(([id, colors]) => {
-      expect(journalThemes[id as keyof typeof journalThemes].categorical).toEqual(colors);
+  it("keeps minimal palettes within a single restrained hue family", () => {
+    paletteSeries.minimal.themeIds.forEach((id) => {
+      const theme = journalThemes[id];
+      expect(theme.series).toBe("minimal");
+      expect(theme.categorical).toHaveLength(8);
+      const luminances = theme.categorical.slice(0, 4).map(relativeLuminance);
+      expect(luminances.every((value, index) => index === 0 || value > luminances[index - 1])).toBe(true);
+      expect(rgbChroma(theme.categorical[0])).toBeLessThan(0.38);
+      expect(theme.categorical.slice(4).every((color) => rgbChroma(color) < 0.09)).toBe(true);
+      expect(theme.categorical.every((color) => relativeLuminance(color) < 0.55)).toBe(true);
+    });
+  });
+
+  it("uses recalibrated low-saturation Chinese-traditional palettes", () => {
+    Object.values(journalThemes).filter((theme) => theme.series === "chinese-traditional").forEach((theme) => {
+      expect(theme.categorical.every((color) => rgbChroma(color) < 0.48)).toBe(true);
     });
   });
 

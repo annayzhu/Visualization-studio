@@ -44,10 +44,10 @@ describe("Visualization Studio release contract", () => {
       width: 340,
       height: 340,
       fontFamily: "arial",
-      categoricalColors: ["#957454", "#1D4C50", "#D4A278", "#3F605B"],
-      divergingLow: "#91A7A6",
-      divergingMid: "#FAF7F2",
-      divergingHigh: "#D3BBA4",
+      categoricalColors: ["#8A6F58", "#355F61", "#C99573", "#71877C"],
+      divergingLow: "#9AADB0",
+      divergingMid: "#FAF8F4",
+      divergingHigh: "#D5B49E",
     });
     expect(defaultVisualizationPaletteSeriesId).toBe("chinese-traditional");
     expect(defaultVisualizationThemeId).toBe("cn-beihai");

@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "private": false,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1 --port 3400",
+    "dev:test": "next dev --hostname 127.0.0.1 --port 33117",
     "build": "next build && node scripts/prepare-standalone.mjs",
     "build:webpack": "next build --webpack && node scripts/prepare-standalone.mjs",
     "start": "node .next/standalone/server.js",
+    "start:local": "PORT=3400 HOSTNAME=127.0.0.1 node .next/standalone/server.js",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

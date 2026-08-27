@@ -26,7 +26,16 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3400](http://localhost:3400). Visualization Studio uses this fixed local port so it does not collide with other LabNest tools.
+
+For a production-style local run:
+
+```bash
+npm run build
+npm run start:local
+```
+
+The production-style local address is also [http://localhost:3400](http://localhost:3400).
 
 For production deployment, reverse-proxy integration, a standalone runtime, or embedding the unchanged interface inside another application, see [Engineering integration](docs/engineering-integration.md).
 

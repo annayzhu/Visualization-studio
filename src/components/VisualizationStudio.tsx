@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
-import { Check, ChevronDown, Download, ExternalLink, FileJson, Image as ImageIcon, Lightbulb, RotateCcw, Save, Upload } from "lucide-react";
+import { Check, ChevronDown, Download, ExternalLink, FileJson, Image as ImageIcon, Lightbulb, RotateCcw, Save, Search, Upload } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { ScientificChartPreview } from "@/components/ScientificChartPreview";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +15,7 @@ import {
   defaultVisualizationSettings,
   defaultVisualizationThemeId,
   activeNumericAxes,
+  analysisProvenanceForPlot,
   figureFontPresets,
   getPlotDefinition,
   getPlotModule,
@@ -40,6 +41,23 @@ const palettePreferenceStorageKey = "labnest:visualization-studio:palette";
 const customPaletteStorageKey = "labnest:visualization-studio:custom-palettes";
 
 type BuiltInPaletteSeriesId = Exclude<PaletteSeriesId, "custom">;
+type PcaInputMode = "scores" | "matrix";
+type PlotFinderGoalId = "compare" | "trend" | "distribution" | "association" | "ordination" | "differential" | "enrichment" | "composition" | "sets" | "network" | "clinical" | "genomic";
+
+const plotFinderGoals: ReadonlyArray<{ id: PlotFinderGoalId; label: string; description: string; keywords: string; plots: readonly PlotType[] }> = [
+  { id: "compare", label: "Compare groups", description: "Compare group means, uncertainty, or raw observations.", keywords: "比较 分组 均值 差异 误差", plots: ["bar", "errorbar", "box", "violin", "beeswarm", "raincloud"] },
+  { id: "trend", label: "Show change or trend", description: "Show ordered, longitudinal, or time-series change.", keywords: "趋势 时间 时序 纵向 变化", plots: ["line", "area", "lollipop"] },
+  { id: "distribution", label: "Show a distribution", description: "Describe spread, shape, density, and outliers.", keywords: "分布 密度 离群 四分位", plots: ["histogram", "density", "box", "violin", "ridge", "raincloud"] },
+  { id: "association", label: "Show an association", description: "Inspect relationships, correlation, and multivariable patterns.", keywords: "相关 关联 回归 关系", plots: ["scatter", "correlation", "correlation-heatmap", "quadrant", "radar"] },
+  { id: "ordination", label: "Sample similarity", description: "Display reduced coordinates or sample-level dissimilarity.", keywords: "降维 样本相似 聚类 主成分 beta diversity", plots: ["pca", "pcoa", "umap", "tsne", "nmds"] },
+  { id: "differential", label: "Show differential results", description: "Display effect sizes, abundance, and statistical evidence.", keywords: "差异表达 差异丰度 fold change 显著", plots: ["volcano", "ma", "waterfall"] },
+  { id: "enrichment", label: "Show pathways or enrichment", description: "Summarize enriched terms, gene sets, and pathway effects.", keywords: "富集 通路 GO KEGG GSEA", plots: ["enrichment", "enrichment-bar", "gsea", "go-circle", "kegg-circle", "pathway-impact", "nes-fdr"] },
+  { id: "composition", label: "Show composition", description: "Display parts of a whole or hierarchical composition.", keywords: "组成 占比 构成 比例", plots: ["bar", "donut", "waffle", "treemap", "sunburst", "rose"] },
+  { id: "sets", label: "Compare sets", description: "Show exact membership and intersections among sets.", keywords: "集合 交集 overlap", plots: ["venn", "upset"] },
+  { id: "network", label: "Show flows or networks", description: "Display links, flows, interactions, and regulatory relationships.", keywords: "网络 流向 相互作用 调控 关系", plots: ["network", "ppi", "cnet", "enrichment-map", "sankey", "alluvial", "chord", "circos"] },
+  { id: "clinical", label: "Show clinical or model results", description: "Present survival, effect estimates, discrimination, and calibration.", keywords: "临床 生存 预后 模型 诊断", plots: ["km", "survival-forest", "roc", "precision-recall", "calibration", "decision-curve", "funnel"] },
+  { id: "genomic", label: "Show genomic context", description: "Display genomic positions, variants, alterations, and sequence motifs.", keywords: "基因组 染色体 突变 位点 motif", plots: ["manhattan", "qq", "genome-tracks", "chromosome-ideogram", "snp-density", "oncoplot", "motif-logo"] },
+];
 
 type PalettePreference = {
   seriesId: PaletteSeriesId;
@@ -436,12 +454,16 @@ export function VisualizationStudio() {
   const [themeId, setThemeId] = useState<JournalThemeId>(defaultVisualizationThemeId);
   const [paletteSeriesId, setPaletteSeriesId] = useState<PaletteSeriesId>(defaultVisualizationPaletteSeriesId);
   const [settings, setSettings] = useState<VisualizationSettings>(() => settingsForTheme(defaultVisualizationThemeId));
+  const [pcaInputMode, setPcaInputMode] = useState<PcaInputMode>("scores");
   const [pcaOptions, setPcaOptions] = useState<PcaOptions>(defaultPcaOptions);
   const [pcaObservationMetadata, setPcaObservationMetadata] = useState("");
   const [customPalettes, setCustomPalettes] = useState<CustomPalette[]>([]);
   const [selectedCustomPaletteId, setSelectedCustomPaletteId] = useState("");
   const [customPaletteName, setCustomPaletteName] = useState("");
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
+  const [plotSearchQuery, setPlotSearchQuery] = useState("");
+  const [plotFinderOpen, setPlotFinderOpen] = useState(false);
+  const [plotFinderGoalId, setPlotFinderGoalId] = useState<PlotFinderGoalId>("compare");
   const [loadedFileName, setLoadedFileName] = useState("");
   const [fileError, setFileError] = useState("");
   const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
@@ -500,12 +522,35 @@ export function VisualizationStudio() {
   const definition = plotModule.definition;
   const dataExamples = plotModule.examples;
   const guidance = plotModule.guidance;
+  const selectedPlotFinderGoal = plotFinderGoals.find((goal) => goal.id === plotFinderGoalId) ?? plotFinderGoals[0];
+  const recommendedPlotModules = useMemo(() => selectedPlotFinderGoal.plots.map((id) => getPlotModule(id)), [selectedPlotFinderGoal]);
+  const filteredPlotModules = useMemo(() => {
+    const query = plotSearchQuery.trim().toLocaleLowerCase();
+    if (!query) return plotModuleRegistry.list();
+    const queryTokens = query.split(/\s+/).filter(Boolean);
+    return plotModuleRegistry.list().filter((candidate) => {
+      const relatedGoals = plotFinderGoals.filter((goal) => goal.plots.includes(candidate.definition.id));
+      const corpus = [
+        candidate.definition.name,
+        candidate.definition.family,
+        candidate.definition.summary,
+        candidate.definition.inputHint,
+        ...candidate.definition.roles.map((role) => role.label),
+        candidate.guidance.definition,
+        candidate.guidance.suitableData,
+        candidate.guidance.answers,
+        candidate.guidance.origin ?? "",
+        ...relatedGoals.flatMap((goal) => [goal.label, goal.description, goal.keywords]),
+      ].join(" ").toLocaleLowerCase();
+      return queryTokens.every((token) => corpus.includes(token));
+    });
+  }, [plotSearchQuery]);
   const hasSetting = (key: keyof VisualizationSettings) => plotModule.capabilities.settingKeys.includes(key);
   const visibleRoles = definition.roles.filter((role) => isPlotRoleActive(plotType, role.key, settings));
   const manualAxes = activeNumericAxes(plotType, settings);
   const invalidXLimits = manualAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
-  const pcaAnalysis = useMemo(() => plotType === "pca" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, rawData, pcaObservationMetadata, pcaOptions]);
+  const pcaAnalysis = useMemo(() => plotType === "pca" && pcaInputMode === "matrix" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, pcaInputMode, rawData, pcaObservationMetadata, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
   const setAnalysis = useMemo(
     () => (plotType === "venn" || plotType === "upset") ? analyzeSetIntersections(dataset.rows, mapping, settings.setInputMode) : null,
@@ -527,6 +572,7 @@ export function VisualizationStudio() {
     [plotType, dataset, mapping, settings],
   );
   const categoryLabels = useMemo(() => categoricalColorLabels(plotType, dataset.rows, mapping), [plotType, dataset.rows, mapping]);
+  const analysisProvenance = useMemo(() => analysisProvenanceForPlot(plotType, settings, pcaInputMode), [pcaInputMode, plotType, settings]);
   const isValid = validation.errors.length === 0;
   const mainGridStyle = {
     "--visualization-panel-top": `${stickyHeaderHeight + 12}px`,
@@ -578,11 +624,21 @@ export function VisualizationStudio() {
     setLoadedFileName("");
     setFileError("");
     setSelectedIntersectionSignature("");
-    if (plotType === "pca") setPcaOptions(defaultPcaOptions);
+    if (plotType === "pca") {
+      const nextInputMode = example.pcaInputMode ?? "matrix";
+      setPcaInputMode(nextInputMode);
+      setPcaOptions(defaultPcaOptions);
+      if (nextInputMode === "scores") setSettings((current) => ({ ...current, ordinationView: "scores", ordinationShowLoadings: false }));
+    }
     if (plotType === "bar") updateSetting("barInputMode", exampleIndex === 1 ? "long" : "summary");
     if (plotType === "roc") updateSetting("rocInputMode", exampleIndex === 1 ? "precomputed-time" : "raw");
     if (plotType === "venn" || plotType === "upset") updateSetting("setInputMode", exampleIndex === 1 ? "peak-overlap" : "membership");
     if (example.settings) setSettings((current) => ({ ...current, ...example.settings as Partial<VisualizationSettings> }));
+  };
+
+  const selectPcaInputMode = (nextMode: PcaInputMode) => {
+    const exampleIndex = dataExamples.findIndex((example) => example.pcaInputMode === nextMode);
+    if (exampleIndex >= 0) applyDataExample(exampleIndex);
   };
 
   const selectPlot = (nextType: PlotType) => {
@@ -597,7 +653,10 @@ export function VisualizationStudio() {
     setLoadedFileName("");
     setFileError("");
     setSelectedIntersectionSignature("");
-    if (nextType === "pca") setPcaOptions(defaultPcaOptions);
+    if (nextType === "pca") {
+      setPcaInputMode(nextExample.pcaInputMode ?? "matrix");
+      setPcaOptions(defaultPcaOptions);
+    }
     setSettings((current) => settingsForDistributionPreset({
       ...current,
       title: "",
@@ -731,7 +790,8 @@ export function VisualizationStudio() {
       setRawData(text);
       setSelectedExampleIndex(-1);
       setLoadedFileName(file.name);
-      if (plotType === "pca") { setPcaObservationMetadata(""); setMapping(definition.defaultMapping); }
+      if (plotType === "pca" && pcaInputMode === "matrix") { setPcaObservationMetadata(""); setMapping(definition.defaultMapping); }
+      else if (plotType === "pca") setMapping(inferPlotMapping(definition, parseDelimitedData(text).headers));
       else setMapping(inferPlotMapping(definition, parseDelimitedData(text).headers));
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "The selected file could not be read.");
@@ -798,7 +858,11 @@ export function VisualizationStudio() {
       themeId,
       mapping,
       settings,
-      pca: pcaAnalysis ? {
+      analysisProvenance: analysisProvenance ?? undefined,
+      pca: plotType === "pca" ? {
+        inputMode: pcaInputMode,
+        provenance: analysisProvenance?.source ?? (pcaInputMode === "matrix" ? "calculated-in-studio" : "supplied"),
+        ...(pcaAnalysis ? {
         options: pcaOptions,
         detectedLayer: pcaAnalysis.detectedLayer,
         sampleColumns: pcaAnalysis.sampleColumns,
@@ -809,6 +873,7 @@ export function VisualizationStudio() {
         explainedVariance: pcaAnalysis.explainedVariance,
         transformation: pcaAnalysis.transformation,
         observationMetadata: pcaObservationMetadata,
+        } : {}),
       } : undefined,
       data: rawData,
     };
@@ -868,34 +933,58 @@ export function VisualizationStudio() {
           </div>
         </Card>
         <Card className="rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none md:hidden">
-          <CardBody className="p-2">
+          <CardBody className="space-y-2 p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden />
+              <input aria-label="Search plot types" type="search" value={plotSearchQuery} onChange={(event) => setPlotSearchQuery(event.target.value)} placeholder="Search plots or questions" className="focus-ring h-9 w-full rounded-[8px] border border-hairline bg-white pl-9 pr-3 text-xs text-ink placeholder:text-muted" />
+            </div>
             <div className="relative">
               <select aria-label="Plot type" value={plotType} onChange={(event) => selectPlot(event.target.value as PlotType)} className="focus-ring h-10 w-full appearance-none rounded-[8px] border border-hairline bg-white px-3 pr-9 text-sm font-medium text-ink">
-                {plotModuleRegistry.list().map(({ definition: plot }) => <option key={plot.id} value={plot.id}>{plot.name}</option>)}
+                {!filteredPlotModules.some((candidate) => candidate.definition.id === plotType) ? <option value={plotType}>{definition.name} · current</option> : null}
+                {filteredPlotModules.map(({ definition: plot }) => <option key={plot.id} value={plot.id}>{plot.name}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
             </div>
+            <button type="button" aria-expanded={plotFinderOpen} onClick={() => setPlotFinderOpen((open) => !open)} className="focus-ring flex w-full items-center justify-between rounded-[7px] px-2 py-1.5 text-left text-[11px] font-medium text-moss hover:bg-sage-surface"><span className="flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" aria-hidden />Help me choose a plot</span><ChevronDown className={cn("h-3.5 w-3.5 transition-transform", plotFinderOpen && "rotate-180")} aria-hidden /></button>
+            {plotFinderOpen ? <div className="space-y-2 rounded-[8px] border border-hairline bg-stone p-2">
+              <select aria-label="What do you want to show?" value={plotFinderGoalId} onChange={(event) => setPlotFinderGoalId(event.target.value as PlotFinderGoalId)} className={controlClass}>{plotFinderGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.label}</option>)}</select>
+              <p className="text-[11px] leading-4 text-muted">{selectedPlotFinderGoal.description}</p>
+              <div className="flex flex-wrap gap-1">{recommendedPlotModules.map((candidate) => <button key={`mobile-recommend-${candidate.definition.id}`} type="button" onClick={() => selectPlot(candidate.definition.id)} className="focus-ring rounded-[6px] border border-hairline bg-white px-2 py-1 text-[11px] text-graphite hover:border-moss hover:text-ink">{candidate.definition.name}</button>)}</div>
+            </div> : null}
           </CardBody>
         </Card>
       </div>
 
       <div className="grid items-start gap-[var(--ln-vis-panel-gap)] xl:grid-cols-[180px_minmax(0,1fr)_288px] xl:items-start" style={mainGridStyle}>
         <Card data-visualization-panel="plots" className="hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none md:block xl:sticky xl:top-[var(--visualization-panel-top)] xl:flex xl:h-[var(--visualization-panel-height)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
-          <CardHeader title="Plot types" className="h-12 shrink-0" />
+          <CardHeader title="Plot types" className="h-12 shrink-0" action={<button type="button" aria-expanded={plotFinderOpen} onClick={() => setPlotFinderOpen((open) => !open)} className="focus-ring rounded-[6px] px-1.5 py-1 text-[10px] font-semibold text-moss hover:bg-sage-surface">Choose</button>} />
+          <div className="shrink-0 space-y-2 border-b border-hairline p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden />
+              <input aria-label="Search plot types" type="search" value={plotSearchQuery} onChange={(event) => setPlotSearchQuery(event.target.value)} placeholder="Search plots" className="focus-ring h-8 w-full rounded-[7px] border border-hairline bg-white pl-8 pr-2 text-[11px] text-ink placeholder:text-muted" />
+            </div>
+            {plotFinderOpen ? <div className="space-y-1.5 rounded-[7px] bg-stone p-2">
+              <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-muted" htmlFor="plot-finder-goal">What should the figure show?</label>
+              <select id="plot-finder-goal" aria-label="What do you want to show?" value={plotFinderGoalId} onChange={(event) => setPlotFinderGoalId(event.target.value as PlotFinderGoalId)} className="focus-ring h-8 w-full rounded-[6px] border border-hairline bg-white px-2 text-[11px] text-ink">{plotFinderGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.label}</option>)}</select>
+              <p className="text-[10px] leading-4 text-muted">{selectedPlotFinderGoal.description}</p>
+              <div className="flex flex-wrap gap-1">{recommendedPlotModules.map((candidate) => <button key={`desktop-recommend-${candidate.definition.id}`} type="button" onClick={() => selectPlot(candidate.definition.id)} className="focus-ring rounded-[5px] border border-hairline bg-white px-1.5 py-1 text-[10px] text-graphite hover:border-moss hover:text-ink">{candidate.definition.name}</button>)}</div>
+            </div> : <p className="text-[10px] text-muted">{filteredPlotModules.length} of {plotModuleRegistry.list().length} plots</p>}
+          </div>
           <CardBody className="space-y-1 p-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
-            {plotModuleRegistry.list().map(({ definition: plot }) => (
+            {filteredPlotModules.map(({ definition: plot }) => (
               <button key={plot.id} type="button" onClick={() => selectPlot(plot.id)} className={cn("focus-ring relative w-full rounded-[6px] border border-transparent px-2.5 py-2 text-left transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent", plotType === plot.id ? "bg-[var(--ln-vis-active-bg)] before:bg-moss" : "hover:bg-warm") }>
                 <span className="block text-[13px] font-medium text-ink">{plot.name}</span>
                 <span className="mt-0.5 block text-[10px] uppercase tracking-[0.07em] text-muted">{plot.family}</span>
               </button>
             ))}
+            {filteredPlotModules.length === 0 ? <div className="rounded-[7px] border border-dashed border-hairline px-2 py-4 text-center text-[11px] leading-4 text-muted">No matching plot. Try a scientific question such as “survival”, “enrichment”, “微生物”, or “相关”.</div> : null}
           </CardBody>
         </Card>
 
         <div className="min-w-0 space-y-[var(--ln-vis-panel-gap)]">
           <div ref={previewCardRef} data-visualization-panel="preview" className="scroll-mt-[var(--visualization-panel-top)]">
           <Card className="overflow-hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-preview-border)] shadow-[var(--ln-vis-preview-shadow)]">
-            <CardHeader className="min-h-12 shrink-0 max-sm:block max-sm:[&_.card-action]:mt-2" title={`${definition.name} preview`} action={<div className="flex flex-wrap items-center justify-end gap-1.5 max-sm:justify-start"><Badge>{dataset.rows.length} {plotType === "pca" ? "observations" : "rows"}</Badge><Badge tone={isValid ? "success" : "danger"}>{isValid ? "Ready" : "Check data"}</Badge><span className="mx-0.5 h-5 w-px bg-hairline max-sm:hidden" aria-hidden /><Button size="sm" onClick={exportSvg} disabled={!isValid}><Download className="h-3.5 w-3.5" aria-hidden />SVG</Button><Button size="sm" onClick={exportPng} disabled={!isValid} title="Export PNG at 600 dpi"><ImageIcon className="h-3.5 w-3.5" aria-hidden />PNG</Button><Button size="sm" onClick={exportConfig}><FileJson className="h-3.5 w-3.5" aria-hidden />Config</Button></div>} />
+            <CardHeader className="min-h-12 shrink-0 max-sm:block max-sm:[&_.card-action]:mt-2" title={`${definition.name} preview`} action={<div className="flex flex-wrap items-center justify-end gap-1.5 max-sm:justify-start">{analysisProvenance ? <span data-analysis-provenance={analysisProvenance.source} data-provenance-detail={analysisProvenance.detail} title={analysisProvenance.detail} aria-label={`${analysisProvenance.label}. ${analysisProvenance.detail}`}><Badge tone={analysisProvenance.source === "calculated-in-studio" ? "sage" : "info"}>{analysisProvenance.label}</Badge></span> : null}<Badge>{dataset.rows.length} {plotType === "pca" ? "observations" : "rows"}</Badge><Badge tone={isValid ? "success" : "danger"}>{isValid ? "Ready" : "Check data"}</Badge><span className="mx-0.5 h-5 w-px bg-hairline max-sm:hidden" aria-hidden /><Button size="sm" onClick={exportSvg} disabled={!isValid}><Download className="h-3.5 w-3.5" aria-hidden />SVG</Button><Button size="sm" onClick={exportPng} disabled={!isValid} title="Export PNG at 600 dpi"><ImageIcon className="h-3.5 w-3.5" aria-hidden />PNG</Button><Button size="sm" onClick={exportConfig}><FileJson className="h-3.5 w-3.5" aria-hidden />Config</Button></div>} />
             <CardBody className="p-3 sm:p-4">
               <p className="mb-3 text-xs leading-5 text-muted">{definition.summary}</p>
               {validation.errors.length > 0 ? (
@@ -929,7 +1018,7 @@ export function VisualizationStudio() {
             <CardBody className="grid items-start gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.56fr)] sm:p-4">
               <div className="grid content-start gap-2 text-xs text-graphite">
                 <div className="flex flex-wrap items-end justify-between gap-2">
-                  <span>{plotType === "pca" ? "Feature matrix" : "CSV or TSV data"}</span>
+                  <span>{plotType === "pca" ? (pcaInputMode === "matrix" ? "Feature matrix" : "PCA coordinates") : "CSV or TSV data"}</span>
                   <div className="flex flex-wrap gap-1.5" aria-label="Example data">
                     {dataExamples.map((example, exampleIndex) => (
                       <button
@@ -953,18 +1042,22 @@ export function VisualizationStudio() {
                     <p className="mt-1 text-[11px] text-muted">{(rawData.length / 1_048_576).toFixed(1)} MB · the full text is not rendered here to keep the browser responsive.</p>
                     <pre className="mt-3 max-h-40 overflow-hidden whitespace-pre-wrap font-mono text-[10px] leading-4 text-graphite">{rawData.slice(0, 8_000)}</pre>
                   </div>
-                ) : <textarea aria-label={plotType === "pca" ? "Feature matrix" : "CSV or TSV data"} value={rawData} onChange={(event) => { setRawData(event.target.value); setSelectedExampleIndex(-1); setLoadedFileName(""); }} spellCheck={false} className="focus-ring min-h-44 resize-y rounded-[8px] border border-hairline bg-[#FBFBF9] p-3 font-mono text-[11px] leading-5 text-ink" />}
-                {plotType === "pca" ? <div className="grid gap-1.5"><span className="flex items-center justify-between gap-2"><label htmlFor="pca-observation-metadata">Observation metadata <span className="font-normal text-muted">(optional; exact sample-ID join)</span></label><button type="button" onClick={downloadPcaMetadataTemplate} className="focus-ring rounded px-1.5 py-1 text-[11px] font-medium text-moss hover:bg-sage-surface">Metadata template</button></span><textarea id="pca-observation-metadata" aria-label="PCA observation metadata" value={pcaObservationMetadata} onChange={(event) => { setPcaObservationMetadata(event.target.value); setSelectedExampleIndex(-1); }} spellCheck={false} placeholder={'sample\tgroup\tbatch\tlabel\nSample_1\tControl\tBatch 1\tS1'} className="focus-ring min-h-28 resize-y rounded-[8px] border border-hairline bg-[#FBFBF9] p-3 font-mono text-[11px] leading-5 text-ink" /><span className="text-[11px] leading-4 text-muted">The first column must match matrix observation names after removing _count, _counts, _tpm, or _fpkm. Duplicate or missing IDs block export.</span></div> : null}
+                ) : <textarea aria-label={plotType === "pca" ? (pcaInputMode === "matrix" ? "Feature matrix" : "PCA coordinates") : "CSV or TSV data"} value={rawData} onChange={(event) => { setRawData(event.target.value); setSelectedExampleIndex(-1); setLoadedFileName(""); }} spellCheck={false} className="focus-ring min-h-44 resize-y rounded-[8px] border border-hairline bg-[#FBFBF9] p-3 font-mono text-[11px] leading-5 text-ink" />}
+                {plotType === "pca" && pcaInputMode === "matrix" ? <div className="grid gap-1.5"><span className="flex items-center justify-between gap-2"><label htmlFor="pca-observation-metadata">Observation metadata <span className="font-normal text-muted">(optional; exact sample-ID join)</span></label><button type="button" onClick={downloadPcaMetadataTemplate} className="focus-ring rounded px-1.5 py-1 text-[11px] font-medium text-moss hover:bg-sage-surface">Metadata template</button></span><textarea id="pca-observation-metadata" aria-label="PCA observation metadata" value={pcaObservationMetadata} onChange={(event) => { setPcaObservationMetadata(event.target.value); setSelectedExampleIndex(-1); }} spellCheck={false} placeholder={'sample\tgroup\tbatch\tlabel\nSample_1\tControl\tBatch 1\tS1'} className="focus-ring min-h-28 resize-y rounded-[8px] border border-hairline bg-[#FBFBF9] p-3 font-mono text-[11px] leading-5 text-ink" /><span className="text-[11px] leading-4 text-muted">The first column must match matrix observation names after removing _count, _counts, _tpm, or _fpkm. Duplicate or missing IDs block export.</span></div> : null}
                 {fileError ? <span className="text-error">{fileError}</span> : null}
               </div>
               <div className="space-y-2.5">
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-graphite">{plotType === "pca" ? "PCA input" : "Column mapping"}</p>
-                    {plotType !== "pca" && definition.roles.length > 0 ? <Button size="sm" variant="ghost" onClick={() => setMapping(inferPlotMapping(definition, dataset.headers))}>Auto-map</Button> : null}
+                    {(plotType !== "pca" || pcaInputMode === "scores") && definition.roles.length > 0 ? <Button size="sm" variant="ghost" onClick={() => setMapping(inferPlotMapping(definition, dataset.headers))}>Auto-map</Button> : null}
                   </div>
                   <p className="mt-1 text-[11px] leading-4 text-muted">{definition.inputHint}</p>
                 </div>
+                {plotType === "pca" ? <div className="grid grid-cols-2 gap-1 rounded-[8px] border border-hairline bg-stone p-1" aria-label="PCA input mode">
+                  <button type="button" aria-pressed={pcaInputMode === "scores"} onClick={() => selectPcaInputMode("scores")} className={cn("focus-ring rounded-[6px] px-2 py-2 text-[11px] font-medium", pcaInputMode === "scores" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink")}>Supplied coordinates</button>
+                  <button type="button" aria-pressed={pcaInputMode === "matrix"} onClick={() => selectPcaInputMode("matrix")} className={cn("focus-ring rounded-[6px] px-2 py-2 text-[11px] font-medium", pcaInputMode === "matrix" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink")}>Calculate from matrix</button>
+                </div> : null}
                 {plotType === "pca" && pcaAnalysis ? <>
                   <SelectControl label="Data layer" value={pcaOptions.dataLayer} onChange={(value) => setPcaOptions((current) => ({ ...current, dataLayer: value as PcaDataLayer }))}>
                     <option value="auto">Auto by explicit suffix; otherwise normalized</option>
@@ -994,12 +1087,12 @@ export function VisualizationStudio() {
                     <p>{pcaAnalysis.groups.length} displayed group{pcaAnalysis.groups.length === 1 ? "" : "s"}: {pcaAnalysis.groups.join(" · ") || "—"}{pcaObservationMetadata.trim() ? " · exact-ID metadata" : " · inferred from delimited replicate suffixes"}</p>
                     {pcaAnalysis.availableLayers.length > 1 ? <p>Detected layers: {pcaAnalysis.availableLayers.map((layer) => `${layer.label} (${layer.columns})`).join(" · ")}</p> : null}
                   </div>
-                </> : visibleRoles.length === 0 ? <p className="rounded-[8px] bg-stone px-3 py-2 text-xs leading-5 text-graphite">The first column supplies row labels; all remaining columns form the numeric matrix.</p> : visibleRoles.map((role) => (
+                </> : visibleRoles.length === 0 ? <p className="rounded-[8px] bg-stone px-3 py-2 text-xs leading-5 text-graphite">The first column supplies row labels; all remaining columns form the numeric matrix.</p> : <>{visibleRoles.map((role) => (
                   <SelectControl key={role.key} label={`${mappingRoleLabel(plotType, role, settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant))}${role.required ? " *" : ""}`} value={mapping[role.key] ?? ""} onChange={(value) => setMapping((current) => ({ ...current, [role.key]: value }))}>
                     <option value="">{role.required ? "Select column" : "None"}</option>
                     {dataset.headers.map((header) => <option key={header} value={header}>{header}</option>)}
                   </SelectControl>
-                ))}
+                ))}{plotType === "pca" ? <p className="rounded-[8px] bg-sage-surface px-3 py-2 text-[11px] leading-4 text-graphite">Studio renders the supplied coordinates without recomputing PCA. Add explained variance to the X/Y axis labels when it is available from the upstream workflow.</p> : null}</>}
                 <div className="rounded-[8px] border border-hairline px-3 py-2 text-[11px] leading-5 text-muted">
                   <p>{dataset.headers.length} columns · {dataset.rows.length} {plotType === "pca" ? "PCA observations" : "data rows"} · {dataset.delimiter === "tab" ? "TSV" : "CSV"}</p>
                   <p>Input stays in your browser; exports include a reproducible parameter file.</p>
@@ -1125,8 +1218,8 @@ export function VisualizationStudio() {
             {plotType === "correlation-heatmap" ? <ControlGroup title="Correlation"><SelectControl label="Method" value={settings.correlationMethod} onChange={(value) => updateSetting("correlationMethod", value as VisualizationSettings["correlationMethod"])}><option value="pearson">Pearson</option><option value="spearman">Spearman</option></SelectControl><p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Each matrix cell is calculated from paired complete observations. This view reports coefficients, not inferential P values.</p></ControlGroup> : null}
             {(["pca", "pcoa", "umap", "tsne", "nmds"] as PlotType[]).includes(plotType) ? <>
               <ControlGroup title="Ordination view">
-                <SelectControl label="View" value={settings.ordinationView} onChange={(value) => updateSetting("ordinationView", value as VisualizationSettings["ordinationView"])}><option value="scores">Scores / coordinates</option>{plotType === "pca" ? <option value="scree">Scree plot</option> : null}<option value="3d">Orthographic 3D projection</option></SelectControl>
-                {settings.ordinationView === "scores" ? <><ToggleControl label="Group covariance ellipses" checked={settings.ordinationShowEllipse} onChange={(value) => updateSetting("ordinationShowEllipse", value)} /><ToggleControl label="Group convex hulls" checked={settings.ordinationShowHull} onChange={(value) => updateSetting("ordinationShowHull", value)} /><ToggleControl label="Group centroids" checked={settings.ordinationShowCentroids} onChange={(value) => updateSetting("ordinationShowCentroids", value)} />{plotType === "pca" ? <><ToggleControl label="Feature loading arrows" checked={settings.ordinationShowLoadings} onChange={(value) => updateSetting("ordinationShowLoadings", value)} />{settings.ordinationShowLoadings ? <RangeControl label="Loading labels" value={settings.ordinationLoadingCount} minimum={1} maximum={30} step={1} onChange={(value) => updateSetting("ordinationLoadingCount", value)} /> : null}</> : null}</> : settings.ordinationView === "3d" ? <ToggleControl label="Group centroids" checked={settings.ordinationShowCentroids} onChange={(value) => updateSetting("ordinationShowCentroids", value)} /> : null}
+                <SelectControl label="View" value={settings.ordinationView} onChange={(value) => updateSetting("ordinationView", value as VisualizationSettings["ordinationView"])}><option value="scores">Scores / coordinates</option>{plotType === "pca" && pcaAnalysis ? <option value="scree">Scree plot</option> : null}<option value="3d">Orthographic 3D projection</option></SelectControl>
+                {settings.ordinationView === "scores" ? <><ToggleControl label="Group covariance ellipses" checked={settings.ordinationShowEllipse} onChange={(value) => updateSetting("ordinationShowEllipse", value)} /><ToggleControl label="Group convex hulls" checked={settings.ordinationShowHull} onChange={(value) => updateSetting("ordinationShowHull", value)} /><ToggleControl label="Group centroids" checked={settings.ordinationShowCentroids} onChange={(value) => updateSetting("ordinationShowCentroids", value)} />{plotType === "pca" && pcaAnalysis ? <><ToggleControl label="Feature loading arrows" checked={settings.ordinationShowLoadings} onChange={(value) => updateSetting("ordinationShowLoadings", value)} />{settings.ordinationShowLoadings ? <RangeControl label="Loading labels" value={settings.ordinationLoadingCount} minimum={1} maximum={30} step={1} onChange={(value) => updateSetting("ordinationLoadingCount", value)} /> : null}</> : null}</> : settings.ordinationView === "3d" ? <ToggleControl label="Group centroids" checked={settings.ordinationShowCentroids} onChange={(value) => updateSetting("ordinationShowCentroids", value)} /> : null}
                 {settings.ordinationView !== "scree" ? <ToggleControl label="Use mapped shapes" checked={settings.ordinationUseShapes} onChange={(value) => updateSetting("ordinationUseShapes", value)} /> : null}
               <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Ellipses summarize within-group covariance; hulls only enclose observed extremes. Neither is a confidence region. The 3D view independently min–max scales each axis before a fixed orthographic projection, so cross-axis distances, angles, and apparent separation are not quantitative; manual 2D limits do not apply.</p>
               </ControlGroup>

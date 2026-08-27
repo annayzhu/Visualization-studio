@@ -3,6 +3,9 @@
 import type { ReactNode, RefObject } from "react";
 import { ScientificAdvancedChartPreview } from "@/components/ScientificAdvancedChartPreview";
 import {
+  BAR_CATEGORY_LABEL_ANGLE,
+  barCategoryAxisLayoutMetrics,
+  barCategoryLabelText,
   boxStatistics,
   divergingColor,
   formatTick,
@@ -50,7 +53,7 @@ const CHART_TEXT_COLOR = "#23242A";
 
 type LegendItem = { label: string; color: string; shape?: "circle" | "line" | "square" };
 
-function getFrame(settings: VisualizationSettings, type: PlotType): PlotFrame {
+function getFrame(settings: VisualizationSettings, type: PlotType, bottomOverride?: number): PlotFrame {
   const titleOffset = settings.title ? 24 : 0;
   const supportsLegend = type !== "box" && type !== "violin";
   const compactWidth = settings.width < 420;
@@ -62,7 +65,7 @@ function getFrame(settings: VisualizationSettings, type: PlotType): PlotFrame {
     : type === "enrichment" ? 168 : type === "heatmap" ? 108 : type === "bar" && (settings.swapAxes || ["horizontal", "bullet", "pyramid"].includes(settings.barVariant)) ? 132 : 72;
   const right = (compactWidth ? 18 : 24) + rightLegend + (type === "bar" && settings.barVariant === "dual-axis" ? 38 : 0);
   const top = (compactHeight ? 20 : 24) + titleOffset;
-  const bottom = (compactHeight ? 48 : 58) + bottomLegend;
+  const bottom = bottomOverride ?? (compactHeight ? 48 : 58) + bottomLegend;
   return {
     width: settings.width,
     height: settings.height,
@@ -164,8 +167,8 @@ function NumericAxes({
           </g>
         );
       }) : null}
-      <text x={frame.left + frame.plotWidth / 2} y={frame.height - (settings.legendPosition === "bottom" ? 57 : 13)} textAnchor="middle" fill={ink} fontSize={settings.axisLabelSize} fontWeight={600}>{xLabel}</text>
-      <text transform={`translate(18 ${frame.top + frame.plotHeight / 2}) rotate(-90)`} textAnchor="middle" fill={ink} fontSize={settings.axisLabelSize} fontWeight={600}>{yLabel}</text>
+      {xLabel.trim() ? <text data-axis-label="x" x={frame.left + frame.plotWidth / 2} y={frame.height - (settings.legendPosition === "bottom" ? 57 : 13)} textAnchor="middle" fill={ink} fontSize={settings.axisLabelSize} fontWeight={600}>{xLabel}</text> : null}
+      {yLabel.trim() ? <text data-axis-label="y" transform={`translate(18 ${frame.top + frame.plotHeight / 2}) rotate(-90)`} textAnchor="middle" fill={ink} fontSize={settings.axisLabelSize} fontWeight={600}>{yLabel}</text> : null}
     </g>
   );
 }
@@ -365,7 +368,7 @@ function renderBar(
     <>
       {numericAxes}
       <g clipPath="url(#plot-area-bar)">{marks}{secondaryMarks}</g>
-      {categories.map((category, index) => { const label = category.includes("\u0000") ? category.split("\u0000")[1] : category; return isHorizontal ? <text key={category} x={frame.left - 9} y={frame.top + band * (index + .5) + settings.tickSize / 3} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{truncate(label, 18)}</text> : <text key={category} transform={`translate(${frame.left + band * (index + .5)} ${frame.top + frame.plotHeight + 10}) rotate(-30)`} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{truncate(label, 16)}</text>; })}
+      {categories.map((category, index) => { const label = category.includes("\u0000") ? category.split("\u0000")[1] : category; return isHorizontal ? <text key={category} x={frame.left - 9} y={frame.top + band * (index + .5) + settings.tickSize / 3} textAnchor="end" fill={muted} fontSize={settings.tickSize}>{truncate(label, 18)}</text> : <text key={category} data-plot-element="bar-category-label" data-full-label={label} transform={`translate(${frame.left + band * (index + .5)} ${frame.top + frame.plotHeight + 10}) rotate(${BAR_CATEGORY_LABEL_ANGLE})`} textAnchor="end" fill={muted} fontSize={settings.tickSize}><title>{label}</title>{barCategoryLabelText(label)}</text>; })}
       {hasAxisBreak ? isHorizontal ? <g><rect x={valueScale((settings.axisBreakStart+settings.axisBreakEnd)/2)-6} y={frame.top} width={12} height={frame.plotHeight} fill="white" /><path d={`M ${valueScale((settings.axisBreakStart+settings.axisBreakEnd)/2)-4} ${frame.top+frame.plotHeight+4} l 8 -8 m -8 0 l 8 8`} fill="none" stroke={ink} strokeWidth={settings.axisLineWidth} /></g> : <g><rect x={frame.left} y={valueScale((settings.axisBreakStart+settings.axisBreakEnd)/2)-6} width={frame.plotWidth} height={12} fill="white" /><path d={`M ${frame.left-4} ${valueScale((settings.axisBreakStart+settings.axisBreakEnd)/2)-4} l 8 8 m -8 0 l 8 -8`} fill="none" stroke={ink} strokeWidth={settings.axisLineWidth} /></g> : null}
       {settings.barVariant === "faceted" ? facets.map((facet) => { const indices = categories.map((key, index) => key.startsWith(`${facet}\u0000`) ? index : -1).filter((index) => index >= 0); const center = indices.length ? indices.reduce((sum, index) => sum + frame.left + band * (index + .5), 0) / indices.length : frame.left; return <text key={facet} x={center} y={frame.top + settings.tickSize} textAnchor="middle" fill={ink} fontSize={settings.tickSize} fontWeight={700}>{facet}</text>; }) : null}
       {settings.barVariant === "dual-axis" ? <g><line x1={frame.left+frame.plotWidth} x2={frame.left+frame.plotWidth} y1={frame.top} y2={frame.top+frame.plotHeight} stroke={ink} strokeWidth={settings.axisLineWidth} />{[0, .5, 1].map((t) => <text key={t} x={frame.left+frame.plotWidth+7} y={frame.top+frame.plotHeight*(1-t)+4} fill={muted} fontSize={settings.tickSize}>{formatTick(secondaryDomain[0]+t*(secondaryDomain[1]-secondaryDomain[0]))}</text>)}{settings.secondaryAxisLabel.trim() ? <text transform={`translate(${frame.width-10} ${frame.top+frame.plotHeight/2}) rotate(90)`} textAnchor="middle" fill={ink} fontSize={settings.axisLabelSize} fontWeight={600}>{settings.secondaryAxisLabel}</text> : null}</g> : null}
@@ -742,7 +745,10 @@ export function ScientificChartPreview({ svgRef, type, dataset, mapping, setting
     return <ScientificAdvancedChartPreview svgRef={svgRef} type={type} dataset={dataset} mapping={mapping} settings={settings} themeId={themeId} />;
   }
   const theme = journalThemes[themeId];
-  const frame = getFrame(settings, type);
+  const barCategoryLayout = type === "bar"
+    ? barCategoryAxisLayoutMetrics(settings, dataset.rows.map((row) => mapping.category ? row[mapping.category] ?? "" : ""))
+    : null;
+  const frame = getFrame(settings, type, barCategoryLayout?.bottom);
   const definition = getPlotDefinition(type);
   const categorical: string[] = settings.categoricalColors.length > 0 ? settings.categoricalColors : theme.categorical;
   const sequential: [string, string] = [settings.continuousLow, settings.continuousHigh];

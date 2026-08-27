@@ -12,6 +12,50 @@ async function expectStablePreviewScreenshot(page: Page, locator: Locator, name:
 }
 
 test.describe("Visualization Studio browser acceptance", () => {
+  test("keeps rotated bar categories clear of the X-axis title", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop bar-axis geometry regression");
+    await page.goto("/");
+
+    await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`category\tvalue\tsd\tgroup
+Mock\t1.32\t0.76\tMock
+NC\t1.00\t0.42\tNC
+siFBN2-1224\t0.04\t0.03\tFBN2
+siFBN2-7173\t0.05\t0.03\tFBN2
+siFBN2-9706\t0.07\t0.04\tFBN2`);
+    await page.getByRole("button", { name: "Auto-map" }).click();
+    await page.getByRole("textbox", { name: "X-axis label" }).fill("H596");
+    const width = page.getByRole("textbox", { name: "Width value", exact: true });
+    const height = page.getByRole("textbox", { name: "Height value", exact: true });
+    await width.fill("480");
+    await width.press("Enter");
+    await height.fill("340");
+    await height.press("Enter");
+
+    const svg = page.locator("svg[aria-label='Bar scientific figure preview']");
+    await expect(svg).toHaveAttribute("width", "480");
+    await expect(svg.locator("[data-plot-element='bar-category-label']")).toHaveCount(5);
+    await expect(svg.locator("[data-axis-label='x']")).toHaveText("H596");
+    const geometry = await svg.evaluate((element) => {
+      const canvas = element.getBoundingClientRect();
+      const title = element.querySelector<SVGTextElement>("[data-axis-label='x']")!.getBoundingClientRect();
+      const labels = [...element.querySelectorAll<SVGTextElement>("[data-plot-element='bar-category-label']")].map((label) => label.getBoundingClientRect());
+      return {
+        minimumGap: Math.min(...labels.map((label) => title.top - label.bottom)),
+        escaped: [...labels, title].filter((box) => box.left < canvas.left - 1 || box.top < canvas.top - 1 || box.right > canvas.right + 1 || box.bottom > canvas.bottom + 1).length,
+      };
+    });
+    expect(geometry.minimumGap).toBeGreaterThanOrEqual(3.5);
+    expect(geometry.escaped).toBe(0);
+
+    const downloadEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "SVG" }).click();
+    const download = await downloadEvent;
+    const source = await readFile((await download.path())!, "utf8");
+    expect(source).toContain('data-plot-element="bar-category-label"');
+    expect(source).toContain('data-axis-label="x"');
+    expect(source).toContain("H596");
+  });
+
   test("selects, resets, remaps, adjusts, and exports a representative plot", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop interaction baseline");
     await page.goto("/");
@@ -141,9 +185,16 @@ test.describe("Visualization Studio browser acceptance", () => {
     await expect(paletteToggle).toHaveAttribute("aria-expanded", "false");
     await paletteToggle.click();
     await expect(paletteToggle).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("button", { name: "极简", exact: true }).click();
+    await page.getByRole("button", { name: "松柏", exact: true }).click();
+    const minimalPaletteToggle = page.getByRole("button", { name: "松柏", exact: true }).first();
+    await minimalPaletteToggle.click();
+    await expect(minimalPaletteToggle).toHaveAttribute("aria-expanded", "false");
 
     const heatmapSvg = page.locator("svg[aria-label='Correlation heatmap scientific figure preview']");
     await expect(heatmapSvg).toHaveAttribute("data-plot-renderer", "advanced");
+    await expect(page.locator("[data-analysis-provenance]")).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
+    await expect(page.getByText("Calculated in Studio", { exact: true })).toBeVisible();
     const escapedLabels = await heatmapSvg.evaluate((element) => {
       const canvas = element.getBoundingClientRect();
       return [...element.querySelectorAll("text")].flatMap((label) => {
@@ -152,6 +203,17 @@ test.describe("Visualization Studio browser acceptance", () => {
       });
     });
     expect(escapedLabels).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+  });
+
+  test("applies a restrained minimal palette to categorical marks", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop palette rendering");
+    await page.goto("/");
+    await page.getByRole("button", { name: "极简", exact: true }).click();
+    await page.getByRole("button", { name: "墨蓝", exact: true }).click();
+    const bars = page.locator("svg[aria-label='Bar scientific figure preview'] [data-plot-element='bar']");
+    await expect(bars).toHaveCount(8);
+    expect(await bars.evaluateAll((marks) => marks.slice(0, 4).map((mark) => mark.getAttribute("fill")))).toEqual(["#315C86", "#526E88", "#70849A", "#8F9DAC"]);
   });
 
   test("keeps the desktop workbench aligned and brings a distant selection fully into view", async ({ page }, testInfo) => {
@@ -260,14 +322,46 @@ test.describe("Visualization Studio browser acceptance", () => {
     expect(escapedGeometry).toEqual([]);
   });
 
-  test("configures reproducible ordination views without recomputing supplied coordinates", async ({ page }, testInfo) => {
+  test("searches the plot catalog and recommends plots by scientific question", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop plot discovery controls");
+    await page.goto("/");
+    const plotPanel = page.locator("[data-visualization-panel='plots']");
+    const search = plotPanel.getByRole("searchbox", { name: "Search plot types" });
+    await search.fill("volcano");
+    await expect(plotPanel.getByRole("button", { name: /^Volcano/ })).toBeVisible();
+    await expect(plotPanel.getByRole("button", { name: /^Kaplan/ })).toHaveCount(0);
+    await plotPanel.getByRole("button", { name: /^Volcano/ }).click();
+    await expect(page.getByRole("heading", { name: "Volcano preview" })).toBeVisible();
+
+    await search.clear();
+    await plotPanel.getByRole("button", { name: "Choose" }).click();
+    await plotPanel.getByRole("combobox", { name: "What do you want to show?" }).selectOption("ordination");
+    await expect(plotPanel.getByText("Display reduced coordinates or sample-level dissimilarity.", { exact: true })).toBeVisible();
+    await plotPanel.getByRole("button", { name: "PCoA", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "PCoA preview" })).toBeVisible();
+
+    await search.fill("微生物");
+    await expect(plotPanel.getByRole("button", { name: "PCoA Dimension reduction", exact: true })).toBeVisible();
+  });
+
+  test("distinguishes supplied PCA coordinates from a reproducible in-browser matrix calculation", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop ordination controls");
     await page.goto("/");
     await page.getByRole("button", { name: /^PCA/ }).click();
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "PCA observation metadata" })).toHaveValue(/Control_1\tControl\tBatch 1\tC1/);
+    await expect(page.getByRole("button", { name: "Supplied coordinates" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("textbox", { name: "PCA coordinates" })).toHaveValue(/sample\tPC1\tPC2\tPC3/);
+    await expect(page.getByRole("textbox", { name: "PCA observation metadata" })).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "Feature loading arrows" })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "View" }).locator("option[value='scree']")).toHaveCount(0);
     await expect(page.getByRole("combobox", { name: "Shape" })).toHaveValue("batch");
     const pcaSvg = page.locator("svg[aria-label='PCA scientific figure preview']");
+    await expect(pcaSvg.locator("[data-plot-family='ordination-scores'] [data-plot-element='ordination-point']")).toHaveCount(12);
+
+    await page.getByRole("button", { name: "Example 2" }).click();
+    await expect(page.getByText("Calculated in Studio", { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "PCA observation metadata" })).toHaveValue(/Control_1\tControl\tBatch 1\tC1/);
+    await expect(page.getByRole("combobox", { name: "Shape" })).toHaveValue("batch");
     await expect(pcaSvg).toHaveAttribute("data-plot-renderer", "advanced");
     await expect(pcaSvg.locator("[data-plot-element='ordination-shape-legend']")).toBeVisible();
     await page.getByRole("checkbox", { name: "Group covariance ellipses" }).check({ force: true });
@@ -368,6 +462,50 @@ test.describe("Visualization Studio browser acceptance", () => {
       await expect(page.getByText("Ready", { exact: true })).toBeVisible();
       await expect(page.locator(`svg[aria-label='${name} scientific figure preview'] [data-plot-family='ordination-scores']`)).toBeVisible();
     }
+  });
+
+  test("reports analysis provenance across supplied and in-browser workflows", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Desktop provenance contract");
+    await page.goto("/");
+    const provenance = page.locator("[data-analysis-provenance]");
+
+    await page.getByRole("button", { name: /^PCoA/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "supplied");
+    await expect(provenance.getByText("Supplied", { exact: true })).toBeVisible();
+    await expect(provenance).toHaveAttribute("data-provenance-detail", /without recomputing PCoA/);
+
+    await page.getByRole("button", { name: /^ROC/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
+    await expect(provenance.getByText("Calculated in Studio", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Example 2" }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "supplied");
+    const configDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Config" }).click();
+    const configPath = await (await configDownload).path();
+    const config = JSON.parse(await readFile(configPath!, "utf8"));
+    expect(config.analysisProvenance).toMatchObject({ source: "supplied", label: "Supplied" });
+    expect(config.analysisProvenance.detail).toMatch(/Time-dependent ROC/);
+
+    await page.getByRole("button", { name: /^Kaplan/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
+    await expect(provenance).toHaveAttribute("data-provenance-detail", /Kaplan–Meier estimates/);
+
+    await page.getByRole("button", { name: /^Clustered heatmap/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
+    await page.getByRole("checkbox", { name: "Cluster rows" }).uncheck({ force: true });
+    await page.getByRole("checkbox", { name: "Cluster columns" }).uncheck({ force: true });
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "supplied");
+    await expect(provenance).toHaveAttribute("data-provenance-detail", /Clustering is disabled/);
+
+    await page.getByRole("button", { name: /^Correlation heatmap/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
+    await expect(provenance).toHaveAttribute("data-provenance-detail", /correlation matrix/);
+
+    await page.getByRole("button", { name: /^Venn/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
+    await expect(provenance).toHaveAttribute("data-provenance-detail", /Exact set intersections/);
+    await page.getByRole("button", { name: /^UpSet/ }).click();
+    await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
   });
 
   test("blocks crowded combined ordination legends until the export canvas can contain them", async ({ page }, testInfo) => {

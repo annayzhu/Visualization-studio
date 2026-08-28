@@ -10,12 +10,14 @@ import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
 import { analyzeExpressionMatrix, defaultPcaOptions, type PcaDataLayer, type PcaOptions } from "@/lib/visualization-pca";
 import { analyzeSetIntersections, intersectionExportTsv } from "@/lib/visualization-sets";
+import { analyzeBarData, barAnalysisResultsTsv } from "@/lib/visualization-bar-analysis";
 import {
   defaultVisualizationPaletteSeriesId,
   defaultVisualizationSettings,
   defaultVisualizationThemeId,
   activeNumericAxes,
   analysisProvenanceForPlot,
+  categoricalColorForIndex,
   figureFontPresets,
   getPlotDefinition,
   getPlotModule,
@@ -552,6 +554,28 @@ export function VisualizationStudio() {
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
   const pcaAnalysis = useMemo(() => plotType === "pca" && pcaInputMode === "matrix" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, pcaInputMode, rawData, pcaObservationMetadata, pcaOptions]);
   const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(rawData), [pcaAnalysis, rawData]);
+  const barCategoryOptions = useMemo(() => plotType === "bar" && mapping.category
+    ? [...new Set(dataset.rows.map((row) => row[mapping.category]).filter(Boolean))]
+    : [], [dataset.rows, mapping.category, plotType]);
+  const barAnalysis = useMemo(() => plotType === "bar" ? analyzeBarData(dataset.rows, mapping, {
+    mode: settings.barAnalysisMode,
+    referenceCategory: settings.barReferenceCategory || barCategoryOptions[0],
+    adjustment: settings.barPAdjustment,
+  }) : null, [barCategoryOptions, dataset.rows, mapping, plotType, settings.barAnalysisMode, settings.barPAdjustment, settings.barReferenceCategory]);
+  const displayDataset = useMemo(() => barAnalysis ? {
+    ...dataset,
+    headers: barAnalysis.pValueColumn && !dataset.headers.includes(barAnalysis.pValueColumn)
+      ? [...dataset.headers, barAnalysis.pValueColumn]
+      : dataset.headers,
+    rows: barAnalysis.rows,
+  } : dataset, [barAnalysis, dataset]);
+  const displayMapping = useMemo(() => plotType === "bar" ? {
+    ...mapping,
+    error: settings.barInputMode === "summary" && settings.barErrorType !== "none"
+      ? mapping[settings.barErrorType] || mapping.error
+      : mapping.error,
+    pValue: barAnalysis?.pValueColumn ?? mapping.pValue,
+  } : mapping, [barAnalysis?.pValueColumn, mapping, plotType, settings.barErrorType, settings.barInputMode]);
   const lineSeriesOptions = useMemo(() => plotType === "line" && mapping.series
     ? [...new Set(dataset.rows.map((row) => row[mapping.series]).filter(Boolean))]
     : [], [dataset.rows, mapping.series, plotType]);
@@ -570,11 +594,12 @@ export function VisualizationStudio() {
     const low = Math.min(...values); const high = Math.max(...values); const span = Math.max(1, high - low, Math.abs(low) * .2, Math.abs(high) * .2);
     return { minimum: Math.floor(low - span * .25), maximum: Math.ceil(high + span * .25), step: Math.max(0.01, Number((span / 200).toPrecision(2))) };
   }, [dataset.rows, mapping.value, plotType]);
-  const validation = useMemo(
-    () => validatePlotDataset(getPlotDefinition(plotType), dataset, mapping, settings),
-    [plotType, dataset, mapping, settings],
-  );
-  const categoryLabels = useMemo(() => categoricalColorLabels(plotType, dataset.rows, mapping), [plotType, dataset.rows, mapping]);
+  const validation = useMemo(() => {
+    const base = validatePlotDataset(getPlotDefinition(plotType), displayDataset, displayMapping, settings);
+    if (!barAnalysis) return base;
+    return { errors: [...base.errors, ...barAnalysis.errors], warnings: [...base.warnings, ...barAnalysis.warnings] };
+  }, [barAnalysis, displayDataset, displayMapping, plotType, settings]);
+  const categoryLabels = useMemo(() => categoricalColorLabels(plotType, displayDataset.rows, displayMapping), [displayDataset.rows, displayMapping, plotType]);
   const analysisProvenance = useMemo(() => analysisProvenanceForPlot(plotType, settings, pcaInputMode), [pcaInputMode, plotType, settings]);
   const isValid = validation.errors.length === 0;
   const mainGridStyle = {
@@ -590,18 +615,20 @@ export function VisualizationStudio() {
   }, [paletteSeriesId, selectedCustomPalette, themeId]);
   const currentPaletteName = paletteSeriesId === "custom" ? selectedCustomPalette?.name || "Custom" : journalThemes[themeId].name;
   const currentPalettePreviewColors = paletteColorsFromSettings(settings, themeId).categoricalColors.slice(0, 4);
+  const effectiveCategoricalColors = useMemo(() => categoryLabels.map((_, index) => categoricalColorForIndex(index, settings.categoricalColors)), [categoryLabels, settings.categoricalColors]);
   const hasUnsavedColorChanges = currentColorFingerprint !== selectedPaletteFingerprint;
+  const colorResolvedSettings = useMemo(() => effectiveCategoricalColors.length ? { ...settings, categoricalColors: effectiveCategoricalColors } : settings, [effectiveCategoricalColors, settings]);
   const previewSettings = useMemo(() => {
-    if (!pcaAnalysis) return settings;
-    if (settings.ordinationView === "scree") return settings;
+    if (!pcaAnalysis) return colorResolvedSettings;
+    if (settings.ordinationView === "scree") return colorResolvedSettings;
     const displayedX = settings.swapAxes ? mapping.y : mapping.x;
     const displayedY = settings.swapAxes ? mapping.x : mapping.y;
     return {
-      ...settings,
+      ...colorResolvedSettings,
       xLabel: settings.xLabel || pcaAxisLabel(displayedX, pcaAnalysis.explainedVariance),
       yLabel: settings.yLabel || pcaAxisLabel(displayedY, pcaAnalysis.explainedVariance),
     };
-  }, [mapping.x, mapping.y, pcaAnalysis, settings]);
+  }, [colorResolvedSettings, mapping.x, mapping.y, pcaAnalysis, settings.ordinationView, settings.swapAxes, settings.xLabel, settings.yLabel]);
 
   const updateSetting = <Key extends keyof VisualizationSettings>(key: Key, value: VisualizationSettings[Key]) => {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -611,7 +638,7 @@ export function VisualizationStudio() {
     setSettings((current) => {
       const themeColors = journalThemes[themeId].categorical;
       const nextLength = Math.max(current.categoricalColors.length, index + 1);
-      const categoricalColors = Array.from({ length: nextLength }, (_, colorIndex) => current.categoricalColors[colorIndex] ?? themeColors[colorIndex % themeColors.length]);
+      const categoricalColors = Array.from({ length: nextLength }, (_, colorIndex) => current.categoricalColors[colorIndex] ?? categoricalColorForIndex(colorIndex, themeColors));
       categoricalColors[index] = value;
       return { ...current, categoricalColors };
     });
@@ -633,7 +660,7 @@ export function VisualizationStudio() {
       setPcaOptions(defaultPcaOptions);
       if (nextInputMode === "scores") setSettings((current) => ({ ...current, ordinationView: "scores", ordinationShowLoadings: false }));
     }
-    if (plotType === "bar") updateSetting("barInputMode", exampleIndex === 1 ? "long" : "summary");
+    if (plotType === "bar" && !example.settings?.barInputMode) updateSetting("barInputMode", exampleIndex === 1 ? "long" : "summary");
     if (plotType === "roc") updateSetting("rocInputMode", exampleIndex === 1 ? "precomputed-time" : "raw");
     if (plotType === "venn" || plotType === "upset") updateSetting("setInputMode", exampleIndex === 1 ? "peak-overlap" : "membership");
     if (example.settings) setSettings((current) => ({ ...current, ...example.settings as Partial<VisualizationSettings> }));
@@ -673,6 +700,7 @@ export function VisualizationStudio() {
       compositionLabelMode: nextType === "rose" ? "value" : current.compositionLabelMode,
       setInputMode: (nextType === "venn" || nextType === "upset") ? "membership" : current.setInputMode,
       rocInputMode: nextType === "roc" ? "raw" : current.rocInputMode,
+      ...(nextExample.settings ?? {}),
       legendPosition: (["heatmap", "clustered-heatmap", "correlation-heatmap", "enrichment", "enrichment-bar", "venn", "upset", "sankey", "alluvial", "chord", "ligand-receptor", "circos"] as PlotType[]).includes(nextType) && current.legendPosition === "bottom" ? "right" : current.legendPosition,
     }, nextType));
     window.requestAnimationFrame(() => {
@@ -773,6 +801,16 @@ export function VisualizationStudio() {
     }));
   };
 
+  const selectBarAnalysisMode = (mode: VisualizationSettings["barAnalysisMode"]) => {
+    setSettings((current) => ({
+      ...current,
+      barAnalysisMode: mode,
+      barInputMode: ["raw-independent", "raw-paired", "qpcr-delta-ct"].includes(mode) ? "long" : "summary",
+      showSignificance: mode !== "none",
+      barReferenceCategory: current.barReferenceCategory || barCategoryOptions[0] || "",
+    }));
+  };
+
   const selectAssociationVariant = (value: VisualizationSettings["associationVariant"]) => {
     setSettings((current) => ({
       ...current,
@@ -820,6 +858,12 @@ export function VisualizationStudio() {
     downloadBlob(new Blob([content], { type: "text/tab-separated-values;charset=utf-8" }), `${slug(definition.name)}-${slug(label)}-exact-members.tsv`);
   };
 
+  const downloadBarAnalysis = () => {
+    if (!barAnalysis?.results.length) return;
+    const content = barAnalysisResultsTsv(barAnalysis.results);
+    downloadBlob(new Blob([content], { type: "text/tab-separated-values;charset=utf-8" }), "bar-statistical-results.tsv");
+  };
+
   const exportSvg = () => {
     if (!svgRef.current || !isValid) return;
     const source = serializeSvg(svgRef.current, figureFontPresets[settings.fontFamily].family);
@@ -860,7 +904,7 @@ export function VisualizationStudio() {
       plotType,
       themeId,
       mapping,
-      settings,
+      settings: previewSettings,
       analysisProvenance: analysisProvenance ?? undefined,
       pca: plotType === "pca" ? {
         inputMode: pcaInputMode,
@@ -997,11 +1041,20 @@ export function VisualizationStudio() {
               ) : (
                 <div className="overflow-auto rounded-[8px] border border-[var(--ln-vis-panel-border)] bg-[var(--ln-vis-canvas-bg)] p-2 sm:p-3">
                   <div className="mx-auto w-fit min-w-max max-w-none rounded-[4px] bg-white shadow-[0_1px_6px_rgba(35,36,42,0.08)]">
-                    <ScientificChartPreview svgRef={svgRef} type={plotType} dataset={dataset} mapping={mapping} settings={previewSettings} themeId={themeId} />
+                    <ScientificChartPreview svgRef={svgRef} type={plotType} dataset={displayDataset} mapping={displayMapping} settings={previewSettings} themeId={themeId} />
                   </div>
                 </div>
               )}
               {validation.warnings.length > 0 ? <div className="mt-3 rounded-[8px] border border-warning/20 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{validation.warnings.join(" · ")}</div> : null}
+              {plotType === "bar" && isValid && barAnalysis?.results.length ? <details className="mt-3 overflow-hidden rounded-[8px] border border-hairline bg-white">
+                <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-ink"><span>Statistical results · {barAnalysis.results.length} comparison{barAnalysis.results.length === 1 ? "" : "s"}</span><Button type="button" size="sm" onClick={(event) => { event.preventDefault(); downloadBarAnalysis(); }}><Download className="h-3.5 w-3.5" aria-hidden />TSV</Button></summary>
+                <div className="overflow-x-auto border-t border-hairline">
+                  <table className="min-w-full text-left text-[11px] text-graphite">
+                    <thead className="bg-stone text-[10px] uppercase tracking-[0.04em] text-muted"><tr><th className="px-3 py-2">Group</th><th className="px-3 py-2">Comparison</th><th className="px-3 py-2">Difference (95% CI)</th><th className="px-3 py-2">n</th><th className="px-3 py-2">P raw</th><th className="px-3 py-2">P adjusted</th><th className="px-3 py-2">Method / scale</th></tr></thead>
+                    <tbody>{barAnalysis.results.map((result) => <tr key={`${result.facet}-${result.group}-${result.reference}-${result.comparison}`} className="border-t border-hairline first:border-t-0"><td className="whitespace-nowrap px-3 py-2">{result.group}</td><td className="whitespace-nowrap px-3 py-2">{result.comparison} vs {result.reference}</td><td className="whitespace-nowrap px-3 py-2 font-mono">{result.difference.toPrecision(4)} ({result.lower95.toPrecision(4)}, {result.upper95.toPrecision(4)})</td><td className="whitespace-nowrap px-3 py-2">{result.nComparison} / {result.nReference}</td><td className="whitespace-nowrap px-3 py-2 font-mono">{result.rawPValue.toPrecision(3)}</td><td className="whitespace-nowrap px-3 py-2 font-mono">{result.adjustedPValue.toPrecision(3)}</td><td className="whitespace-nowrap px-3 py-2">{result.method} · {result.analysisScale}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              </details> : null}
             </CardBody>
           </Card>
           </div>
@@ -1194,9 +1247,24 @@ export function VisualizationStudio() {
                 {settings.barVariant === "dual-axis" ? <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The secondary column uses an independently labelled right-side scale. Use only when the two units are explicit and a shared baseline would be misleading.</p> : null}
                 {settings.barVariant === "overlay" ? <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">The secondary column shares the primary value axis and should use the same unit.</p> : null}
                 {settings.barVariant === "axis-break" ? <><RangeControl label="Break start" value={settings.axisBreakStart} minimum={barBreakRange.minimum} maximum={barBreakRange.maximum} step={barBreakRange.step} onChange={(value) => updateSetting("axisBreakStart", value)} /><RangeControl label="Break end" value={settings.axisBreakEnd} minimum={barBreakRange.minimum} maximum={barBreakRange.maximum} step={barBreakRange.step} onChange={(value) => updateSetting("axisBreakEnd", value)} /></> : null}
-                {settings.barVariant !== "polar" ? <ToggleControl label="Significance annotations" checked={settings.showSignificance} onChange={(value) => updateSetting("showSignificance", value)} /> : null}
-                {settings.showSignificance && settings.barVariant !== "polar" ? <RangeControl label="P-value threshold" value={settings.significanceThreshold} minimum={0.001} maximum={0.1} step={0.001} onChange={(value) => updateSetting("significanceThreshold", value)} /> : null}
               </ControlGroup>
+              {settings.barVariant !== "polar" ? <ControlGroup title="Statistical analysis">
+                <SelectControl label="Analysis source / design" value={settings.barAnalysisMode} onChange={(value) => selectBarAnalysisMode(value as VisualizationSettings["barAnalysisMode"])}>
+                  <option value="none">Visualization only · no P values</option>
+                  <option value="supplied">Display supplied P values</option>
+                  <option value="raw-independent">Raw independent observations · Welch</option>
+                  <option value="summary-independent">Mean + SD/SEM + n · Welch</option>
+                  <option value="raw-paired">Raw matched observations · paired t</option>
+                  <option value="qpcr-delta-ct">qPCR · display relative expression, test ΔCt</option>
+                </SelectControl>
+                {!["none", "supplied"].includes(settings.barAnalysisMode) ? <>
+                  <SelectControl label="Reference category" value={settings.barReferenceCategory || barCategoryOptions[0] || ""} onChange={(value) => updateSetting("barReferenceCategory", value)}>{barCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}</SelectControl>
+                  <SelectControl label="Multiple-testing correction" value={settings.barPAdjustment} onChange={(value) => updateSetting("barPAdjustment", value as VisualizationSettings["barPAdjustment"])}><option value="bh">Benjamini–Hochberg FDR</option><option value="holm">Holm family-wise correction</option><option value="none">None</option></SelectControl>
+                </> : null}
+                {settings.barAnalysisMode !== "none" ? <ToggleControl label="Significance annotations" checked={settings.showSignificance} onChange={(value) => updateSetting("showSignificance", value)} /> : null}
+                {settings.showSignificance ? <RangeControl label={settings.barPAdjustment === "none" || settings.barAnalysisMode === "supplied" ? "P-value threshold" : "Adjusted P threshold"} value={settings.significanceThreshold} minimum={0.001} maximum={0.1} step={0.001} onChange={(value) => updateSetting("significanceThreshold", value)} /> : null}
+                <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite">Independent modes use two-sided Welch t-tests within each group/facet. Summary inference requires explicit integer n ≥ 2 and SD or SEM; n is never inferred. Paired mode requires the same subject IDs in both categories. qPCR displays relative expression but tests biological-replicate ΔCt. Technical replicates must be aggregated before import.</p>
+              </ControlGroup> : null}
               {settings.barVariant !== "polar" ? <ControlGroup title="Bar appearance"><RangeControl label="Border width" value={settings.barBorderWidth} minimum={0} maximum={3} step={0.1} unit=" px" onChange={(value) => updateSetting("barBorderWidth", value)} />{settings.barBorderWidth > 0 ? <ColorControl label="Border color" value={settings.barBorderColor} onChange={(value) => updateSetting("barBorderColor", value)} /> : null}<p className="text-[11px] leading-4 text-muted">Set the width to 0 for borderless bars. The outline remains fully opaque so it stays legible when fill opacity is reduced.</p></ControlGroup> : null}
             </> : null}
 
@@ -1320,7 +1388,7 @@ export function VisualizationStudio() {
             </ControlGroup> : null}
 
               <ControlGroup title="Editable colors">
-                {categoryLabels.map((label, index) => <ColorControl key={`${label}-${index}`} label={`${index + 1} · ${label}`} value={settings.categoricalColors[index] ?? journalThemes[themeId].categorical[index % journalThemes[themeId].categorical.length]} onChange={(value) => updateCategoryColor(index, value)} />)}
+                {categoryLabels.map((label, index) => <ColorControl key={`${label}-${index}`} label={`${index + 1} · ${label}`} value={effectiveCategoricalColors[index] ?? categoricalColorForIndex(index, journalThemes[themeId].categorical)} onChange={(value) => updateCategoryColor(index, value)} />)}
                 {(["enrichment", "enrichment-bar", "go-circle", "kegg-circle", "pathway-impact", "nes-fdr"] as PlotType[]).includes(plotType) || ((plotType === "heatmap" || plotType === "clustered-heatmap") && settings.heatmapScale === "none" && settings.heatmapColorMode === "sequential") ? <><ColorControl label="Sequential low" value={settings.continuousLow} onChange={(value) => updateSetting("continuousLow", value)} /><ColorControl label="Sequential high" value={settings.continuousHigh} onChange={(value) => updateSetting("continuousHigh", value)} /></> : null}
                 {(["heatmap", "clustered-heatmap", "correlation-heatmap"] as PlotType[]).includes(plotType) && (plotType === "correlation-heatmap" || settings.heatmapScale !== "none" || settings.heatmapColorMode === "diverging") ? <><ColorControl label="Diverging low" value={settings.divergingLow} onChange={(value) => updateSetting("divergingLow", value)} /><ColorControl label="Midpoint" value={settings.divergingMid} onChange={(value) => updateSetting("divergingMid", value)} /><ColorControl label="Diverging high" value={settings.divergingHigh} onChange={(value) => updateSetting("divergingHigh", value)} /></> : null}
               </ControlGroup>

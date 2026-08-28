@@ -14,7 +14,7 @@ async function expectStablePreviewScreenshot(page: Page, locator: Locator, name:
 test.describe("Visualization Studio browser acceptance", () => {
   test("calculates auditable Bar statistics for raw, summary, paired, and qPCR examples", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop Bar-statistics acceptance");
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Example 2" }).click();
     await expect(page.getByRole("combobox", { name: "Analysis source / design" })).toHaveValue("raw-independent");
     await expect(page.getByRole("combobox", { name: "Reference category" })).toHaveValue("Control");
@@ -48,7 +48,7 @@ test.describe("Visualization Studio browser acceptance", () => {
 
   test("keeps rotated bar categories clear of the X-axis title", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop bar-axis geometry regression");
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "networkidle" });
 
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`category\tvalue\tsd\tgroup
 Mock\t1.32\t0.76\tMock

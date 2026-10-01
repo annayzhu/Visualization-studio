@@ -34,3 +34,26 @@ it.each(['xls','xlsx'] as const)('reads all %s worksheets locally without replac
  const bytes=XLSX.write(book,{type:'array',bookType:bookType==='xls'?'biff8':'xlsx'});
  const sheets=await readLocalFile(new File([bytes],`fixture.${bookType}`));expect(sheets.map(sheet=>sheet.name)).toEqual(['First','Second']);expect(inspectTable(sheets[0].text).table.rows[0]).toEqual(['001','2']);
 });
+it.each(['bar','pca','heatmap','venn','upset','enrichment'] as const)('roundtrips every shipped %s example including explicit analytical settings',type=>{
+ const plotModule=getPlotModule(type);
+ for(const example of plotModule.examples){
+  const result=decodeProject(JSON.stringify({plotType:type,data:example.data,mapping:example.mapping??plotModule.definition.defaultMapping,settings:example.settings??{},pca:{inputMode:example.pcaInputMode??'scores',observationMetadata:example.metadata??''}}));
+  expect(decodeProject(encodeProject(result.project)).project).toEqual(result.project);
+  expect(result.project.datasets[0].raw).toBe(example.data);
+  for(const [key,value] of Object.entries(example.settings??{}))expect(result.project.figures[0].settings[key as keyof typeof result.project.figures[0]['settings']]).toEqual(value);
+ }
+});
+it('aligns heatmap annotation IDs exactly, including meaningful spaces and leading zeroes',async()=>{
+ const {alignHeatmapAnnotations}=await import('./visualization-studio');
+ const result=alignHeatmapAnnotations('id\tgroup[categorical]\n001\tA\n 001\tB',['001',' 001'],'row');
+ expect(result.errors).toEqual([]);expect(result.matchedIds).toBe(2);
+ expect(result.tracks[0].values.get('001')).toBe('A');expect(result.tracks[0].values.get(' 001')).toBe('B');
+ expect(alignHeatmapAnnotations('id\tgroup[categorical]\n\tA',['001'],'row').errors.length).toBeGreaterThan(0);
+});
+
+it('infers both target mappings when sharing an enrichment bar result',()=>{
+ const project=createProject(),plot=getPlotModule('enrichment-bar'),dataset=makeDataset(plot.examples[0].data);
+ project.datasets=[dataset];project.history={datasetIds:[dataset.id],cursor:0};project.figures[0]={...project.figures[0],datasetId:dataset.id,plotType:'enrichment-bar',mapping:plot.definition.defaultMapping};
+ const shared=shareEnrichment(project,{});
+ expect(shared.figures.at(-2)?.mapping.count).toBe('count');
+});

@@ -15,3 +15,6 @@ it('round-trips paired identifiers and refuses ambiguous pivots', () => {
   expect(transformTable(long,{kind:'long-to-wide',fixed:['id'],variable:'visit',value:'value'})).toEqual(wide);
   expect(()=>transformTable({...long, rows:[...long.rows,long.rows[0]]},{kind:'long-to-wide',fixed:['id'],variable:'visit',value:'value'})).toThrow(/Duplicate pivot/);
 });
+it('treats whitespace-only numeric entries as invalid instead of numeric zero',()=>{
+ expect(inspectTable('id\tvalue\n001\t ',{numericColumns:['value']}).issues.some(issue=>issue.code==='numeric')).toBe(true);
+});

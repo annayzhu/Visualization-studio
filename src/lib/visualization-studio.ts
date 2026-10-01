@@ -3773,7 +3773,7 @@ export function parseDelimitedData(raw: string): ParsedDataset {
     return { headers, rows: (blocked ? [] : rows).map(cells => Object.fromEntries(headers.map((header,index) => [header,cells[index] ?? '']))),
       delimiter: raw.split('\n')[0].includes('\t') ? 'tab' : 'comma',
       errors: report.issues.filter(issue => issue.severity === 'error').map(issue => `${issue.row ? `Row ${issue.row}: ` : ''}${issue.message}`),
-      warnings: [...(missing ? [`${missing} blank cell${missing === 1 ? '' : 's'} detected.`] : []), ...report.issues.filter(issue => issue.severity === 'warning').map(issue => issue.message).filter((message,index,all) => all.indexOf(message) === index)] };
+      warnings: [...(missing ? [`${missing} blank cell${missing === 1 ? '' : 's'} detected.`] : []), ...report.issues.filter(issue => issue.severity === 'warning' && issue.code !== 'missing').map(issue => issue.message).filter((message,index,all) => all.indexOf(message) === index)] };
   } catch (error) { return { headers: [], rows: [], delimiter: 'tab', errors: [String(error)], warnings: [] }; }
 }
 
@@ -3894,7 +3894,8 @@ export function alignHeatmapAnnotations(text: string, targetIds: string[], targe
   if (parsed.headers.length < 2) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotations need an ID column and at least one track.`);
   if (parsed.headers.length > 7) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotations are limited to six tracks in the browser preview.`);
   const idColumn = parsed.headers[0] ?? "id";
-  const ids = parsed.rows.map((row) => row[idColumn]?.trim()).filter(Boolean);
+  const ids = parsed.rows.map((row) => row[idColumn] ?? "");
+  if(ids.some(id=>!id.trim()))errors.push("Annotation IDs must not be blank.");
   const duplicateIds = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
   if (duplicateIds.length > 0) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotation IDs must be unique; duplicates: ${duplicateIds.slice(0, 6).join(", ")}.`);
   const idSet = new Set(ids);
@@ -3911,7 +3912,7 @@ export function alignHeatmapAnnotations(text: string, targetIds: string[], targe
     const declaration = header.match(/^(.*?)\s*\[(categorical|continuous)\]\s*$/i);
     const name = declaration?.[1]?.trim() || header;
     const declaredKind = declaration?.[2]?.toLowerCase() as "categorical" | "continuous" | undefined;
-    const values = new Map(parsed.rows.map((row) => [row[idColumn]?.trim(), row[header]?.trim() ?? ""]));
+    const values = new Map(parsed.rows.map((row) => [row[idColumn] ?? "", row[header] ?? ""]));
     const matchedValues = targetIds.map((id) => values.get(id) ?? "").filter((value) => value !== "");
     const numericValues = matchedValues.map((value) => parseNumericValue(value));
     const allNumeric = matchedValues.length > 0 && numericValues.every((value) => value !== null);
@@ -4079,7 +4080,7 @@ export function validatePlotDataset(
     if (dataset.headers.length < 3) errors.push("Heatmap data needs one row-label column and at least two numeric sample columns.");
     const labelHeader = dataset.headers[0];
     const numericHeaders = dataset.headers.slice(1);
-    const rowIds = dataset.rows.map((row) => row[labelHeader]?.trim()).filter(Boolean);
+    const rowIds = dataset.rows.map((row) => row[labelHeader] ?? "").filter(id=>id.trim().length>0);
     if (rowIds.length !== dataset.rows.length) errors.push("Heatmap row identifiers must not be blank.");
     if (new Set(rowIds).size !== rowIds.length) errors.push("Heatmap row identifiers must be unique so annotations and labels align reproducibly.");
     const invalid = dataset.rows.filter((row) => numericHeaders.some((header) => parseNumericValue(row[header]) === null));

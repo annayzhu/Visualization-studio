@@ -24,3 +24,22 @@ it('invalidates analysis after source changes, not style changes',()=>{
  styled.datasets[0].raw+='\nnew\t3';
  expect(analysisIsStale(styled,result,{mode:'paired'})).toBe(true);
 });
+it('rejects invalid PCA analysis options rather than guessing preprocessing',()=>{
+ const project=createProject();project.figures[0].pca.options.dataLayer='invalid' as never;
+ expect(()=>decodeProject(JSON.stringify(project))).toThrow(/PCA/);
+});
+it('verifies replayed derived tables instead of trusting a forged history',()=>{
+ const project=createProject(),parent=project.datasets[0];
+ const derived={...parent,id:'derived',parentId:parent.id,transform:{kind:'select' as const,columns:['category'],names:['category']}};
+ project.datasets.push(derived);
+ expect(()=>decodeProject(JSON.stringify(project))).toThrow();
+});
+
+it.each(['barAnalysisMode','barPAdjustment','heatmapScale','correlationMethod','fontFamily'])('rejects unknown %s without guessing scientific settings',key=>{
+ const project=createProject();Object.assign(project.figures[0].settings,{[key]:'invalid-value'});
+ expect(()=>decodeProject(JSON.stringify(project))).toThrow(/setting/);
+});
+it('rejects a non-text figure name before rendering imported tabs',()=>{
+ const project=createProject();Object.assign(project.figures[0],{name:{unexpected:'object'}});
+ expect(()=>decodeProject(JSON.stringify(project))).toThrow(/figure/);
+});

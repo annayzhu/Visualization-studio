@@ -15,7 +15,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "npm run dev:test",
+    command: process.env.STUDIO_E2E_PRODUCTION ? "PORT=33117 HOSTNAME=127.0.0.1 node .next/standalone/server.js" : "npm run dev:test",
     url: "http://127.0.0.1:33117",
     reuseExistingServer: false,
     timeout: 120_000,

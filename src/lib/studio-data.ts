@@ -5,7 +5,7 @@ export const importLimits = { bytes: 20 * 1024 * 1024, rows: 100_000, columns: 1
 export function tableText(table: DataTable): string {
   return [table.headers, ...table.rows].map(row => row.map(cell => /[\t\n\r"]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell).join('\t')).join('\n');
 }
-export function inspectTable(text: string, options: { name?: string; idColumn?: string; numericColumns?: string[]; units?: Record<string,string> } = {}) {
+export function inspectTable(text: string, options: { name?: string; idColumn?: string; idColumns?: string[]; numericColumns?: string[]; units?: Record<string,string> } = {}) {
   const issues: DataIssue[] = [];
   const add = (issue: Omit<DataIssue,'table'>) => issues.push({ table: options.name || 'Data', ...issue });
   if (new TextEncoder().encode(text).byteLength > importLimits.bytes) throw new Error('File exceeds the 20 MiB local import limit. Split the table before importing.');
@@ -14,6 +14,7 @@ export function inspectTable(text: string, options: { name?: string; idColumn?: 
   const records: { cells: string[]; line: number }[] = [];
   let cells: string[] = [], value = '', quoted = false, line = 1, startLine = 1;
   for (let index = 0; index < normalized.length; index++) {
+    if(cells.length>importLimits.columns || records.length>importLimits.rows+1 || records.length*(records[0]?.cells.length??1)>importLimits.cells)throw new Error('Local row/column/cell limit exceeded; split the input.');
     const char = normalized[index];
     if (char === '"') {
       if (quoted && normalized[index + 1] === '"') { value += '"'; index++; }
@@ -34,22 +35,21 @@ export function inspectTable(text: string, options: { name?: string; idColumn?: 
     if (!field.trim() || seenHeaders.has(field)) add({severity:'error', code:'header', field, row:1, message:'Empty or duplicate header; rename it before importing.'});
     seenHeaders.add(field);
   });
-  const idIndex = options.idColumn ? headers.indexOf(options.idColumn) : -1;
-  if (options.idColumn && idIndex < 0) add({severity:'error', code:'id-column', field:options.idColumn, message:'Selected ID column is missing.'});
-  const ids = new Set<string>();
+  const idFields = [...new Set([...(options.idColumns??[]),...(options.idColumn?[options.idColumn]:[])])].map(field=>({field,index:headers.indexOf(field),ids:new Set<string>()}));
+  for(const {field,index} of idFields) if(index<0) add({severity:'error',code:'id-column',field,message:'Selected ID column is missing.'});
   records.forEach(record => {
     if (record.cells.length !== headers.length) add({severity:'error', code:'width', row:record.line, message:`Row ${record.line} has ${record.cells.length} values; expected ${headers.length}. Original input retained.`});
-    if (idIndex >= 0) {
+    for(const {field,index:idIndex,ids} of idFields) if (idIndex >= 0) {
       const id = record.cells[idIndex] ?? '';
-      if (!id.trim() || ids.has(id)) add({severity:'error', code:'id', field:options.idColumn, row:record.line, message:'Blank or duplicate identifier.'});
-      if (/^0\d/.test(id)) add({severity:'warning', code:'leading-zero', field:options.idColumn, row:record.line, message:'Leading-zero ID preserved as text.'});
-      if (id !== id.trim()) add({severity:'warning', code:'id-space', field:options.idColumn, row:record.line, message:'ID spaces preserved; alignment uses exact IDs.'});
+      if (!id.trim() || ids.has(id)) add({severity:'error', code:'id', field, row:record.line, message:'Blank or duplicate identifier.'});
+      if (/^0\d/.test(id)) add({severity:'warning', code:'leading-zero', field, row:record.line, message:'Leading-zero ID preserved as text.'});
+      if (id !== id.trim()) add({severity:'warning', code:'id-space', field, row:record.line, message:'ID spaces preserved; alignment uses exact IDs.'});
       ids.add(id);
     }
     headers.forEach((field,index) => {
       const cell = record.cells[index];
       if (cell === '' || cell === undefined) add({severity:'warning', code:'missing', field,row:record.line, message:'Missing cell preserved; no imputation applied.'});
-      else if (options.numericColumns?.includes(field) && !Number.isFinite(Number(cell))) add({severity:'error',code:'numeric',field,row:record.line,message:'Non-numeric value; it will not be converted to zero.'});
+      else if (options.numericColumns?.includes(field) && (!cell.trim() || !Number.isFinite(Number(cell)))) add({severity:'error',code:'numeric',field,row:record.line,message:'Non-numeric value; it will not be converted to zero.'});
     });
   });
   if (!rows.length) add({severity:'error',code:'empty',message:'At least one data row is required.'});

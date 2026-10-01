@@ -1,4 +1,6 @@
 "use client";
+import type {StudioDataset} from '@/lib/studio-project';
+import {isCustomPalette, type CustomPalette} from '@/lib/studio-palettes';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
 import { Check, ChevronDown, Download, ExternalLink, FileJson, Image as ImageIcon, Lightbulb, RotateCcw, Save, Search, Upload } from "lucide-react";
@@ -6,8 +8,8 @@ import { StudioProjectPanel, type FigureSnapshot, downloadLocal } from './Studio
 import { readLocalFile, type ImportedSheet } from '@/lib/studio-import';
 import { enrichmentDisplay } from '@/lib/studio-enrichment';
 import { inspectTable } from '@/lib/studio-data';
-import { chartAliases, scenarioPresets, catalogPreference } from '@/lib/studio-catalog';
-import { Ui } from "./StudioLanguage";
+import { chartAliases, plotChineseNames, scenarioPresets, catalogPreference, catalogEntry, type CatalogEntry } from '@/lib/studio-catalog';
+import { Ui, GuidanceText } from "./StudioLanguage";
 import { StudioAnnotationImport } from "./StudioAnnotationImport";
 import { PageHeader } from "@/components/PageHeader";
 import { ScientificChartPreview } from "@/components/ScientificChartPreview";
@@ -74,21 +76,6 @@ type PalettePreference = {
   customPaletteId?: string;
 };
 
-type CustomPalette = {
-  id: string;
-  name: string;
-  sourceThemeId: JournalThemeId;
-  categoricalColors: string[];
-  continuousLow: string;
-  continuousHigh: string;
-  divergingLow: string;
-  divergingMid: string;
-  divergingHigh: string;
-  barBorderColor: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 function isPaletteSeriesId(value: string | null): value is PaletteSeriesId {
   return Boolean(value && value in paletteSeries);
 }
@@ -118,31 +105,6 @@ function writePalettePreference(preference: PalettePreference) {
   } catch {
     // Local storage can be disabled; the studio should remain fully usable.
   }
-}
-
-function isHexColor(value: unknown): value is string {
-  return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
-}
-
-function isCustomPalette(value: unknown): value is CustomPalette {
-  if (!value || typeof value !== "object") return false;
-  const palette = value as Partial<CustomPalette>;
-  return (
-    typeof palette.id === "string" &&
-    typeof palette.name === "string" &&
-    isJournalThemeId(palette.sourceThemeId ?? null) &&
-    Array.isArray(palette.categoricalColors) &&
-    palette.categoricalColors.length > 0 &&
-    palette.categoricalColors.every(isHexColor) &&
-    isHexColor(palette.continuousLow) &&
-    isHexColor(palette.continuousHigh) &&
-    isHexColor(palette.divergingLow) &&
-    isHexColor(palette.divergingMid) &&
-    isHexColor(palette.divergingHigh) &&
-    isHexColor(palette.barBorderColor) &&
-    typeof palette.createdAt === "string" &&
-    typeof palette.updatedAt === "string"
-  );
 }
 
 function readCustomPalettes(): CustomPalette[] {
@@ -369,7 +331,7 @@ function RangeControl({ label, value, minimum, maximum, step = 1, unit, onChange
           <input
             type="text"
             inputMode="decimal"
-            aria-label={`$<Ui text={label} /> value`}
+            aria-label={`${label} value`}
             value={displayedValue}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={commitDraft}
@@ -384,7 +346,7 @@ function RangeControl({ label, value, minimum, maximum, step = 1, unit, onChange
           {unit ? <span>{unit}</span> : null}
         </span>
       </div>
-      <input aria-label={`$<Ui text={label} /> slider`} className="h-5 w-full accent-[var(--color-moss)]" type="range" min={minimum} max={maximum} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      <input aria-label={`${label} slider`} className="h-5 w-full accent-[var(--color-moss)]" type="range" min={minimum} max={maximum} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
     </div>
   );
 }
@@ -453,10 +415,12 @@ function ColorControl({ label, value, onChange }: { label: string; value: string
 export function VisualizationStudio() {
   const initialDefinition = getPlotDefinition("bar");
   const [resultId,setResultId] = useState<string | undefined>();
+  const [declaredFields,setDeclaredFields]=useState<StudioDataset["fields"]>({});
   const [figureDisplay,setFigureDisplay] = useState<FigureSnapshot['display']>();
   const [pendingSheets, setPendingSheets] = useState<ImportedSheet[]>([]);
-  const [favorites,setFavorites] = useState<PlotType[]>([]);
-  const [recentPlots,setRecentPlots] = useState<PlotType[]>([]);
+  const [favorites,setFavorites] = useState<CatalogEntry[]>([]);
+  const [selectedPreset,setSelectedPreset]=useState<CatalogEntry|null>(null);
+  const [recentPlots,setRecentPlots] = useState<CatalogEntry[]>([]);
   useEffect(() => { const timer = setTimeout(() => { try { setFavorites(catalogPreference(JSON.parse(localStorage.getItem('studio.favorites') || '[]'))); setRecentPlots(catalogPreference(JSON.parse(localStorage.getItem('studio.recent') || '[]'))); } catch { /* The complete registry remains available. */ } },0); return () => clearTimeout(timer); },[]);
   const [plotType, setPlotType] = useState<PlotType>("bar");
   const [rawData, setRawData] = useState(initialDefinition.sampleData);
@@ -487,9 +451,11 @@ export function VisualizationStudio() {
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const previewCardRef = useRef<HTMLDivElement | null>(null);
   const parameterScrollRef = useRef<HTMLDivElement | null>(null);
+  const projectRestored=useRef(false);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
+      if(projectRestored.current)return;
       const storedCustomPalettes = readCustomPalettes();
       setCustomPalettes(storedCustomPalettes);
       const preference = readPalettePreference();
@@ -548,7 +514,7 @@ export function VisualizationStudio() {
     return plotModuleRegistry.list().filter((candidate) => {
       const relatedGoals = plotFinderGoals.filter((goal) => goal.plots.includes(candidate.definition.id));
       const corpus = [
-        candidate.definition.name, chartAliases[candidate.definition.id] ?? "",
+        candidate.definition.name, chartAliases[candidate.definition.id] ?? "", plotChineseNames[candidate.definition.id],
         candidate.definition.family,
         candidate.definition.summary,
         candidate.definition.inputHint,
@@ -568,7 +534,11 @@ export function VisualizationStudio() {
   const invalidXLimits = manualAxes.includes("x") && settings.xMin !== null && settings.xMax !== null && settings.xMin >= settings.xMax;
   const invalidYLimits = manualAxes.includes("y") && settings.yMin !== null && settings.yMax !== null && settings.yMin >= settings.yMax;
   const pcaAnalysis = useMemo(() => plotType === "pca" && pcaInputMode === "matrix" ? analyzeExpressionMatrix(rawData, pcaOptions, pcaObservationMetadata) : null, [plotType, pcaInputMode, rawData, pcaObservationMetadata, pcaOptions]);
-  const dataset = useMemo(() => pcaAnalysis?.dataset ?? parseDelimitedData(figureDisplay && ['enrichment','enrichment-bar'].includes(plotType) ? enrichmentDisplay(rawData, figureDisplay) : rawData), [pcaAnalysis, rawData, figureDisplay, plotType]);
+  const dataset = useMemo(() => {
+    if(pcaAnalysis) return pcaAnalysis.dataset;
+    try {return parseDelimitedData(figureDisplay && ['enrichment','enrichment-bar'].includes(plotType) ? enrichmentDisplay(rawData, figureDisplay) : rawData);}
+    catch {return parseDelimitedData(rawData); } // Preflight displays the limit error; the editor remains recoverable.
+  }, [pcaAnalysis, rawData, figureDisplay, plotType]);
   const barCategoryOptions = useMemo(() => plotType === "bar" && mapping.category
     ? [...new Set(dataset.rows.map((row) => row[mapping.category]).filter(Boolean))]
     : [], [dataset.rows, mapping.category, plotType]);
@@ -616,10 +586,13 @@ export function VisualizationStudio() {
   }, [barAnalysis, displayDataset, displayMapping, plotType, settings]);
   const categoryLabels = useMemo(() => categoricalColorLabels(plotType, displayDataset.rows, displayMapping), [displayDataset.rows, displayMapping, plotType]);
   const analysisProvenance = useMemo(() => analysisProvenanceForPlot(plotType, settings, pcaInputMode), [pcaInputMode, plotType, settings]);
-  const inputPreflight = useMemo(() => inspectTable(rawData), [rawData]);
+  const inputPreflight = useMemo(() => {
+    try { return inspectTable(rawData,{idColumns:Object.keys(declaredFields).filter(key=>declaredFields[key].kind==='id'),numericColumns:Object.keys(declaredFields).filter(key=>declaredFields[key].kind==='number'),units:Object.fromEntries(Object.entries(declaredFields).filter(([,field])=>field.unit).map(([key,field])=>[key,field.unit!]))}); }
+    catch(error) {return {table:{headers:[],rows:[]},issues:[{severity:'error' as const,table:'Data',code:'limit',row:undefined,field:undefined,message:String(error)}]};}
+  }, [rawData,declaredFields]);
   const isValid = validation.errors.length === 0 && !inputPreflight.issues.some(issue => issue.severity === 'error');
   const restoreSnapshot = (snapshot: FigureSnapshot) => {
-    setResultId(snapshot.analysisResultId); setFigureDisplay(snapshot.display);
+    projectRestored.current=true;setDeclaredFields(snapshot.fields??{});setResultId(snapshot.analysisResultId); setFigureDisplay(snapshot.display);
     setPlotType(snapshot.plotType); setRawData(snapshot.raw); setMapping(snapshot.mapping);
     setSettings(snapshot.settings); setThemeId(snapshot.themeId); setPcaInputMode(snapshot.pca.inputMode);
     setPcaOptions(snapshot.pca.options); setPcaObservationMetadata(snapshot.pca.observationMetadata);
@@ -671,7 +644,7 @@ export function VisualizationStudio() {
     const example = dataExamples[exampleIndex];
     if (!example) return;
     setSelectedExampleIndex(exampleIndex);
-    setRawData(example.data);
+    setDeclaredFields({});setRawData(example.data);
     setPcaObservationMetadata(example.metadata ?? "");
     setMapping(example.mapping ?? definition.defaultMapping);
     setLoadedFileName("");
@@ -695,9 +668,17 @@ export function VisualizationStudio() {
   };
 
   const selectPlot = (nextType: PlotType) => {
+    setSelectedPreset(null);
     const nextRecent = [nextType,...recentPlots.filter(id => id !== nextType)].slice(0,6); setRecentPlots(nextRecent); try { localStorage.setItem('studio.recent',JSON.stringify(nextRecent)); } catch {}
     const next = getPlotModule(nextType).definition;
     setPlotType(nextType); setResultId(undefined); setFigureDisplay(undefined);
+    setSettings(current=>settingsForDistributionPreset({...current,
+      showLabels:(["sankey","alluvial","chord","ligand-receptor","circos"] as PlotType[]).includes(nextType)?true:current.showLabels,
+      ordinationView:(["pca","pcoa","umap","tsne","nmds"] as PlotType[]).includes(nextType)?"scores":current.ordinationView,
+      clusterColumns:nextType==='correlation-heatmap'?current.clusterRows:current.clusterColumns,
+      heatmapColumnClusters:nextType==='correlation-heatmap'?current.heatmapRowClusters:current.heatmapColumnClusters,
+      legendPosition:(["heatmap","clustered-heatmap","correlation-heatmap","enrichment","enrichment-bar","venn","upset","sankey","alluvial","chord","ligand-receptor","circos"] as PlotType[]).includes(nextType)&&current.legendPosition==='bottom'?'right':current.legendPosition
+    },nextType));
     setSelectedExampleIndex(-1);
     setMapping(inferPlotMapping(next, parseDelimitedData(rawData).headers));
     setFileError('Data retained. Check the field mapping for this plot. 原始表已保留，请核对映射。');
@@ -708,6 +689,14 @@ export function VisualizationStudio() {
     });
   };
 
+  const selectCatalogEntry=(id:CatalogEntry)=>{
+    const entry=catalogEntry(id);selectPlot(entry.plotType);
+    if(entry.settings)setSettings(current=>({...current,...entry.settings}));
+    setSelectedPreset(id.startsWith('preset:')?id:null);
+    const next=[id,...recentPlots.filter(value=>value!==id)].slice(0,6);setRecentPlots(next);
+    try{localStorage.setItem('studio.recent',JSON.stringify(next));}catch{}
+  };
+  const activeCatalogEntry=selectedPreset??plotType;
   const selectTheme = (nextTheme: JournalThemeId) => {
     const theme = journalThemes[nextTheme];
     setThemeId(nextTheme);
@@ -930,8 +919,8 @@ export function VisualizationStudio() {
 
   return (
     <div className="space-y-[var(--ln-vis-panel-gap)]" data-visualization-workbench>
-      <details className="rounded-[9px] border border-hairline bg-white p-3"><summary className="cursor-pointer text-sm font-medium"><Ui text={"Scenarios, favorites & recent / 场景、收藏与最近使用"} /></summary><div className="mt-2 flex flex-wrap gap-2">{scenarioPresets.map(preset=><Button key={preset.id} size="sm" onClick={()=>{selectPlot(preset.plotType);if(preset.settings)setSettings(current=>({...current,...preset.settings}));}}>{preset.en} / {preset.zh}</Button>)}</div><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={()=>{const next=favorites.includes(plotType)?favorites.filter(id=>id!==plotType):[plotType,...favorites];setFavorites(next);try{localStorage.setItem('studio.favorites',JSON.stringify(next));}catch{}}}>{favorites.includes(plotType)?'Unfavorite / 取消收藏':'Favorite / 收藏当前图'}</Button>{favorites.map(id=><Button key={id} size="sm" onClick={()=>selectPlot(id)}>{getPlotModule(id).definition.name}</Button>)}</div>{recentPlots.length?<div className="mt-2 flex flex-wrap gap-2" aria-label="Recent plots">{recentPlots.map(id=><Button key={id} size="sm" onClick={()=>selectPlot(id)}>{getPlotModule(id).definition.name}</Button>)}</div>:null}</details>
-      <StudioProjectPanel snapshot={{ analysisResultId: resultId, display: figureDisplay, plotType, raw: rawData, mapping, settings, themeId, pca: { inputMode: pcaInputMode, options: pcaOptions, observationMetadata: pcaObservationMetadata } }} onRestore={restoreSnapshot} />
+      <details className="rounded-[9px] border border-hairline bg-white p-3"><summary className="cursor-pointer text-sm font-medium"><Ui text={"Scenarios, favorites & recent / 场景、收藏与最近使用"} /></summary><div className="mt-2 flex flex-wrap gap-2">{scenarioPresets.map(preset=><Button key={preset.id} size="sm" onClick={()=>{selectCatalogEntry(`preset:${preset.id}`);}}>{preset.en} / {preset.zh}</Button>)}</div><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={()=>{const next=favorites.includes(activeCatalogEntry)?favorites.filter(id=>id!==activeCatalogEntry):[activeCatalogEntry,...favorites];setFavorites(next);try{localStorage.setItem('studio.favorites',JSON.stringify(next));}catch{}}}>{favorites.includes(activeCatalogEntry)?'Unfavorite / 取消收藏':'Favorite / 收藏当前图'}</Button>{favorites.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>{recentPlots.length?<div className="mt-2 flex flex-wrap gap-2" aria-label="Recent plots">{recentPlots.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>:null}</details>
+      <StudioProjectPanel palettes={customPalettes} onPalettes={setCustomPalettes} snapshot={{ fields:declaredFields, analysisResultId: resultId, display: figureDisplay, plotType, raw: rawData, mapping, settings, themeId, pca: { inputMode: pcaInputMode, options: pcaOptions, observationMetadata: pcaObservationMetadata } }} onRestore={restoreSnapshot} />
       <div ref={stickyHeaderRef} data-visualization-sticky-header className="sticky top-0 z-20 -mx-1 space-y-1.5 border-b border-hairline/70 bg-paper/95 px-1 pb-2 backdrop-blur">
         <PageHeader identifier="TOOLS / VIS" title="Visualization Studio" className="min-h-8" />
         <Card className="overflow-hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none">
@@ -1007,7 +996,7 @@ export function VisualizationStudio() {
 
       <div className="grid items-start gap-[var(--ln-vis-panel-gap)] xl:grid-cols-[180px_minmax(0,1fr)_288px] xl:items-start" style={mainGridStyle}>
         <Card data-visualization-panel="plots" className="hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none md:block xl:sticky xl:top-[var(--visualization-panel-top)] xl:flex xl:h-[var(--visualization-panel-height)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
-          <CardHeader title="Plot types" className="h-12 shrink-0" action={<button type="button" aria-expanded={plotFinderOpen} onClick={() => setPlotFinderOpen((open) => !open)} className="focus-ring rounded-[6px] px-1.5 py-1 text-[10px] font-semibold text-moss hover:bg-sage-surface"><Ui text={"Choose"} /></button>} />
+          <CardHeader title={<Ui text="Plot types" />} className="h-12 shrink-0" action={<button type="button" aria-expanded={plotFinderOpen} onClick={() => setPlotFinderOpen((open) => !open)} className="focus-ring rounded-[6px] px-1.5 py-1 text-[10px] font-semibold text-moss hover:bg-sage-surface"><Ui text={"Choose"} /></button>} />
           <div className="shrink-0 space-y-2 border-b border-hairline p-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden />
@@ -1024,7 +1013,7 @@ export function VisualizationStudio() {
             {filteredPlotModules.map(({ definition: plot }) => (
               <button key={plot.id} type="button" onClick={() => selectPlot(plot.id)} className={cn("focus-ring relative w-full rounded-[6px] border border-transparent px-2.5 py-2 text-left transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent", plotType === plot.id ? "bg-[var(--ln-vis-active-bg)] before:bg-moss" : "hover:bg-warm") }>
                 <span className="block text-[13px] font-medium text-ink"><Ui text={plot.name} /></span>
-                <span className="mt-0.5 block text-[10px] uppercase tracking-[0.07em] text-muted">{plot.family}</span>
+                <span className="mt-0.5 block text-[10px] uppercase tracking-[0.07em] text-muted"><Ui text={plot.family} /></span>
               </button>
             ))}
             {filteredPlotModules.length === 0 ? <div className="rounded-[7px] border border-dashed border-hairline px-2 py-4 text-center text-[11px] leading-4 text-muted"><Ui text={"No matching plot. Try a scientific question such as “survival”, “enrichment”, “微生物”, or “相关”."} /></div> : null}
@@ -1034,9 +1023,9 @@ export function VisualizationStudio() {
         <div className="min-w-0 space-y-[var(--ln-vis-panel-gap)]">
           <div ref={previewCardRef} data-visualization-panel="preview" className="scroll-mt-[var(--visualization-panel-top)]">
           <Card className="overflow-hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-preview-border)] shadow-[var(--ln-vis-preview-shadow)]">
-            <CardHeader className="min-h-12 shrink-0 max-sm:block max-sm:[&_.card-action]:mt-2" title={`$<Ui text={definition.name} /> preview`} action={<div className="flex flex-wrap items-center justify-end gap-1.5 max-sm:justify-start">{analysisProvenance ? <span data-analysis-provenance={analysisProvenance.source} data-provenance-detail={analysisProvenance.detail} title={analysisProvenance.detail} aria-label={`${analysisProvenance.label}. ${analysisProvenance.detail}`}><Badge tone={analysisProvenance.source === "calculated-in-studio" ? "sage" : "info"}>{analysisProvenance.label}</Badge></span> : null}<Badge>{dataset.rows.length} {plotType === "pca" ? "observations" : "rows"}</Badge><Badge tone={isValid ? "success" : "danger"}>{isValid ? "Ready" : "Check data"}</Badge><span className="mx-0.5 h-5 w-px bg-hairline max-sm:hidden" aria-hidden /><Button size="sm" onClick={exportSvg} disabled={!isValid}><Download className="h-3.5 w-3.5" aria-hidden /><Ui text={"SVG"} /></Button><Button size="sm" onClick={exportPng} disabled={!isValid} title="Export PNG at 600 dpi"><ImageIcon className="h-3.5 w-3.5" aria-hidden /><Ui text={"PNG"} /></Button><Button size="sm" onClick={exportConfig}><FileJson className="h-3.5 w-3.5" aria-hidden /><Ui text={"Config"} /></Button></div>} />
+            <CardHeader className="min-h-12 shrink-0 max-sm:block max-sm:[&_.card-action]:mt-2" title={`${definition.name} preview`} action={<div className="flex flex-wrap items-center justify-end gap-1.5 max-sm:justify-start">{analysisProvenance ? <span data-analysis-provenance={analysisProvenance.source} data-provenance-detail={analysisProvenance.detail} title={analysisProvenance.detail} aria-label={`${analysisProvenance.label}. ${analysisProvenance.detail}`}><Badge tone={analysisProvenance.source === "calculated-in-studio" ? "sage" : "info"}><Ui text={analysisProvenance.label} /></Badge></span> : null}<Badge>{dataset.rows.length} {plotType === "pca" ? "observations" : "rows"}</Badge><Badge tone={isValid ? "success" : "danger"}><Ui text={isValid ? "Ready" : "Check data"} /></Badge><span className="mx-0.5 h-5 w-px bg-hairline max-sm:hidden" aria-hidden /><Button size="sm" onClick={exportSvg} disabled={!isValid}><Download className="h-3.5 w-3.5" aria-hidden /><Ui text={"SVG"} /></Button><Button size="sm" onClick={exportPng} disabled={!isValid} title="Export PNG at 600 dpi"><ImageIcon className="h-3.5 w-3.5" aria-hidden /><Ui text={"PNG"} /></Button><Button size="sm" onClick={exportConfig}><FileJson className="h-3.5 w-3.5" aria-hidden /><Ui text={"Config"} /></Button></div>} />
             <CardBody className="p-3 sm:p-4">
-              <p className="mb-3 text-xs leading-5 text-muted">{definition.summary}</p>
+              <p className="mb-3 text-xs leading-5 text-muted"><Ui text={definition.summary} /></p>
               {validation.errors.length > 0 ? (
                 <div className="rounded-[9px] border border-error/25 bg-error-surface px-3 py-2 text-xs leading-5 text-error">
                   {validation.errors.map((error) => <p key={error}>• {error}</p>)}
@@ -1050,7 +1039,7 @@ export function VisualizationStudio() {
               )}
               {validation.warnings.length > 0 ? <div className="mt-3 rounded-[8px] border border-warning/20 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{validation.warnings.join(" · ")}</div> : null}
               {plotType === "bar" && isValid && barAnalysis?.results.length ? <details className="mt-3 overflow-hidden rounded-[8px] border border-hairline bg-white">
-                <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-ink"><span><Ui text={"Statistical results ·"} />{barAnalysis.results.length}<Ui text={"comparison"} />{barAnalysis.results.length === 1 ? "" : "s"}</span><Button type="button" size="sm" onClick={(event) => { event.preventDefault(); downloadBarAnalysis(); }}><Download className="h-3.5 w-3.5" aria-hidden /><Ui text={"TSV"} /></Button></summary>
+                <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-ink"><span><Ui text={"Statistical results ·"} />{" "}{barAnalysis.results.length}{" "}<Ui text={"comparison"} />{barAnalysis.results.length === 1 ? "" : "s"}</span><Button type="button" size="sm" onClick={(event) => { event.preventDefault(); downloadBarAnalysis(); }}><Download className="h-3.5 w-3.5" aria-hidden /><Ui text={"TSV"} /></Button></summary>
                 <div className="overflow-x-auto border-t border-hairline">
                   <table className="min-w-full text-left text-[11px] text-graphite">
                     <thead className="bg-stone text-[10px] uppercase tracking-[0.04em] text-muted"><tr><th className="px-3 py-2"><Ui text={"Group"} /></th><th className="px-3 py-2"><Ui text={"Comparison"} /></th><th className="px-3 py-2"><Ui text={"Difference (95% CI)"} /></th><th className="px-3 py-2"><Ui text={"n"} /></th><th className="px-3 py-2"><Ui text={"P raw"} /></th><th className="px-3 py-2"><Ui text={"P adjusted"} /></th><th className="px-3 py-2"><Ui text={"Method / scale"} /></th></tr></thead>
@@ -1065,7 +1054,7 @@ export function VisualizationStudio() {
           <Card className="overflow-hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none">
             <CardHeader
               className="h-12"
-              title="Data & mapping"
+              title={<Ui text="Data & mapping" />}
               action={(
                 <div className="flex flex-wrap justify-end gap-2">
                   <input ref={fileRef} type="file" accept=".tsv,.csv,.txt,.xls,.xlsx,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={loadFile} />
@@ -1078,7 +1067,8 @@ export function VisualizationStudio() {
               <div className="grid content-start gap-2 text-xs text-graphite">
                 <div className="flex flex-wrap items-end justify-between gap-2">
                   {pendingSheets.length > 0 ? <label className="grid gap-1"><Ui text={"Choose worksheet / 选择工作表"} /><select aria-label="Worksheet" className={controlClass} defaultValue="" onChange={event => { const sheet = pendingSheets[Number(event.target.value)]; if(sheet) acceptImportedData(sheet.text, `${loadedFileName}: ${sheet.name}`); }}><option value="" disabled><Ui text={"Select / 选择"} /></option>{pendingSheets.map((sheet,index) => <option key={sheet.name} value={index}>{sheet.name}</option>)}</select></label> : null}
-                  {inputPreflight.issues.length > 0 ? <details className="w-full"><summary><Ui text={"Input check / 输入预检 ("} />{inputPreflight.issues.length})</summary><Button size="sm" onClick={() => downloadLocal(JSON.stringify(inputPreflight.issues,null,2), 'input-issues.json')}><Ui text={"Download issues / 下载问题清单"} /></Button><ul className="max-h-40 overflow-auto">{inputPreflight.issues.slice(0,50).map((issue,index) => <li key={index}>{issue.severity} · {issue.field} · {issue.row} · {issue.message}</li>)}</ul></details> : null}
+                  <details className="w-full"><summary><Ui text="Field semantics and units / 字段语义与单位" /></summary><p className="text-xs"><Ui text="Declare a unique ID only when the table requires one. Units are recorded, not converted. / 仅在表格要求唯一标识时声明 ID；单位仅记录，不自动换算。" /></p><div className="max-h-60 overflow-auto">{inputPreflight.table.headers.map((header,index)=><div key={`${header}-${index}`} className="flex flex-wrap items-center gap-2 py-1"><span className="min-w-20 break-all text-xs">{header}</span><select aria-label={`${header} field type`} value={declaredFields[header]?.kind??'text'} onChange={event=>setDeclaredFields({...declaredFields,[header]:{unit:declaredFields[header]?.unit??null,kind:event.target.value as 'text'|'number'|'id'}})} className="max-w-full border border-hairline text-xs"><option value="text">Text / 文本</option><option value="number">Number / 数值</option><option value="id">Unique ID / 唯一ID</option></select><input aria-label={`${header} unit`} placeholder="Unit / 单位" className="w-24 border border-hairline text-xs" value={declaredFields[header]?.unit??''} onChange={event=>setDeclaredFields({...declaredFields,[header]:{kind:declaredFields[header]?.kind??'text',unit:event.target.value||null}})}/></div>)}</div></details>
+                  {inputPreflight.issues.length > 0 ? <details className="w-full"><summary><Ui text={"Input check / 输入预检 ("} />{inputPreflight.issues.length})</summary><Button size="sm" onClick={() => downloadLocal(JSON.stringify(inputPreflight.issues,null,2), 'input-issues.json')}><Ui text={"Download issues / 下载问题清单"} /></Button><ul className="max-h-40 overflow-auto">{inputPreflight.issues.slice(0,50).map((issue,index) => <li key={index}>{issue.severity} · {issue.field} · {issue.row} · <Ui text={issue.message} /></li>)}</ul></details> : null}
                   <span>{plotType === "pca" ? (pcaInputMode === "matrix" ? "Feature matrix" : "PCA coordinates") : "CSV or TSV data"}</span>
                   <div className="flex flex-wrap gap-1.5" aria-label="Example data">
                     {dataExamples.map((example, exampleIndex) => (
@@ -1110,10 +1100,10 @@ export function VisualizationStudio() {
               <div className="space-y-2.5">
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-graphite">{plotType === "pca" ? "PCA input" : "Column mapping"}</p>
+                    <p className="text-xs font-semibold text-graphite"><Ui text={plotType === "pca" ? "PCA input" : "Column mapping"} /></p>
                     {(plotType !== "pca" || pcaInputMode === "scores") && definition.roles.length > 0 ? <Button size="sm" variant="ghost" onClick={() => setMapping(inferPlotMapping(definition, dataset.headers))}><Ui text={"Auto-map"} /></Button> : null}
                   </div>
-                  <p className="mt-1 text-[11px] leading-4 text-muted">{definition.inputHint}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-muted"><GuidanceText plotId={plotType} section="data" /></p>
                 </div>
                 {plotType === "pca" ? <div className="grid grid-cols-2 gap-1 rounded-[8px] border border-hairline bg-stone p-1" aria-label="PCA input mode">
                   <button type="button" aria-pressed={pcaInputMode === "scores"} onClick={() => selectPcaInputMode("scores")} className={cn("focus-ring rounded-[6px] px-2 py-2 text-[11px] font-medium", pcaInputMode === "scores" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink")}><Ui text={"Supplied coordinates"} /></button>
@@ -1172,7 +1162,7 @@ export function VisualizationStudio() {
             }}><RotateCcw className="h-3.5 w-3.5" aria-hidden /><Ui text={"Reset"} /></Button>} />
             <CardBody data-visualization-parameter-scroll ref={parameterScrollRef} className="space-y-4 p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
               <ControlGroup title="Labels">
-                <TextControl label="Title" value={settings.title} onChange={(value) => updateSetting("title", value)} placeholder={`$<Ui text={definition.name} /> title`} />
+                <TextControl label="Title" value={settings.title} onChange={(value) => updateSetting("title", value)} placeholder={`${definition.name} title`} />
               {hasSetting("xLabel") ? <TextControl label="X-axis label" value={settings.xLabel} onChange={(value) => updateSetting("xLabel", value)} /> : null}
               {hasSetting("yLabel") ? <TextControl label="Y-axis label" value={settings.yLabel} onChange={(value) => updateSetting("yLabel", value)} /> : null}
               {manualAxes.length > 0 ? (
@@ -1212,7 +1202,7 @@ export function VisualizationStudio() {
             {(plotType === "venn" || plotType === "upset") ? <ControlGroup title="Set intersections">
               <SelectControl label="Input structure" value={settings.setInputMode} onChange={(value) => { updateSetting("setInputMode", value as VisualizationSettings["setInputMode"]); setSelectedIntersectionSignature(""); }}><option value="auto"><Ui text={"Auto detect"} /></option><option value="membership"><Ui text={"Item–set membership"} /></option><option value="peak-overlap"><Ui text={"Genomic peak overlap"} /></option></SelectControl>
               {plotType === "venn" ? <><SelectControl label="Diagram layout" value={settings.vennLayout} onChange={(value) => updateSetting("vennLayout", value as VisualizationSettings["vennLayout"])}><option value="auto"><Ui text={"Auto · circles / radial index"} /></option><option value="classic"><Ui text={"Classic circles · 2–3 sets"} /></option><option value="radial"><Ui text={"Radial exact intersections · 2–7 sets"} /></option></SelectControl><ToggleControl label="Size-weighted visual cue" checked={settings.vennProportional} onChange={(value) => updateSetting("vennProportional", value)} /></> : <RangeControl label="Displayed intersections" value={settings.upsetMaxIntersections} minimum={3} maximum={30} step={1} onChange={(value) => updateSetting("upsetMaxIntersections", value)} />}
-              {setAnalysis && setAnalysis.intersections.length > 0 ? <><SelectControl label="Exact intersection to download" value={selectedSetIntersection?.signature ?? ""} onChange={setSelectedIntersectionSignature}>{setAnalysis.intersections.map((entry) => <option key={entry.signature} value={entry.signature}>{entry.sets.join(" ∩ ")}<Ui text={"· n="} />{entry.size}</option>)}</SelectControl><Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={downloadSelectedIntersection}><Download className="h-3.5 w-3.5" aria-hidden /><Ui text={"Download selected members"} /></Button></> : null}
+              {setAnalysis && setAnalysis.intersections.length > 0 ? <><SelectControl label="Exact intersection to download" value={selectedSetIntersection?.signature ?? ""} onChange={setSelectedIntersectionSignature}>{setAnalysis.intersections.map((entry) => <option key={entry.signature} value={entry.signature}>{entry.sets.join(" ∩ ")}{" "}<Ui text={"· n="} />{entry.size}</option>)}</SelectControl><Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={downloadSelectedIntersection}><Download className="h-3.5 w-3.5" aria-hidden /><Ui text={"Download selected members"} /></Button></> : null}
               <p className="rounded-[8px] bg-stone px-3 py-2 text-[11px] leading-4 text-graphite"><Ui text={"Counts are exact membership combinations. Peak mode splits half-open intervals [start, end) into disjoint atomic genomic segments wherever active set membership changes; counts are segments, not base pairs or original peaks. Size weighting is only a visual cue, never an area-proportional fit."} /></p>
             </ControlGroup> : null}
 
@@ -1407,9 +1397,9 @@ export function VisualizationStudio() {
               <span className="flex shrink-0 items-center gap-1 text-[11px] text-moss">{guidanceOpen ? "收起" : "展开"}<ChevronDown className={cn("h-3.5 w-3.5", guidanceOpen && "rotate-180")} aria-hidden /></span>
             </button>
             <div id="visualization-guidance-content" hidden={!guidanceOpen} className="mt-2 min-h-0 space-y-2 overflow-y-auto text-[11px] leading-[1.55] text-graphite">
-              <p><span className="font-semibold text-ink">基本定义：</span><Ui text={guidance.definition} /></p>
-              <p><span className="font-semibold text-ink">适合的数据：</span><Ui text={guidance.suitableData} /></p>
-              <p><span className="font-semibold text-ink">适合说明的问题：</span><Ui text={guidance.answers} /></p>
+              <p><span className="font-semibold text-ink"><Ui text="Definition" />：</span><GuidanceText plotId={plotType} section="definition" /></p>
+              <p><span className="font-semibold text-ink"><Ui text="Suitable data" />：</span><GuidanceText plotId={plotType} section="data" /></p>
+              <p><span className="font-semibold text-ink"><Ui text="Scientific question" />：</span><GuidanceText plotId={plotType} section="question" /></p>
               {guidance.origin ? (
                 <details data-plot-origin={plotType} className="border-t border-moss/20 pt-2">
                   <summary className="focus-ring cursor-pointer rounded text-[11px] font-semibold text-ink">方法由来</summary>

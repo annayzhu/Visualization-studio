@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /private/tmp/visualization-studio-p0-20260930
+
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  10:14:14
+   Duration  454ms (transform 450ms, setup 0ms, import 561ms, tests 66ms, environment 0ms)
+

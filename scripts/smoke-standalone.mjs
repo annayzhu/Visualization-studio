@@ -1,3 +1,4 @@
+import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -50,9 +51,21 @@ try {
     throw new Error(`An asset is missing the ${basePath} prefix.`);
   }
 
-  const assetResponse = await fetchWhenReady(`${origin}${assetPaths[0]}`);
-  const asset = await assetResponse.arrayBuffer();
-  if (asset.byteLength === 0) throw new Error("The prefixed production asset was empty.");
+  for(const assetPath of new Set(assetPaths)) {
+    const assetResponse=await fetchWhenReady(`${origin}${assetPath}`);
+    if((await assetResponse.arrayBuffer()).byteLength===0)throw new Error('Empty prefixed production asset.');
+  }
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:390,height:844}});
+    await page.goto(`${origin}${basePath}/`);
+    await page.getByRole('button',{name:'SVG',exact:true}).waitFor();
+    const download=page.waitForEvent('download');
+    await page.getByRole('button',{name:'SVG',exact:true}).click();
+    const output=await download;
+    if(!readFileSync(await output.path(),'utf8').includes('<svg'))throw new Error('Prefixed UI export is not an SVG.');
+    if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw new Error('Prefixed mobile page overflows.');
+  } finally {await browser.close();}
   console.log(`Verified standalone page ${basePath}/ and ${assetPaths.length} prefixed assets.`);
 } catch (error) {
   throw new Error(`${error instanceof Error ? error.message : String(error)}\n${output.join("")}`);

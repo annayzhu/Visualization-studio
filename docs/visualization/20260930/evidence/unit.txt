@@ -1,0 +1,13 @@
+
+> visualization-studio@1.0.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /private/tmp/visualization-studio-p0-20260930
+
+
+ Test Files  17 passed (17)
+      Tests  225 passed (225)
+   Start at  10:15:18
+   Duration  2.12s (transform 5.70s, setup 0ms, import 8.04s, tests 5.04s, environment 1ms)
+

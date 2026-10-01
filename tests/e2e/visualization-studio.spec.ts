@@ -94,6 +94,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop line-statistics regression");
     await page.goto("/");
     await page.getByRole("button", { name: /^Line/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`time\tvalue\tsd\tsem\tn\tseries
 0\t0.2292416667\t0.0456901316\t0.0263792098\t3\tMock
 1\t0.2277416667\t0.0061745614\t0.0035648847\t3\tMock
@@ -133,6 +134,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
 
     await page.getByRole("button", { name: /^Raincloud/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByRole("heading", { name: "Raincloud preview" })).toBeVisible();
     const dataInput = page.getByRole("textbox", { name: "CSV or TSV data" });
     await dataInput.fill("broken\nrow");
@@ -217,6 +219,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await yMaximum.press("Enter");
 
     await page.getByRole("button", { name: /^Scatter/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`x\ty\tgroup\tlabel
 1\t2\tBaseline reference cohort\tS1
 2\t3\tEarly treatment responder\tS2
@@ -240,6 +243,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.getByRole("textbox", { name: "X maximum", exact: true }).press("Enter");
     await expect(page.getByText("X minimum must be smaller than X maximum.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: /^Box/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByRole("textbox", { name: "X minimum", exact: true })).toHaveCount(0);
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "SVG" })).toBeEnabled();
@@ -251,6 +255,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
 
     const plotSelect = page.getByRole("combobox", { name: "Plot type" });
     await plotSelect.selectOption("correlation-heatmap");
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
     await expect(page.getByRole("heading", { name: "Correlation heatmap preview" })).toBeVisible();
 
     const paletteToggle = page.getByRole("button", { name: "柴染棕" }).first();
@@ -310,6 +315,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(Math.abs(panelTops.parameters - panelTops.preview)).toBeLessThanOrEqual(1);
 
     await page.getByRole("button", { name: /^Word cloud/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const previewHeading = page.getByRole("heading", { name: "Word cloud preview" });
     await expect(previewHeading).toBeVisible();
     const preview = page.locator('[data-visualization-panel="preview"]');
@@ -330,9 +336,9 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
 
     const guidance = page.locator('[data-plot-guidance="word-cloud"]');
     await guidance.getByRole("button", { name: "展开图形定义与适用场景" }).click();
-    await expect(guidance).toContainText("基本定义");
-    await expect(guidance).toContainText("适合的数据");
-    await expect(guidance).toContainText("适合说明的问题");
+    await expect(guidance).toContainText("Definition");
+    await expect(guidance).toContainText("Suitable data");
+    await expect(guidance).toContainText("Scientific question");
     await guidance.locator("[data-plot-references='word-cloud'] summary").click();
     await expect(guidance.locator("[data-plot-references='word-cloud'] a")).not.toHaveCount(0);
   });
@@ -350,6 +356,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop heatmap controls");
     await page.goto("/");
     await page.getByRole("button", { name: /^Clustered heatmap/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const svg = page.locator("svg[aria-label='Clustered heatmap scientific figure preview']");
     await expect(svg).toHaveAttribute("data-plot-renderer", "advanced");
@@ -415,6 +422,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(plotPanel.getByRole("button", { name: /^Volcano/ })).toBeVisible();
     await expect(plotPanel.getByRole("button", { name: /^Kaplan/ })).toHaveCount(0);
     await plotPanel.getByRole("button", { name: /^Volcano/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByRole("heading", { name: "Volcano preview" })).toBeVisible();
 
     await search.clear();
@@ -432,6 +440,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop ordination controls");
     await page.goto("/");
     await page.getByRole("button", { name: /^PCA/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Supplied coordinates" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("textbox", { name: "PCA coordinates" })).toHaveValue(/sample\tPC1\tPC2\tPC3/);
@@ -521,6 +530,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(pcaSvg.locator("[data-plot-element='ordination-shape-legend']")).toBeVisible();
 
     await page.getByRole("button", { name: /^PCoA/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("button", { name: "Example 2" }).click();
     await page.getByRole("combobox", { name: "View" }).selectOption("3d");
     for (const [label, value] of [["PCoA 1 variance (%)", "41.2"], ["PCoA 2 variance (%)", "22.4"], ["PCoA 3 variance (%)", "11.3"], ["R²", "0.183"], ["P value", "0.004"], ["Permutations", "999"]] as const) {
@@ -543,6 +553,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
 
     for (const name of ["t-SNE", "NMDS"]) {
       await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await expect(page.getByText("Ready", { exact: true })).toBeVisible();
       await expect(page.locator(`svg[aria-label='${name} scientific figure preview'] [data-plot-family='ordination-scores']`)).toBeVisible();
     }
@@ -554,11 +565,13 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     const provenance = page.locator("[data-analysis-provenance]");
 
     await page.getByRole("button", { name: /^PCoA/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "supplied");
     await expect(provenance.getByText("Supplied", { exact: true })).toBeVisible();
     await expect(provenance).toHaveAttribute("data-provenance-detail", /without recomputing PCoA/);
 
     await page.getByRole("button", { name: /^ROC/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
     await expect(provenance.getByText("Calculated in Studio", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Example 2" }).click();
@@ -571,10 +584,12 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(config.analysisProvenance.detail).toMatch(/Time-dependent ROC/);
 
     await page.getByRole("button", { name: /^Kaplan/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
     await expect(provenance).toHaveAttribute("data-provenance-detail", /Kaplan–Meier estimates/);
 
     await page.getByRole("button", { name: /^Clustered heatmap/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
     await page.getByRole("checkbox", { name: "Cluster rows" }).uncheck({ force: true });
     await page.getByRole("checkbox", { name: "Cluster columns" }).uncheck({ force: true });
@@ -582,13 +597,16 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(provenance).toHaveAttribute("data-provenance-detail", /Clustering is disabled/);
 
     await page.getByRole("button", { name: /^Correlation heatmap/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
     await expect(provenance).toHaveAttribute("data-provenance-detail", /correlation matrix/);
 
     await page.getByRole("button", { name: /^Venn/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
     await expect(provenance).toHaveAttribute("data-provenance-detail", /Exact set intersections/);
     await page.getByRole("button", { name: /^UpSet/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(provenance).toHaveAttribute("data-analysis-provenance", "calculated-in-studio");
   });
 
@@ -596,6 +614,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop ordination legend boundary");
     await page.goto("/");
     await page.getByRole("button", { name: /^PCoA/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const crowdedRows = Array.from({ length: 12 }, (_, index) => `${index}\t${index % 3}\tExtremelyWideGroupName${index + 1}\tShape${index % 4 + 1}\tS${index + 1}`);
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`dim1\tdim2\tgroup\tshape\tsample\n${crowdedRows.join("\n")}`);
     await expect(page.getByRole("combobox", { name: "Group" })).toHaveValue("group");
@@ -670,6 +689,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     if (testInfo.project.name === "desktop-chromium") {
       for (const plotType of newPlots) {
         await page.getByRole("button", { name: new RegExp(`^${plotType === "polar-profile" ? "Polar profile" : plotType === "population-pyramid" ? "Population pyramid" : plotType[0].toUpperCase() + plotType.slice(1)}`) }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
         await expect(page.getByText("Ready", { exact: true })).toBeVisible();
         const svg = page.locator(`svg[data-plot-renderer='advanced'][aria-label$='scientific figure preview']`);
         await expect(svg.locator("[data-plot-data]")).toHaveCount(1);
@@ -688,6 +708,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       await expect(page.locator("svg[aria-label='Population pyramid scientific figure preview']")).toContainText("%");
 
       await page.getByRole("button", { name: /^Rose/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await page.getByRole("button", { name: "Reset" }).click();
       const roseConfigEvent = page.waitForEvent("download");
       await page.getByRole("button", { name: "Config" }).click();
@@ -697,6 +718,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       expect(roseConfig.settings.compositionLabelMode).toBe("value");
 
       await page.getByRole("button", { name: /^Pie/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await expect(page.getByRole("textbox", { name: "X-axis label" })).toHaveCount(0);
       await expect(page.getByRole("combobox", { name: "Grid" })).toHaveCount(0);
       const compositionInput = page.getByRole("textbox", { name: "CSV or TSV data" });
@@ -719,11 +741,14 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       expect(clippedPieLabels).toEqual([]);
 
       await page.getByRole("button", { name: /^Sunburst/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await page.getByRole("combobox", { name: "Legend" }).selectOption("right");
+      await page.getByRole("combobox", { name: "Value labels", exact: true }).selectOption("percent"); // Fix the screenshot style independently of the preceding Rose view.
       const previewCard = page.getByRole("heading", { name: "Sunburst preview" }).locator("xpath=ancestor::section");
       await expectStablePreviewScreenshot(page, previewCard, "sunburst-hierarchy-desktop.png", { maxDiffPixels: 100 });
     } else {
       await plotSelect.selectOption("radar");
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
       await expect(page.getByRole("heading", { name: "Radar preview" })).toBeVisible();
       const svgBox = await page.locator("svg[aria-label='Radar scientific figure preview']").boundingBox();
       expect(svgBox).not.toBeNull();
@@ -731,6 +756,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       const previewCard = page.getByRole("heading", { name: "Radar preview" }).locator("xpath=ancestor::section");
       await expectStablePreviewScreenshot(page, previewCard, "radar-profile-mobile.png");
       await plotSelect.selectOption("sunburst");
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
     }
 
     const downloadEvent = page.waitForEvent("download");
@@ -748,6 +774,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
     if (testInfo.project.name === "desktop-chromium") {
       await page.getByRole("button", { name: /^Histogram/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await expect(page.getByRole("checkbox", { name: "Histogram" })).toBeChecked();
       await expect(page.getByRole("checkbox", { name: "Density" })).not.toBeChecked();
       await page.getByRole("button", { name: "Example 2" }).click();
@@ -778,11 +805,13 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       expect(source).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
 
       await page.getByRole("button", { name: /^Ridge/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await expect(page.getByRole("combobox", { name: "Orientation" })).toHaveValue("horizontal");
       await expect(page.getByRole("checkbox", { name: "Density" })).toBeChecked();
       await expect(page.getByRole("checkbox", { name: "Histogram" })).not.toBeChecked();
     } else {
       await page.getByRole("combobox", { name: "Plot type" }).selectOption("ridge");
+    await page.getByRole("button", { name: "Example 1" }).click();
       await expect(page.getByRole("heading", { name: "Ridge preview" })).toBeVisible();
       const svgBox = await page.locator("svg[aria-label='Ridge scientific figure preview']").boundingBox();
       expect(svgBox).not.toBeNull();
@@ -794,12 +823,14 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
     if (testInfo.project.name === "desktop-chromium") {
       await page.getByRole("button", { name: /^Line/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await page.getByRole("combobox", { name: "Error representation" }).selectOption("ci95");
       await page.getByRole("combobox", { name: "Display style" }).selectOption("band");
       await expect(page.getByText("Ready", { exact: true })).toBeVisible();
       await expect(page.locator("svg[aria-label='Line scientific figure preview'] [data-plot-element='line-uncertainty-band']")).toHaveCount(2);
 
       await page.getByRole("button", { name: /^Scatter/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
       await page.getByRole("button", { name: "Example 2" }).click();
       await page.getByRole("checkbox", { name: "Swap axes" }).check({ force: true });
       await page.getByRole("combobox", { name: "Variant" }).selectOption("ternary");
@@ -834,6 +865,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       await expect(page.getByRole("combobox", { name: "Legend" })).toHaveCount(0);
     } else {
       await page.getByRole("combobox", { name: "Plot type" }).selectOption("scatter");
+    await page.getByRole("button", { name: "Example 1" }).click();
       await page.getByRole("button", { name: "Example 2" }).click();
       await page.getByRole("combobox", { name: "Variant" }).selectOption("3d");
       const svg = page.locator("svg[aria-label='Scatter scientific figure preview']");
@@ -850,6 +882,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
 
     await page.getByRole("button", { name: /^Manhattan/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const manhattan = page.locator("svg[aria-label='Manhattan scientific figure preview']");
     await expect(manhattan.locator("[data-plot-element='manhattan-point']")).toHaveCount(216);
@@ -888,6 +921,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedManhattanAxisLabels).toEqual([]);
 
     await page.getByRole("button", { name: /^Chromosome ideogram/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("chromosome\tstart\tend\tstain\tband\nVeryLongReferenceContigIdentifier_000001\t0\t100\tgneg\tp1\nchr23\t0\t80\tgpos50\tq1");
     await page.getByRole("button", { name: "Auto-map" }).click();
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
@@ -900,6 +934,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedIdeogramText).toEqual([]);
 
     await page.getByRole("button", { name: /^Genome tracks/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill([
       "chromosome\tstart\tend\tvalue\ttrack\tfeature",
       "VeryLongReferenceContigIdentifier_000001\t0\t100\t1.25\tAccessibility\tPeak_A",
@@ -918,6 +953,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedTrackAxisLabels).toEqual([]);
 
     await page.getByRole("button", { name: /^Mutation waterfall/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const longSampleRows = Array.from({ length: 8 }, (_, index) => `ExtremelyLongTumorSampleIdentifier_${index + 1}\tTP53\t${index % 2 ? "Missense" : "Nonsense"}`);
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(`sample\tgene\talteration\n${longSampleRows.join("\n")}`);
     await page.getByRole("button", { name: "Auto-map" }).click();
@@ -931,6 +967,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedWaterfallLabels).toEqual([]);
 
     await page.getByRole("button", { name: /^Oncoplot/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const oncoplot = page.locator("svg[aria-label='Oncoplot scientific figure preview']");
     expect(await oncoplot.locator("[data-plot-element='oncoplot-cell']").count()).toBeGreaterThan(30);
@@ -941,6 +978,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(oncoplot.locator("[data-plot-element='oncoplot-frequency']")).toHaveCount(0);
 
     await page.getByRole("button", { name: /^Motif logo/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const motif = page.locator("svg[aria-label='Motif logo scientific figure preview']");
     expect(await motif.locator("[data-plot-element='motif-letter']").count()).toBeGreaterThan(20);
@@ -966,6 +1004,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
 
     await page.getByRole("button", { name: /^PPI network/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const ppi = page.locator("svg[aria-label='PPI network scientific figure preview']");
     await expect(ppi.locator("[data-plot-element='network-node']")).toHaveCount(8);
@@ -998,6 +1037,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedNetworkLabels).toEqual([]);
 
     await page.getByRole("button", { name: "Tree Hierarchy", exact: true }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
     await page.getByRole("checkbox", { name: "Show leaf labels" }).check({ force: true });
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const tree = page.locator("svg[aria-label='Tree scientific figure preview']");
@@ -1016,6 +1056,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(clippedTreeNodes).toBe(0);
 
     await page.getByRole("button", { name: "Dendrogram Hierarchical clustering", exact: true }).click();
+    await page.getByRole("button", { name: "Example 1" }).click();
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const dendrogram = page.locator("svg[aria-label='Dendrogram scientific figure preview']");
     await expect(dendrogram.locator("[data-plot-element='dendrogram-branch']")).toHaveCount(8);
@@ -1031,6 +1072,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(await dendrogram.innerHTML()).not.toMatch(/(?:NaN|Infinity|-Infinity|undefined)/);
 
     await page.getByRole("button", { name: /^Network Relationships/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const curvedRows = [
       "record_type\tnode\tsource\ttarget\tweight\tdirection\tsign\tedge_type\tgroup\tnode_type\tnode_value",
       "node\tA\t\t\t\t\t\t\tG\tCell\t1",
@@ -1066,6 +1108,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
 
     await page.getByRole("button", { name: "Sankey Flow" }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const sankey = page.locator("svg[aria-label='Sankey scientific figure preview']");
     expect(await sankey.locator("[data-plot-element='flow-ribbon']").count()).toBeGreaterThan(3);
@@ -1077,6 +1120,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedSankeyText).toBe(0);
 
     await page.getByRole("button", { name: /^Alluvial/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const alluvial = page.locator("svg[aria-label='Alluvial scientific figure preview']");
     expect(await alluvial.locator("[data-plot-element='alluvial-ribbon']").count()).toBeGreaterThan(5);
@@ -1094,11 +1138,13 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(alluvialLabelSafety).toEqual({ collisions: 0, outside: 0 });
 
     await page.getByRole("button", { name: /^Chord/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("source\ttarget\tvalue\nDominant A\tDominant B\t1000\nTiny C\tTiny D\t0.001");
     await expect(page.getByText(/minimum category arc/i)).toBeVisible();
     await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
 
     await page.getByRole("button", { name: /^Ligand–receptor/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const ligandReceptor = page.locator("svg[aria-label='Ligand–receptor scientific figure preview']");
     expect(await ligandReceptor.locator("[data-plot-element='ligand-receptor-edge']").count()).toBeGreaterThan(12);
@@ -1106,6 +1152,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(ligandReceptor).toContainText("Receptor");
 
     await page.getByRole("button", { name: /^Circos/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const circos = page.locator("svg[aria-label='Circos scientific figure preview']");
     await expect(circos.locator("[data-coordinate-system='shared-genomic']")).toHaveCount(1);
@@ -1151,6 +1198,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await page.goto("/");
 
     await page.getByRole("button", { name: /^Venn/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const venn = page.locator("svg[aria-label='Venn scientific figure preview']");
     await expect(venn.locator("[data-plot-family='venn-classic']")).toHaveCount(1);
@@ -1180,6 +1228,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(radialSafety).toEqual({ collisions: 0, outside: 0 });
 
     await page.getByRole("button", { name: /^UpSet/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const upset = page.locator("svg[aria-label='UpSet scientific figure preview']");
     await expect(upset.locator("[data-plot-element='upset-set-summary']")).toHaveCount(3);
@@ -1236,6 +1285,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     ];
     for (const entry of cases) {
       await page.getByRole("button", { name: entry.button }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
       await expect(page.getByText("Ready", { exact: true })).toBeVisible();
       const svg = page.locator(`svg[aria-label='${entry.type} scientific figure preview']`);
       expect(await svg.locator(`[data-plot-element='${entry.element}']`).count()).toBeGreaterThanOrEqual(entry.minimum);
@@ -1245,6 +1295,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     }
 
     await page.getByRole("button", { name: /^Cutoff KM/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const cutoffKm = page.locator("svg[aria-label='Cutoff KM scientific figure preview']");
     await expect(cutoffKm.locator("[data-step-curve='right-continuous']")).toHaveCount(2);
     expect(await cutoffKm.locator("[data-step-curve='right-continuous']").first().getAttribute("d")).toMatch(/^M [\d.]+ [\d.]+(?: H [\d.]+ V [\d.]+)+$/);
@@ -1261,6 +1312,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(censorBounds.every((box) => box.left >= box.canvasLeft - 0.5 && box.right <= box.canvasRight + 0.5 && box.top >= box.canvasTop - 0.5 && box.bottom <= box.canvasBottom + 0.5 && box.clip === "none" && Math.abs(box.anchorX - box.lineCenterX) < 1e-6), JSON.stringify(censorBounds)).toBe(true);
 
     await page.getByRole("button", { name: /^Precision–recall/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("sample\ttruth\tscore\tmodel\nS1\t1\t0.9\tExtremely long externally validated integrated clinical molecular model\nS2\t0\t0.2\tExtremely long externally validated integrated clinical molecular model\nS3\t1\t0.8\tSecond exceptionally long independent prediction model identity\nS4\t0\t0.1\tSecond exceptionally long independent prediction model identity");
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     const precisionRecall = page.locator("svg[aria-label='Precision–recall scientific figure preview']");
@@ -1269,6 +1321,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(escapedModelLabels).toBe(0);
 
     await page.getByRole("button", { name: /^LASSO path/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const lassoRows = ["lambda\tcoefficient\tfeature", ...Array.from({ length: 12 }, (_, feature) => [1, 0.1].map((lambda, point) => `${lambda}\t${(feature + 1) * (point + 1) / 20}\t宽字符临床分子特征名称 ${String(feature + 1).padStart(2, "0")} extraordinarily long suffix`).join("\n"))].join("\n");
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill(lassoRows);
     const legendSize = page.getByRole("textbox", { name: "Legend size value" });
@@ -1279,6 +1332,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(lassoLayout).toEqual({ collisions: 0, escaped: 0 });
 
     await page.getByRole("button", { name: /^Nomogram/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("predictor\tlevel\tpoints\nStage\tNearly identical level alpha\t10\nStage\tNearly identical level beta\t10.1");
     await expect(page.getByText(/overlap within predictor/)).toBeVisible();
     await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
@@ -1289,6 +1343,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(nomogramEscapes).toBe(0);
 
     await page.getByRole("button", { name: /^ROC/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("button", { name: /Example 2.*Time-dependent/ }).click();
     await expect(page.getByRole("combobox", { name: "Input structure" })).toHaveValue("precomputed-time");
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
@@ -1298,6 +1353,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(roc.locator("[data-auc-interval]").first()).toContainText(/AUC.*\[.*–.*\]/);
 
     await page.getByRole("button", { name: /^Decision curve/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "Minimum threshold value" }).fill("0.01");
     await page.getByRole("textbox", { name: "Minimum threshold value" }).press("Enter");
     await page.getByRole("textbox", { name: "Grid resolution value" }).fill("0.01");
@@ -1327,6 +1383,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     ];
     for (const entry of cases) {
       await page.getByRole("button", { name: entry.button }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Load the requested fixture explicitly.
       await expect(page.getByText("Ready", { exact: true })).toBeVisible();
       const svg = page.locator(`svg[aria-label='${entry.type} scientific figure preview']`);
       expect(await svg.locator(`[data-plot-element='${entry.element}']`).count(), entry.type).toBeGreaterThanOrEqual(entry.minimum);
@@ -1336,11 +1393,13 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
       await expect(page.getByRole("button", { name: "SVG" })).toBeEnabled();
     }
     await page.getByRole("button", { name: /^Multi-GSEA/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const gsea = page.locator("svg[aria-label='Multi-GSEA scientific figure preview']");
     expect(await gsea.locator("[data-plot-element='multi-gsea-hit']").count()).toBeGreaterThanOrEqual(27);
     await expect(gsea.locator("text[data-full-label]").first()).toContainText(/NES.*FDR/);
     for (const footerCase of [{ name: /^Multi-GSEA/, type: "Multi-GSEA" }, { name: /^Enrichment ridge/, type: "Enrichment ridge" }]) {
       await page.getByRole("button", { name: footerCase.name }).click();
+      await page.getByRole("button", { name: "Example 1" }).click();
       await page.getByRole("textbox", { name: "Tick size value", exact: true }).fill("16");
       await page.getByRole("textbox", { name: "Tick size value", exact: true }).press("Enter");
       if (footerCase.type === "Multi-GSEA") {
@@ -1359,6 +1418,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     }
 
     await page.getByRole("button", { name: /^GO circle/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await expect(page.getByLabel("1 · BP")).toBeVisible();
     await expect(page.getByLabel("2 · CC")).toBeVisible();
     await expect(page.getByLabel("3 · MF")).toBeVisible();
@@ -1383,6 +1443,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(circleFooterSafe).toBe(true);
 
     await page.getByRole("button", { name: /^Pathway impact/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "Point size value", exact: true }).fill("12");
     await page.getByRole("textbox", { name: "Point size value", exact: true }).press("Enter");
     await page.getByRole("textbox", { name: "Tick size value", exact: true }).fill("16");
@@ -1402,6 +1463,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(pathwayFooterSafe).toBe(true);
 
     await page.getByRole("button", { name: /^GO chord/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     const chordFooterSafe = await page.locator("svg[aria-label='GO chord scientific figure preview']").evaluate((element) => {
       const selectors = ["[data-plot-element='go-chord-effect-legend']", "[data-plot-element='category-footer-legend']", "[data-plot-element='method-note']"];
       const boxes = selectors.map((selector) => element.querySelector<SVGGraphicsElement>(selector)?.getBBox()).filter((box): box is DOMRect => Boolean(box));
@@ -1410,6 +1472,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     expect(chordFooterSafe).toBe(true);
 
     await page.getByRole("button", { name: /^Geographic point map/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("textbox", { name: "Tick size value", exact: true }).fill("11");
     await page.getByRole("textbox", { name: "Tick size value", exact: true }).press("Enter");
     await page.getByRole("checkbox", { name: "Labels" }).check({ force: true });
@@ -1448,6 +1511,7 @@ siFBN2-9706\t0.07\t0.04\tFBN2`);
     await expect(page.getByRole("button", { name: "SVG" })).toBeDisabled();
 
     await page.getByRole("button", { name: /^Petal/ }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
     await page.getByRole("checkbox", { name: "Labels" }).check({ force: true });
     await page.getByRole("textbox", { name: "CSV or TSV data" }).fill("category\tvalue\nA very long category on the right\t8\nA long category at the bottom\t7\nA very long category on the left\t6\nA long category at the top\t5");
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();

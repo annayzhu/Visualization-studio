@@ -26,6 +26,7 @@ test('guidance reclaims usable parameters, preserves export and keyboard focus',
   await last.scrollIntoViewIfNeeded(); await expect(last).toBeInViewport();
   expect(await downloadConfig()).toEqual(before);
   await page.getByRole('button', { name: /^Scatter / }).click();
+    await page.getByRole("button", { name: "Example 1" }).click(); // Explicitly opt into the fixture; plot changes retain input.
   await expect(close).toHaveAttribute('aria-expanded', 'true');
   await close.focus(); await page.keyboard.press('Space'); await expect(button).toBeFocused();
   const width = page.getByRole('textbox', { name: 'Width value', exact: true });

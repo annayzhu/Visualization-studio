@@ -1,3 +1,4 @@
+import { inspectTable } from './studio-data';
 import {
   createPlotModuleRegistry,
   type PlotDataShape,
@@ -3763,73 +3764,17 @@ export function getPlotExamples(definition: PlotDefinition): PlotDataExample[] {
   return [...getPlotModule(definition.id).examples];
 }
 
-function detectDelimiter(line: string) {
-  return line.includes("\t") ? "\t" : ",";
-}
-
-function splitDelimitedLine(line: string, delimiter: string) {
-  if (delimiter === "\t") return line.split("\t").map((value) => value.trim());
-
-  const cells: string[] = [];
-  let current = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    if (character === '"') {
-      if (quoted && line[index + 1] === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (character === delimiter && !quoted) {
-      cells.push(current.trim());
-      current = "";
-    } else {
-      current += character;
-    }
-  }
-  cells.push(current.trim());
-  return cells;
-}
-
 export function parseDelimitedData(raw: string): ParsedDataset {
-  const lines = raw.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
-  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
-  if (nonEmptyLines.length === 0) {
-    return { headers: [], rows: [], delimiter: "tab", errors: ["Paste tab- or comma-delimited data."], warnings: [] };
-  }
-
-  const delimiter = detectDelimiter(nonEmptyLines[0]);
-  const headers = splitDelimitedLine(nonEmptyLines[0], delimiter);
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  if (headers.some((header) => header.length === 0)) errors.push("Every column must have a header.");
-  if (new Set(headers).size !== headers.length) errors.push("Column headers must be unique.");
-
-  const rows: DelimitedRow[] = [];
-  nonEmptyLines.slice(1).forEach((line, rowIndex) => {
-    const cells = splitDelimitedLine(line, delimiter);
-    if (cells.length !== headers.length) {
-      errors.push(`Row ${rowIndex + 2} has ${cells.length} values; expected ${headers.length}.`);
-      return;
-    }
-    rows.push(Object.fromEntries(headers.map((header, index) => [header, cells[index]])));
-  });
-
-  if (rows.length === 0 && errors.length === 0) errors.push("The dataset needs at least one data row.");
-  const blankCells = rows.reduce((count, row) => count + headers.filter((header) => row[header] === "").length, 0);
-  if (blankCells > 0) warnings.push(`${blankCells} blank cell${blankCells === 1 ? "" : "s"} detected.`);
-  if (rows.length > 5_000) warnings.push("More than 5,000 rows may reduce browser preview performance.");
-
-  return {
-    headers,
-    rows,
-    delimiter: delimiter === "\t" ? "tab" : "comma",
-    errors: errors.slice(0, 8),
-    warnings,
-  };
+  try {
+    const report = inspectTable(raw);
+    const { headers, rows } = report.table;
+    const blocked = report.issues.some(issue => issue.severity === 'error');
+    const missing = report.issues.filter(issue => issue.code === 'missing').length;
+    return { headers, rows: (blocked ? [] : rows).map(cells => Object.fromEntries(headers.map((header,index) => [header,cells[index] ?? '']))),
+      delimiter: raw.split('\n')[0].includes('\t') ? 'tab' : 'comma',
+      errors: report.issues.filter(issue => issue.severity === 'error').map(issue => `${issue.row ? `Row ${issue.row}: ` : ''}${issue.message}`),
+      warnings: [...(missing ? [`${missing} blank cell${missing === 1 ? '' : 's'} detected.`] : []), ...report.issues.filter(issue => issue.severity === 'warning' && issue.code !== 'missing').map(issue => issue.message).filter((message,index,all) => all.indexOf(message) === index)] };
+  } catch (error) { return { headers: [], rows: [], delimiter: 'tab', errors: [String(error)], warnings: [] }; }
 }
 
 export function parseNumericValue(value: string | undefined) {
@@ -3949,7 +3894,8 @@ export function alignHeatmapAnnotations(text: string, targetIds: string[], targe
   if (parsed.headers.length < 2) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotations need an ID column and at least one track.`);
   if (parsed.headers.length > 7) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotations are limited to six tracks in the browser preview.`);
   const idColumn = parsed.headers[0] ?? "id";
-  const ids = parsed.rows.map((row) => row[idColumn]?.trim()).filter(Boolean);
+  const ids = parsed.rows.map((row) => row[idColumn] ?? "");
+  if(ids.some(id=>!id.trim()))errors.push("Annotation IDs must not be blank.");
   const duplicateIds = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
   if (duplicateIds.length > 0) errors.push(`${targetLabel === "row" ? "Row" : "Column"} annotation IDs must be unique; duplicates: ${duplicateIds.slice(0, 6).join(", ")}.`);
   const idSet = new Set(ids);
@@ -3966,7 +3912,7 @@ export function alignHeatmapAnnotations(text: string, targetIds: string[], targe
     const declaration = header.match(/^(.*?)\s*\[(categorical|continuous)\]\s*$/i);
     const name = declaration?.[1]?.trim() || header;
     const declaredKind = declaration?.[2]?.toLowerCase() as "categorical" | "continuous" | undefined;
-    const values = new Map(parsed.rows.map((row) => [row[idColumn]?.trim(), row[header]?.trim() ?? ""]));
+    const values = new Map(parsed.rows.map((row) => [row[idColumn] ?? "", row[header] ?? ""]));
     const matchedValues = targetIds.map((id) => values.get(id) ?? "").filter((value) => value !== "");
     const numericValues = matchedValues.map((value) => parseNumericValue(value));
     const allNumeric = matchedValues.length > 0 && numericValues.every((value) => value !== null);
@@ -4134,7 +4080,7 @@ export function validatePlotDataset(
     if (dataset.headers.length < 3) errors.push("Heatmap data needs one row-label column and at least two numeric sample columns.");
     const labelHeader = dataset.headers[0];
     const numericHeaders = dataset.headers.slice(1);
-    const rowIds = dataset.rows.map((row) => row[labelHeader]?.trim()).filter(Boolean);
+    const rowIds = dataset.rows.map((row) => row[labelHeader] ?? "").filter(id=>id.trim().length>0);
     if (rowIds.length !== dataset.rows.length) errors.push("Heatmap row identifiers must not be blank.");
     if (new Set(rowIds).size !== rowIds.length) errors.push("Heatmap row identifiers must be unique so annotations and labels align reproducibly.");
     const invalid = dataset.rows.filter((row) => numericHeaders.some((header) => parseNumericValue(row[header]) === null));

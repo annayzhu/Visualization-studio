@@ -1,0 +1,11 @@
+'use client';
+import { useRef, useState } from 'react';
+import { Button } from './ui/Button';
+import { readLocalFile, type ImportedSheet } from '@/lib/studio-import';
+import { inspectTable, alignAnnotation, tableText } from '@/lib/studio-data';
+import { downloadLocal } from './StudioProjectPanel';
+export function StudioAnnotationImport({axis,ids,onImport}:{axis:'row'|'column';ids:string[];onImport:(text:string)=>void}) {
+ const fileRef=useRef<HTMLInputElement>(null), [sheets,setSheets]=useState<ImportedSheet[]>([]), [message,setMessage]=useState('');
+ const accept=(sheet:ImportedSheet)=>{try{const report=inspectTable(sheet.text,{name:`${axis} annotation`});const matching=alignAnnotation(ids,report.table);const details=`Missing / 缺失: ${matching.missing.join(', ') || '0'}; extra / 多余: ${matching.extra.join(', ') || '0'}; duplicates / 重复: ${matching.duplicates.join(', ') || '0'}; blank / 空ID: ${matching.blank}`;setMessage(details);if(report.issues.some(issue=>issue.severity==='error') || matching.duplicates.length || matching.blank)throw new Error(`Annotation blocked / 注释未应用. ${details}`);onImport(sheet.text);setSheets([]);}catch(error){setMessage(String(error));}};
+ return <div className="grid gap-1"><div className="flex flex-wrap gap-2"><Button size="sm" onClick={()=>fileRef.current?.click()}>Import {axis} annotations / 导入{axis==='row'?'行':'列'}注释</Button><Button size="sm" onClick={()=>downloadLocal(tableText({headers:['id','group[categorical]'],rows:ids.map(id=>[id,''])}),`${axis}-annotation-template.tsv`,'text/tab-separated-values')}>Template / 模板</Button></div><input ref={fileRef} aria-label={`${axis} annotation file`} className="hidden" type="file" accept=".csv,.tsv,.xls,.xlsx" onChange={async event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;try{const sheets=await readLocalFile(file);if(sheets.length>1)setSheets(sheets);else accept(sheets[0]);}catch(error){setMessage(String(error));}}}/>{sheets.length?<select aria-label={`${axis} annotation worksheet`} defaultValue="" onChange={event=>accept(sheets[Number(event.target.value)])}><option value="" disabled>Choose worksheet / 选择工作表</option>{sheets.map((sheet,index)=><option key={index} value={index}>{sheet.name}</option>)}</select>:null}{message?<p role="status" className="break-words text-xs text-graphite">{message}</p>:null}</div>;
+}

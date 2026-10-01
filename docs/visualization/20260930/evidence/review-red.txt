@@ -1,0 +1,77 @@
+
+ RUN  v4.1.11 /private/tmp/visualization-studio-p0-20260930
+
+ ❯ src/lib/studio-project.test.ts (11 tests | 6 failed) 15ms
+   × rejects unknown barAnalysisMode without guessing scientific settings 3ms
+   × rejects unknown barPAdjustment without guessing scientific settings 1ms
+   × rejects unknown heatmapScale without guessing scientific settings 1ms
+   × rejects unknown correlationMethod without guessing scientific settings 1ms
+   × rejects unknown fontFamily without guessing scientific settings 1ms
+   × rejects a non-text figure name before rendering imported tabs 1ms
+ ❯ src/lib/studio-workflow.test.ts (14 tests | 1 failed) 58ms
+   × infers both target mappings when sharing an enrichment bar result 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/studio-project.test.ts > rejects unknown barAnalysisMode without guessing scientific settings
+ FAIL  src/lib/studio-project.test.ts > rejects unknown barPAdjustment without guessing scientific settings
+ FAIL  src/lib/studio-project.test.ts > rejects unknown heatmapScale without guessing scientific settings
+ FAIL  src/lib/studio-project.test.ts > rejects unknown correlationMethod without guessing scientific settings
+ FAIL  src/lib/studio-project.test.ts > rejects unknown fontFamily without guessing scientific settings
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/lib/studio-project.test.ts:40:53
+     38| it.each(['barAnalysisMode','barPAdjustment','heatmapScale','correlatio…
+     39|  const project=createProject();Object.assign(project.figures[0].settin…
+     40|  expect(()=>decodeProject(JSON.stringify(project))).toThrow(/setting/);
+       |                                                     ^
+     41| });
+     42| it('rejects a non-text figure name before rendering imported tabs',()=…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/lib/studio-project.test.ts > rejects a non-text figure name before rendering imported tabs
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/lib/studio-project.test.ts:44:53
+     42| it('rejects a non-text figure name before rendering imported tabs',()=…
+     43|  const project=createProject();Object.assign(project.figures[0],{name:…
+     44|  expect(()=>decodeProject(JSON.stringify(project))).toThrow(/figure/);
+       |                                                     ^
+     45| });
+     46|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/lib/studio-workflow.test.ts > infers both target mappings when sharing an enrichment bar result
+AssertionError: expected undefined to be 'count' // Object.is equality
+
+- Expected:
+"count"
+
++ Received:
+undefined
+
+ ❯ src/lib/studio-workflow.test.ts:58:47
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 18 passed (25)
+   Start at  10:13:39
+   Duration  459ms (transform 444ms, setup 0ms, import 567ms, tests 73ms, environment 0ms)
+

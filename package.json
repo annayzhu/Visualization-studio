@@ -23,7 +23,8 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "read-excel-file": "^9.2.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

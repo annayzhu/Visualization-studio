@@ -1,0 +1,106 @@
+[WebServer] (node:70096) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 86 tests using 6 workers
+
+(node:70103) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70100) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70101) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70099) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70104) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70102) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  -   2 [mobile-chromium] › tests/e2e/guidance-20260920.spec.ts:4:5 › guidance reclaims usable parameters, preserves export and keyboard focus
+  -   5 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:15:7 › Visualization Studio browser acceptance › calculates auditable Bar statistics for raw, summary, paired, and qPCR examples
+  -   8 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:49:7 › Visualization Studio browser acceptance › keeps rotated bar categories clear of the X-axis title
+  -   9 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:93:7 › Visualization Studio browser acceptance › uses actual time points and calculates adjusted line significance
+  -  10 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:132:7 › Visualization Studio browser acceptance › selects, resets, remaps, adjusts, and exports a representative plot
+  ✓   7 [mobile-chromium] › tests/e2e/guidance-20260920.spec.ts:38:5 › all guidance remains reachable on short and narrow screens (1.4s)
+  ✓  11 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:252:7 › Visualization Studio browser acceptance › keeps mobile plot and palette selectors compact (1.3s)
+  -  13 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:286:7 › Visualization Studio browser acceptance › applies a restrained minimal palette to categorical marks
+  ✓   4 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:4:5 › retains data through language, plot switching, project export and fresh-session restore (2.5s)
+  ✓   3 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:15:7 › Visualization Studio browser acceptance › calculates auditable Bar statistics for raw, summary, paired, and qPCR examples (2.5s)
+  -  14 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:296:7 › Visualization Studio browser acceptance › renders redesigned traditional and journal colors
+  ✓   1 [desktop-chromium] › tests/e2e/guidance-20260920.spec.ts:4:5 › guidance reclaims usable parameters, preserves export and keyboard focus (2.5s)
+  ✓   6 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:4:5 › retains data through language, plot switching, project export and fresh-session restore (2.6s)
+  -  17 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:307:7 › Visualization Studio browser acceptance › keeps the desktop workbench aligned and brings a distant selection fully into view
+  ✓  20 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:346:7 › Visualization Studio browser acceptance › exposes every module through the compact mobile selector (407ms)
+  ✓  15 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:31:5 › failed persistence offers export without claiming successful save (612ms)
+  -  21 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:355:7 › Visualization Studio browser acceptance › configures reproducible heatmap structure without clipping the compact export
+  ✓  19 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:31:5 › failed persistence offers export without claiming successful save (547ms)
+  -  23 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:416:7 › Visualization Studio browser acceptance › searches the plot catalog and recommends plots by scientific question
+  -  25 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:439:7 › Visualization Studio browser acceptance › distinguishes supplied PCA coordinates from a reproducible in-browser matrix calculation
+  -  26 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:562:7 › Visualization Studio browser acceptance › reports analysis provenance across supplied and in-browser workflows
+  -  27 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:613:7 › Visualization Studio browser acceptance › blocks crowded combined ordination legends until the export canvas can contain them
+  -  28 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:640:7 › Visualization Studio browser acceptance › switches categorical variants and computes long-form uncertainty
+  ✓  12 [mobile-chromium] › tests/e2e/guidance-20260920.spec.ts:50:5 › saved explicit legacy palette colors survive preset redesign and reload (1.7s)
+  ✓  16 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:49:7 › Visualization Studio browser acceptance › keeps rotated bar categories clear of the X-axis title (1.2s)
+  ✓  22 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:38:5 › declared ID and numeric preflight blocks malformed data without replacing text (655ms)
+  ✓  24 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:38:5 › declared ID and numeric preflight blocks malformed data without replacing text (690ms)
+  ✓  29 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:684:7 › Visualization Studio browser acceptance › renders composition and profile families responsively and exports finite SVG (885ms)
+  ✓  18 [desktop-chromium] › tests/e2e/guidance-20260920.spec.ts:38:5 › all guidance remains reachable on short and narrow screens (2.1s)
+  ✓  30 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:93:7 › Visualization Studio browser acceptance › uses actual time points and calculates adjusted line significance (926ms)
+  ✓  31 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:50:66 › from enrichment: reuses a full enrichment result across two figures and warns after source edits (1.1s)
+  ✓  32 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:50:66 › from enrichment: reuses a full enrichment result across two figures and warns after source edits (1.2s)
+  ✓  33 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:773:7 › Visualization Studio browser acceptance › composes distribution layers, paired facets, and orientation responsively (691ms)
+  ✓  38 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:822:7 › Visualization Studio browser acceptance › configures line uncertainty and advanced association views (774ms)
+  -  39 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:880:7 › Visualization Studio browser acceptance › renders genomic association, cancer alterations, and motif logos with bounded geometry
+  ✓  36 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:50:66 › from enrichment-bar: reuses a full enrichment result across two figures and warns after source edits (1.2s)
+  ✓  34 [desktop-chromium] › tests/e2e/guidance-20260920.spec.ts:50:5 › saved explicit legacy palette colors survive preset redesign and reload (1.4s)
+  -  40 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:1002:7 › Visualization Studio browser acceptance › renders typed reproducible networks and hierarchy-specific trees safely
+  -  42 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:1106:7 › Visualization Studio browser acceptance › renders conserved flows and a shared-coordinate multi-track Circos
+  ✓  37 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:50:66 › from enrichment-bar: reuses a full enrichment result across two figures and warns after source edits (1.1s)
+  -  43 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:1196:7 › Visualization Studio browser acceptance › counts, lays out, and downloads exact Venn and UpSet intersections
+  -  45 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:1272:7 › Visualization Studio browser acceptance › renders clinical evaluation modules with explicit assumptions and uncertainty
+  -  46 [mobile-chromium] › tests/e2e/visualization-studio.spec.ts:1368:7 › Visualization Studio browser acceptance › renders enrichment and specialized scientific views with explicit quantitative limits
+  ✓  35 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:132:7 › Visualization Studio browser acceptance › selects, resets, remaps, adjusts, and exports a representative plot (2.3s)
+  -  47 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:252:7 › Visualization Studio browser acceptance › keeps mobile plot and palette selectors compact
+  ✓  41 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy bar example 4 through a new browser context (1.2s)
+  ✓  44 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy bar example 4 through a new browser context (1.2s)
+  ✓  48 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:286:7 › Visualization Studio browser acceptance › applies a restrained minimal palette to categorical marks (518ms)
+  ✓  51 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:296:7 › Visualization Studio browser acceptance › renders redesigned traditional and journal colors (480ms)
+  ✓  49 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy bar example 5 through a new browser context (1.1s)
+  ✓  50 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy bar example 5 through a new browser context (1.0s)
+  ✓  52 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:307:7 › Visualization Studio browser acceptance › keeps the desktop workbench aligned and brings a distant selection fully into view (647ms)
+  -  55 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:346:7 › Visualization Studio browser acceptance › exposes every module through the compact mobile selector
+  ✓  53 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy pca example 1 through a new browser context (1.0s)
+  ✓  54 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy pca example 1 through a new browser context (1.1s)
+  ✓  56 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:355:7 › Visualization Studio browser acceptance › configures reproducible heatmap structure without clipping the compact export (1.1s)
+  ✓  57 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy heatmap example 1 through a new browser context (1.1s)
+  ✓  59 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:416:7 › Visualization Studio browser acceptance › searches the plot catalog and recommends plots by scientific question (744ms)
+  ✓  58 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy heatmap example 1 through a new browser context (1.2s)
+  ✓  60 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy venn example 1 through a new browser context (1.1s)
+  ✓  62 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy venn example 1 through a new browser context (1.1s)
+  ✓  63 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy upset example 1 through a new browser context (1.1s)
+  ✓  61 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:439:7 › Visualization Studio browser acceptance › distinguishes supplied PCA coordinates from a reproducible in-browser matrix calculation (2.1s)
+  ✓  64 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy upset example 1 through a new browser context (1.1s)
+  ✓  65 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy enrichment example 1 through a new browser context (1.1s)
+  ✓  67 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:71:6 › roundtrips legacy enrichment example 1 through a new browser context (1.2s)
+  ✓  66 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:562:7 › Visualization Studio browser acceptance › reports analysis provenance across supplied and in-browser workflows (1.5s)
+  ✓  68 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:88:5 › imports both heatmap annotation axes by exact ID and retains them in a project (669ms)
+  ✓  69 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:88:5 › imports both heatmap annotation axes by exact ID and retains them in a project (634ms)
+  ✓  70 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:613:7 › Visualization Studio browser acceptance › blocks crowded combined ordination legends until the export canvas can contain them (652ms)
+  ✓  71 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:102:5 › retains edits made while a project file is being read (512ms)
+  ✓  72 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:102:5 › retains edits made while a project file is being read (487ms)
+  ✓  74 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:111:5 › keeps the editor recoverable when an active transformation preview receives oversized input (512ms)
+  ✓  75 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:111:5 › keeps the editor recoverable when an active transformation preview receives oversized input (571ms)
+  ✓  73 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:640:7 › Visualization Studio browser acceptance › switches categorical variants and computes long-form uncertainty (1.6s)
+  ✓  76 [mobile-chromium] › tests/e2e/studio-project-p0.spec.ts:122:5 › prepares a derived table with undo redo and restores a favorite preset (1.6s)
+  ✓  77 [desktop-chromium] › tests/e2e/studio-project-p0.spec.ts:122:5 › prepares a derived table with undo redo and restores a favorite preset (1.3s)
+  ✓  78 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:684:7 › Visualization Studio browser acceptance › renders composition and profile families responsively and exports finite SVG (1.8s)
+  ✓  79 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:773:7 › Visualization Studio browser acceptance › composes distribution layers, paired facets, and orientation responsively (855ms)
+  ✓  80 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:822:7 › Visualization Studio browser acceptance › configures line uncertainty and advanced association views (748ms)
+  ✓  81 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:880:7 › Visualization Studio browser acceptance › renders genomic association, cancer alterations, and motif logos with bounded geometry (1.3s)
+  ✓  82 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:1002:7 › Visualization Studio browser acceptance › renders typed reproducible networks and hierarchy-specific trees safely (1.0s)
+  ✓  83 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:1106:7 › Visualization Studio browser acceptance › renders conserved flows and a shared-coordinate multi-track Circos (1.1s)
+  ✓  84 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:1196:7 › Visualization Studio browser acceptance › counts, lays out, and downloads exact Venn and UpSet intersections (725ms)
+  ✓  85 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:1272:7 › Visualization Studio browser acceptance › renders clinical evaluation modules with explicit assumptions and uncertainty (1.7s)
+  ✓  86 [desktop-chromium] › tests/e2e/visualization-studio.spec.ts:1368:7 › Visualization Studio browser acceptance › renders enrichment and specialized scientific views with explicit quantitative limits (2.3s)
+
+  22 skipped
+  64 passed (29.6s)

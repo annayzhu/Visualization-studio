@@ -1,6 +1,6 @@
 # Engineering integration
 
-Visualization Studio is a standalone Next.js 16 application. Its scientific calculations, uploaded inputs, previews, and exports run in the browser; it has no database or upload API. The safest integration keeps this repository as an independently built application and mounts it at a stable web path.
+Visualization Studio is a standalone Next.js 16 application. Its scientific calculations, uploaded inputs, previews, and exports run in the browser; it has no database or upload API. The one server route, `/api/ai/plan/`, is the optional figure-assistant proxy; see [AI figure assistant](ai/README.md) for `STUDIO_AI_PROXY` and `STUDIO_AI_ALLOWED_HOSTS`. The safest integration keeps this repository as an independently built application and mounts it at a stable web path.
 
 ## Deliverables for an engineer
 

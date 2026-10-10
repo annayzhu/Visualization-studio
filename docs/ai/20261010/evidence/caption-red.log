@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /Users/annayzhu/Documents/Playground/LabNest/.local-runtime/studio-ai-deepseek-20261010
+
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > fails a time-course answer that omits the series requested by the scientist 6ms
+ × src/lib/studio-ai-eval.test.ts > assistant evaluation harness > does not award a complete answer when both caption drafts are absent 4ms
+   → expected 1 to be +0 // Object.is equality
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > every case has a usable table and a valid reference answer 15ms
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > scores a reference model that answers every case correctly as 10/10, and a wrong one as 0 7ms
+ ↓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > live model passes at least 8 of 10 cases
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/studio-ai-eval.test.ts > assistant evaluation harness > does not award a complete answer when both caption drafts are absent
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/lib/studio-ai-eval.test.ts:24:27
+     22|       plotType: "scatter", mapping: { x: "x", y: "y" },
+     23|     }), evalCases.filter((item) => item.id === "two-numeric"));
+     24|     expect(result.passed).toBe(0);
+       |                           ^
+     25|     expect(result.outcomes[0].reason).toContain("caption");
+     26|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed | 1 skipped (5)
+   Start at  01:22:45
+   Duration  383ms (transform 213ms, setup 0ms, import 255ms, tests 34ms, environment 0ms)
+

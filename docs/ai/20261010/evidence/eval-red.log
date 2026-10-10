@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /Users/annayzhu/Documents/Playground/LabNest/.local-runtime/studio-ai-deepseek-20261010
+
+ × src/lib/studio-ai-eval.test.ts > assistant evaluation harness > fails a time-course answer that omits the series requested by the scientist 10ms
+   → expected 1 to be +0 // Object.is equality
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > every case has a usable table and a valid reference answer 16ms
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > scores a reference model that answers every case correctly as 10/10, and a wrong one as 0 7ms
+ ↓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > live model passes at least 8 of 10 cases
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/studio-ai-eval.test.ts > assistant evaluation harness > fails a time-course answer that omits the series requested by the scientist
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/lib/studio-ai-eval.test.ts:16:27
+     14|       caption: { en: "Measurement over time by series.", zh: "按系列展示随时间…
+     15|     }), cases);
+     16|     expect(result.passed).toBe(0);
+       |                           ^
+     17|     expect(result.outcomes[0].reason).toContain("series");
+     18|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed | 1 skipped (4)
+   Start at  01:20:23
+   Duration  414ms (transform 233ms, setup 0ms, import 276ms, tests 34ms, environment 0ms)
+

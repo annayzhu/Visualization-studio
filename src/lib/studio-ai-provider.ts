@@ -1,6 +1,6 @@
 "use client";
 import type { AIContext } from "./studio-ai-context";
-import type { ProviderType } from "./studio-ai-types";
+import { providerTypes, type ProviderType } from "./studio-ai-types";
 
 /**
  * Browser-side model connection settings. They stay on this device: in sessionStorage by
@@ -13,6 +13,7 @@ export type ProviderSettings = { type: ProviderType; baseUrl: string; model: str
 const STORAGE_KEY = "studio.ai.provider";
 
 export const providerLabels: Record<ProviderType, string> = {
+  deepseek: "DeepSeek",
   dify: "Dify app (e.g. ZJU aihub)",
   openai_compatible: "OpenAI-compatible (Qwen, OpenAI, vLLM…)",
   anthropic: "Anthropic",
@@ -24,7 +25,7 @@ export function readProviderSettings(): ProviderSettings | null {
       const value = store().getItem(STORAGE_KEY);
       if (!value) continue;
       const parsed = JSON.parse(value) as Partial<ProviderSettings>;
-      if (parsed.type && typeof parsed.baseUrl === "string" && typeof parsed.apiKey === "string") {
+      if (parsed.type && providerTypes.includes(parsed.type) && typeof parsed.baseUrl === "string" && typeof parsed.apiKey === "string") {
         return { type: parsed.type, baseUrl: parsed.baseUrl, model: parsed.model ?? "", apiKey: parsed.apiKey, remember: Boolean(parsed.remember) };
       }
     } catch {

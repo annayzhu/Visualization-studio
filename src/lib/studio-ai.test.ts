@@ -123,6 +123,16 @@ describe("upstream calls", () => {
   }) as typeof fetch;
   afterEach(() => { replies.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
+  it("connects the DeepSeek preset through its official OpenAI-compatible endpoint", async () => {
+    const result = await callUpstream({ type: "deepseek", baseUrl: "", model: "deepseek-flash", apiKey: "synthetic-deepseek-key" }, "sys", "usr", {
+      fetchImpl: fake({ model: "deepseek-flash", choices: [{ message: { content: '{"plotType":"bar"}' } }] }),
+    });
+    expect(replies[0].url).toBe("https://api.deepseek.com/chat/completions");
+    expect(JSON.parse(String(replies[0].init.body)).model).toBe("deepseek-flash");
+    expect(new Headers(replies[0].init.headers).get("authorization")).toBe("Bearer synthetic-deepseek-key");
+    expect(result.text).toBe('{"plotType":"bar"}');
+  });
+
   it("speaks the three provider dialects", async () => {
     await callUpstream({ type: "openai_compatible", baseUrl: "https://m.example/v1/", model: "qwen-plus", apiKey: "k1" }, "sys", "usr", { fetchImpl: fake({ model: "qwen-plus", choices: [{ message: { content: "{}" } }] }) });
     await callUpstream({ type: "dify", baseUrl: "https://aihub.example/v1", model: "", apiKey: "k2" }, "sys", "usr", { fetchImpl: fake({ answer: "{}" }) });
@@ -138,6 +148,13 @@ describe("upstream calls", () => {
     expect(() => checkAllowedHost("https://evil.internal/v1", "aihub.zju.edu.cn")).toThrow(/not in STUDIO_AI_ALLOWED_HOSTS/);
     expect(checkAllowedHost("https://aihub.zju.edu.cn/v1/", "aihub.zju.edu.cn")).toBe("https://aihub.zju.edu.cn/v1");
     expect(() => checkAllowedHost("file:///etc/passwd", "")).toThrow(/http/);
+  });
+
+  it("never follows a redirect carrying a model credential outside the allowed endpoint", async () => {
+    await callUpstream({ type: "deepseek", baseUrl: "", model: "deepseek-flash", apiKey: "synthetic-key" }, "s", "u", {
+      fetchImpl: fake({ choices: [{ message: { content: "OK" } }] }),
+    });
+    expect(replies[0].init.redirect).toBe("error");
   });
 });
 

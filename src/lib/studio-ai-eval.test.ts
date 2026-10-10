@@ -7,6 +7,23 @@ import { callUpstream } from "./studio-ai-upstream";
 import type { ProviderType } from "./studio-ai-types";
 
 describe("assistant evaluation harness", () => {
+  it("fails a time-course answer that omits the series requested by the scientist", async () => {
+    const cases = evalCases.filter((item) => item.id === "time-course");
+    const result = await runEval(async () => JSON.stringify({
+      plotType: "line", mapping: { x: "time", value: "value" },
+      caption: { en: "Measurement over time by series.", zh: "按系列展示随时间变化的测量值。" },
+    }), cases);
+    expect(result.passed).toBe(0);
+    expect(result.outcomes[0].reason).toContain("series");
+  });
+
+  it("does not award a complete answer when both caption drafts are absent", async () => {
+    const result = await runEval(async () => JSON.stringify({
+      plotType: "scatter", mapping: { x: "x", y: "y" },
+    }), evalCases.filter((item) => item.id === "two-numeric"));
+    expect(result.passed).toBe(0);
+    expect(result.outcomes[0].reason).toContain("caption");
+  });
   it("every case has a usable table and a valid reference answer", () => {
     for (const item of evalCases) {
       const { dataset, startPlot } = caseContext(item);
@@ -21,7 +38,7 @@ describe("assistant evaluation harness", () => {
     const reference = async () => {
       const item = evalCases[index++];
       const { dataset } = caseContext(item);
-      return JSON.stringify({ plotType: item.accept[0], mapping: referenceMapping(item.accept[0], dataset.headers), caption: { en: "", zh: "" }, rationale: "", questions: [] });
+      return JSON.stringify({ plotType: item.accept[0], mapping: referenceMapping(item.accept[0], dataset.headers), caption: { en: "Synthetic example; verify before use.", zh: "合成示例；使用前请核对。" }, rationale: "", questions: [] });
     };
     const good = await runEval(reference);
     expect(good.outcomes.filter((outcome) => !outcome.passed)).toEqual([]);

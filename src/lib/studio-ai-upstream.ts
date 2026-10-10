@@ -1,4 +1,4 @@
-import type { ProviderType } from "./studio-ai-types";
+import { providerDefaults, type ProviderType } from "./studio-ai-types";
 
 /**
  * Server-side calls from the Studio proxy to a model endpoint. The API key arrives per request
@@ -16,7 +16,7 @@ export class UpstreamError extends Error {
 }
 
 const RESPONSE_LIMIT = 400_000;
-const DEFAULT_BASE: Partial<Record<ProviderType, string>> = { anthropic: "https://api.anthropic.com/v1" };
+
 
 /** Optional allowlist (comma-separated host names) so a shared deployment cannot be used to reach internal hosts. */
 export function checkAllowedHost(baseUrl: string, allowList = process.env.STUDIO_AI_ALLOWED_HOSTS) {
@@ -49,7 +49,7 @@ export async function callUpstream(
   options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<{ text: string; model?: string }> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const base = checkAllowedHost(provider.baseUrl.trim() || DEFAULT_BASE[provider.type] || "");
+  const base = checkAllowedHost(provider.baseUrl.trim() || providerDefaults[provider.type]?.baseUrl || "");
   if (!provider.apiKey) throw new UpstreamError("No API key was provided.", 400);
   if (provider.type !== "dify" && !provider.model.trim()) throw new UpstreamError("A model name is required.", 400);
 
@@ -64,6 +64,8 @@ export async function callUpstream(
   try {
     response = await fetchImpl(`${base}${request.path}`, {
       method: "POST",
+      // Credentials must never follow a redirect beyond the checked model host.
+      redirect: "error",
       headers: { "content-type": "application/json", ...request.headers },
       body: JSON.stringify(request.body),
       signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),

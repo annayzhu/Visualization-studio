@@ -8,13 +8,14 @@ import { useStudioLanguage } from "./StudioLanguage";
 import { buildAIContext, type PublicationCheck } from "@/lib/studio-ai-context";
 import { checkPlan, manualPrompt, parsePlanText, type CheckedPlan, type FigurePlan } from "@/lib/studio-ai-plan";
 import { providerLabels, readProviderSettings, requestPlan, testProvider, writeProviderSettings, type ProviderSettings } from "@/lib/studio-ai-provider";
-import { providerTypes, type ProviderType } from "@/lib/studio-ai-types";
+import { providerDefaults, providerTypes, type ProviderType } from "@/lib/studio-ai-types";
 import { getPlotModule, type JournalThemeId, type ParsedDataset, type PlotType, type VisualizationSettings } from "@/lib/visualization-studio";
 
 const fieldClass = "focus-ring h-8 w-full rounded-[7px] border border-hairline bg-white px-2.5 text-xs text-ink placeholder:text-muted";
 const areaClass = "focus-ring w-full rounded-[7px] border border-hairline bg-white px-2.5 py-2 text-xs leading-5 text-ink placeholder:text-muted";
 
 type Props = {
+  contextVersion: object;
   dataset: ParsedDataset;
   plotType: PlotType;
   mapping: Record<string, string>;
@@ -23,7 +24,7 @@ type Props = {
   validationErrors: string[];
   checks: PublicationCheck[];
   canUndo: boolean;
-  onApply: (plan: FigurePlan) => void;
+  onApply: (plan: FigurePlan, contextVersion: object) => boolean;
   onUndo: () => void;
 };
 
@@ -37,7 +38,7 @@ export function StudioAssistantPanel(props: Props) {
   const [busy, setBusy] = useState<"plan" | "test">();
   const [error, setError] = useState<string>();
   const [status, setStatus] = useState<string>();
-  const [result, setResult] = useState<{ checked: CheckedPlan; model?: string; source: "model" | "pasted"; applied?: boolean }>();
+  const [result, setResult] = useState<{ contextVersion: object; checked: CheckedPlan; model?: string; source: "model" | "pasted"; applied?: boolean }>();
   const [pasted, setPasted] = useState("");
   const [caption, setCaption] = useState({ en: "", zh: "" });
 
@@ -64,7 +65,7 @@ export function StudioAssistantPanel(props: Props) {
   function check(text: string, source: "model" | "pasted", model?: string) {
     const { raw } = parsePlanText(text);
     const checked = checkPlan(raw, { plotType: props.plotType, mapping: props.mapping, settings: props.settings, themeId: props.themeId, dataset: props.dataset });
-    setResult({ checked, model, source });
+    setResult({ checked, model, source, contextVersion: props.contextVersion });
     setCaption(checked.plan.caption);
   }
 
@@ -117,6 +118,7 @@ export function StudioAssistantPanel(props: Props) {
 
   const sentColumns = context.columns.length;
   const checked = result?.checked;
+  const stale = Boolean(result && !result.applied && result.contextVersion !== props.contextVersion);
 
   return (
     <section aria-label="AI figure assistant" className="space-y-4">
@@ -139,8 +141,8 @@ export function StudioAssistantPanel(props: Props) {
         </label>
         <p className="rounded-[7px] bg-stone px-2.5 py-2 text-[11px] leading-4 text-muted">
           {t(
-            `Sent to the model: your request, ${sentColumns} column names with type, counts and numeric ranges, the current plot and mapping${includeRows ? ", and 5 rows of values" : ". No cell values"}.`,
-            `发送给模型：你的描述、${sentColumns} 个列名及其类型、计数与数值范围、当前图形与映射${includeRows ? "，以及 5 行数值" : "；不发送任何单元格数值"}。`,
+            `Sent to the model: your request, ${sentColumns} column names with type, counts and numeric ranges, the current plot and mapping${includeRows ? ", and 5 rows of values" : ". No individual rows; ranges include minimum and maximum values"}.`,
+            `发送给模型：你的描述、${sentColumns} 个列名及其类型、计数与数值范围、当前图形与映射${includeRows ? "，以及 5 行数值" : "；默认不发送逐行数据，数值范围包含最小值和最大值"}。`,
           )}
         </p>
         <div className="flex flex-wrap gap-2">
@@ -167,10 +169,11 @@ export function StudioAssistantPanel(props: Props) {
       {checked ? (
         <div role="group" className="space-y-3 rounded-[9px] border border-moss/25 bg-white p-3" aria-label={t("Proposed plan", "建议方案")}>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge tone={checked.canApply ? "success" : "danger"}>{checked.canApply ? t("Ready to apply", "可以应用") : t("Cannot apply", "无法应用")}</Badge>
+            <Badge tone={checked.canApply && !stale ? "success" : "danger"}>{checked.canApply && !stale ? t("Ready to apply", "可以应用") : t("Cannot apply", "无法应用")}</Badge>
             <Badge tone="sage">{getPlotModule(checked.plan.plotType).definition.name}</Badge>
             <span className="text-[11px] text-muted">{result?.source === "pasted" ? t("pasted plan", "粘贴的方案") : result?.model ?? ""}</span>
           </div>
+          {stale ? <p role="alert" className="text-xs text-warning">{t("Data or figure changed. Generate or check the plan again before applying.", "数据或图形已变化，请重新生成或校验方案后再应用。")}</p> : null}
           {checked.plan.rationale ? <p className="text-xs leading-5 text-graphite">{checked.plan.rationale}</p> : null}
           {checked.plan.questions.length ? (
             <div className="rounded-[8px] border border-warning/30 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">
@@ -203,7 +206,7 @@ export function StudioAssistantPanel(props: Props) {
               </div>
             ))}
           </div>
-          <Button size="sm" variant="primary" disabled={!checked.canApply || result?.applied} onClick={() => { props.onApply(checked.plan); setResult((current) => current && { ...current, applied: true }); setStatus(t("Plan applied. Use Undo to go back.", "已应用方案；可用撤销返回。")); }}>{result?.applied ? t("Applied", "已应用") : t("Apply plan", "应用方案")}</Button>
+          <Button size="sm" variant="primary" disabled={!checked.canApply || stale || result?.applied} onClick={() => { if (!result || !props.onApply(checked.plan, result.contextVersion)) { setError(t("The figure changed. Check the plan again.", "图形已变化，请重新校验方案。")); return; } setResult((current) => current && { ...current, applied: true }); setStatus(t("Plan applied. Use Undo to go back.", "已应用方案；可用撤销返回。")); }}>{result?.applied ? t("Applied", "已应用") : t("Apply plan", "应用方案")}</Button>
         </div>
       ) : null}
 
@@ -225,16 +228,17 @@ function ProviderForm({ initial, t, busy, onSave, onTest, onForget }: {
   onTest: (settings: ProviderSettings) => void;
   onForget: () => void;
 }) {
-  const [draft, setDraft] = useState<ProviderSettings>(initial ?? { type: "dify", baseUrl: "", model: "", apiKey: "", remember: false });
+  const [draft, setDraft] = useState<ProviderSettings>(initial ?? { type: "deepseek", ...providerDefaults.deepseek, apiKey: "", remember: false });
   const complete = draft.apiKey.trim() && (draft.baseUrl.trim() || draft.type === "anthropic") && (draft.model.trim() || draft.type === "dify");
   const update = <K extends keyof ProviderSettings>(key: K, value: ProviderSettings[K]) => setDraft((current) => ({ ...current, [key]: value }));
   return (
     <form className="space-y-2 rounded-[8px] border border-hairline bg-stone p-3" onSubmit={(event) => { event.preventDefault(); if (complete) onSave({ ...draft, baseUrl: draft.baseUrl.trim(), model: draft.model.trim(), apiKey: draft.apiKey.trim() }); }} autoComplete="off">
       <label className="block text-[11px] text-graphite">{t("Connection type", "接入方式")}
-        <select value={draft.type} onChange={(event) => update("type", event.target.value as ProviderType)} className={`${fieldClass} mt-1`}>
+        <select value={draft.type} onChange={(event) => { const type = event.target.value as ProviderType; setDraft((current) => ({ ...current, type, ...providerDefaults[type], apiKey: "" })); }} className={`${fieldClass} mt-1`}>
           {providerTypes.map((type) => <option key={type} value={type}>{providerLabels[type]}</option>)}
         </select>
       </label>
+      {draft.type === "deepseek" ? <p className="text-[11px] leading-4 text-muted">{t("Official DeepSeek API preset. Enter your API key; you can change the model to one available to your account.", "已填入 DeepSeek 官方接口。输入 API 密钥即可测试；模型名可按账号可用模型修改。")}</p> : null}
       <label className="block text-[11px] text-graphite">{t("Base URL", "服务地址")}
         <input value={draft.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} className={`${fieldClass} mt-1`} placeholder={draft.type === "dify" ? "https://aihub.zju.edu.cn/v1" : draft.type === "anthropic" ? "https://api.anthropic.com/v1" : "https://dashscope.aliyuncs.com/compatible-mode/v1"} />
       </label>

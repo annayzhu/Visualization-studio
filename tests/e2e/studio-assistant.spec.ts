@@ -112,3 +112,84 @@ test("the proxy refuses foreign origins and raw tables", async ({ request }) => 
   expect(raw.status()).toBe(400);
   expect(prompts.length).toBe(before);
 });
+
+test("editing data after applying AI disables its undo and preserves the new value", async ({ page }, info) => {
+  await page.goto("/");
+  const data = page.getByRole("textbox", { name: "CSV or TSV data", exact: true });
+  await data.fill(table);
+  await page.getByRole("tab", { name: /AI 智能作图/ }).click();
+  const assistant = page.getByRole("region", { name: "AI figure assistant" });
+  await assistant.getByText("Paste a plan from another chat").click();
+  await assistant.getByRole("textbox", { name: "Pasted plan JSON" }).fill(JSON.stringify(plan));
+  await assistant.getByRole("button", { name: "Check pasted plan" }).click();
+  await assistant.getByRole("button", { name: "Apply plan", exact: true }).click();
+  await expect(assistant.getByRole("button", { name: "Undo last plan" })).toBeVisible();
+  const edited = table.replace("4.4321", "99.2");
+  await data.fill(edited);
+  await expect(assistant.getByRole("button", { name: "Undo last plan" })).toBeHidden();
+  await expect(data).toHaveValue(edited);
+  await page.screenshot({ path: info.outputPath("data-edit-preserved.png"), fullPage: true });
+});
+
+test("a checked plan becomes stale when columns change", async ({ page }) => {
+  await page.goto("/");
+  const data = page.getByRole("textbox", { name: "CSV or TSV data", exact: true });
+  await data.fill(table);
+  await page.getByRole("tab", { name: /AI 智能作图/ }).click();
+  const assistant = page.getByRole("region", { name: "AI figure assistant" });
+  await assistant.getByText("Paste a plan from another chat").click();
+  await assistant.getByRole("textbox", { name: "Pasted plan JSON" }).fill(JSON.stringify(plan));
+  await assistant.getByRole("button", { name: "Check pasted plan" }).click();
+  const apply = assistant.getByRole("button", { name: "Apply plan", exact: true });
+  await expect(apply).toBeEnabled();
+  await data.fill(table.replace("value", "measurement"));
+  await expect(apply).toBeDisabled();
+  await expect(assistant.getByText(/Data or figure changed/)).toBeVisible();
+  await assistant.getByRole("button", { name: "Check pasted plan" }).click();
+  await expect(assistant.getByText(/Column "value"/)).toBeVisible();
+  await expect(apply).toBeDisabled();
+});
+
+test("a late model response cannot be applied after the data changes", async ({ page }) => {
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  let sent!: () => void;
+  const received = new Promise<void>((resolve) => { sent = resolve; });
+  await page.route("**/api/ai/plan/", async (route) => {
+    sent(); await waiting;
+    await route.fulfill({ json: { text: JSON.stringify(plan), model: "synthetic-deepseek" } });
+  });
+  await page.goto("/");
+  const data = page.getByRole("textbox", { name: "CSV or TSV data", exact: true });
+  await data.fill(table);
+  await page.getByRole("tab", { name: /AI 智能作图/ }).click();
+  const assistant = page.getByRole("region", { name: "AI figure assistant" });
+  await assistant.getByRole("combobox", { name: "Connection type" }).selectOption("deepseek");
+  await expect(assistant.getByRole("textbox", { name: "Base URL" })).toHaveValue("https://api.deepseek.com");
+  await expect(assistant.getByRole("textbox", { name: "Model", exact: true })).toHaveValue("deepseek-flash");
+  await assistant.getByLabel("API key").fill("synthetic-only");
+  await assistant.getByRole("button", { name: "Save", exact: true }).click();
+  await assistant.getByRole("textbox", { name: "What should the figure show?" }).fill("Compare groups");
+  await assistant.getByRole("button", { name: "Propose a plan" }).click();
+  await received;
+  await data.fill(table.replace("value", "measurement"));
+  release();
+  await expect(assistant.getByRole("button", { name: "Apply plan", exact: true })).toBeDisabled();
+  await expect(assistant.getByText(/Data or figure changed/)).toBeVisible();
+});
+
+test("switching project invalidates an earlier AI undo", async ({ page }) => {
+  await page.goto("/");
+  const data = page.getByRole("textbox", { name: "CSV or TSV data", exact: true });
+  await data.fill(table);
+  await page.getByRole("tab", { name: /AI 智能作图/ }).click();
+  const assistant = page.getByRole("region", { name: "AI figure assistant" });
+  await assistant.getByText("Paste a plan from another chat").click();
+  await assistant.getByRole("textbox", { name: "Pasted plan JSON" }).fill(JSON.stringify(plan));
+  await assistant.getByRole("button", { name: "Check pasted plan" }).click();
+  await assistant.getByRole("button", { name: "Apply plan", exact: true }).click();
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.getByRole("region", { name: "Project workspace" }).getByRole("button", { name: /New/ }).click();
+  await expect(assistant.getByRole("button", { name: "Undo last plan" })).toBeHidden();
+  await expect(data).not.toHaveValue(table);
+});

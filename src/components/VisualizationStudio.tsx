@@ -13,7 +13,7 @@ import { Ui, GuidanceText } from "./StudioLanguage";
 import { StudioAnnotationImport } from "./StudioAnnotationImport";
 import { StudioAssistantPanel } from "./StudioAssistantPanel";
 import { publicationChecks } from "@/lib/studio-ai-context";
-import type { FigurePlan } from "@/lib/studio-ai-plan";
+import { checkPlan, type FigurePlan } from "@/lib/studio-ai-plan";
 import { PageHeader } from "@/components/PageHeader";
 import { ScientificChartPreview } from "@/components/ScientificChartPreview";
 import { Badge } from "@/components/ui/Badge";
@@ -456,7 +456,11 @@ export function VisualizationStudio() {
   const parameterScrollRef = useRef<HTMLDivElement | null>(null);
   const projectRestored=useRef(false);
   const [rightPane, setRightPane] = useState<"parameters" | "assistant">("parameters");
-  const [assistantUndo, setAssistantUndo] = useState<Array<{ snapshot: FigureSnapshot; paletteSeriesId: PaletteSeriesId; customPaletteId: string }>>([]);
+  const [assistantUndo, setAssistantUndo] = useState<Array<{ snapshot: FigureSnapshot; paletteSeriesId: PaletteSeriesId; customPaletteId: string; dataVersion: object }>>([]);
+  const [assistantProjectRevision, setAssistantProjectRevision] = useState(0);
+  // Identity changes even if a later edit restores identical text: an old action is still stale.
+  const assistantDataVersion = useMemo(() => ({ project: assistantProjectRevision, rawData, declaredFields, pcaInputMode, pcaOptions, pcaObservationMetadata }), [assistantProjectRevision, rawData, declaredFields, pcaInputMode, pcaOptions, pcaObservationMetadata]);
+  const assistantContextVersion = useMemo(() => ({ data: assistantDataVersion, plotType, mapping, settings, themeId, resultId, figureDisplay, paletteSeriesId, selectedCustomPaletteId }), [assistantDataVersion, plotType, mapping, settings, themeId, resultId, figureDisplay, paletteSeriesId, selectedCustomPaletteId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -598,6 +602,8 @@ export function VisualizationStudio() {
   const isValid = validation.errors.length === 0 && !inputPreflight.issues.some(issue => issue.severity === 'error');
   const currentSnapshot: FigureSnapshot = { fields:declaredFields, analysisResultId: resultId, display: figureDisplay, plotType, raw: rawData, mapping, settings, themeId, pca: { inputMode: pcaInputMode, options: pcaOptions, observationMetadata: pcaObservationMetadata } };
   const restoreSnapshot = (snapshot: FigureSnapshot) => {
+    setAssistantProjectRevision((revision) => revision + 1);
+    setAssistantUndo([]);
     projectRestored.current=true;setDeclaredFields(snapshot.fields??{});setResultId(snapshot.analysisResultId); setFigureDisplay(snapshot.display);
     setPlotType(snapshot.plotType); setRawData(snapshot.raw); setMapping(snapshot.mapping);
     setSettings(snapshot.settings); setThemeId(snapshot.themeId); setPcaInputMode(snapshot.pca.inputMode);
@@ -723,8 +729,12 @@ export function VisualizationStudio() {
   };
 
   /** Applies a checked assistant plan as one undoable step; the data table is never changed. */
-  const applyFigurePlan = (plan: FigurePlan) => {
-    setAssistantUndo((stack) => [...stack, { snapshot: currentSnapshot, paletteSeriesId, customPaletteId: selectedCustomPaletteId }].slice(-10));
+  const applyFigurePlan = (proposal: FigurePlan, version: object): boolean => {
+    if (version !== assistantContextVersion) return false;
+    const checked = checkPlan({ ...proposal }, { plotType, mapping, settings, themeId, dataset });
+    if (!checked.canApply) return false;
+    const plan = checked.plan;
+    setAssistantUndo((stack) => [...stack, { snapshot: currentSnapshot, paletteSeriesId, customPaletteId: selectedCustomPaletteId, dataVersion: assistantDataVersion }].slice(-10));
     const plotChanged = plan.plotType !== plotType;
     if (plotChanged) { setPlotType(plan.plotType); setResultId(undefined); setFigureDisplay(undefined); setSelectedIntersectionSignature(''); }
     setSelectedPreset(null); setSelectedExampleIndex(-1); setFileError('');
@@ -736,13 +746,17 @@ export function VisualizationStudio() {
       const themed = theme ? { ...base, categoricalColors: [...theme.categorical], continuousLow: theme.sequential[0], continuousHigh: theme.sequential[1], divergingLow: theme.diverging[0], divergingMid: theme.diverging[1], divergingHigh: theme.diverging[2], barBorderColor: theme.ink } : base;
       return { ...themed, ...plan.settingsPatch };
     });
+    return true;
   };
 
   const undoFigurePlan = () => {
     const last = assistantUndo.at(-1);
-    if (!last) return;
+    if (!last || last.dataVersion !== assistantDataVersion) return;
     setAssistantUndo((stack) => stack.slice(0, -1));
-    restoreSnapshot(last.snapshot);
+    // Undo presentation only; never write the raw table, fields, or PCA inputs.
+    setPlotType(last.snapshot.plotType); setMapping(last.snapshot.mapping);
+    setSettings(last.snapshot.settings); setThemeId(last.snapshot.themeId);
+    setResultId(last.snapshot.analysisResultId); setFigureDisplay(last.snapshot.display);
     setPaletteSeriesId(last.paletteSeriesId);
     setSelectedCustomPaletteId(last.customPaletteId);
   };
@@ -1193,7 +1207,7 @@ export function VisualizationStudio() {
           {rightPane === "assistant" ? (
             <Card className="min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col">
               <CardBody className="p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
-                <StudioAssistantPanel dataset={dataset} plotType={plotType} mapping={mapping} settings={settings} themeId={themeId} validationErrors={validation.errors} checks={figureChecks} canUndo={assistantUndo.length > 0} onApply={applyFigurePlan} onUndo={undoFigurePlan} />
+                <StudioAssistantPanel contextVersion={assistantContextVersion} dataset={dataset} plotType={plotType} mapping={mapping} settings={settings} themeId={themeId} validationErrors={validation.errors} checks={figureChecks} canUndo={assistantUndo.at(-1)?.dataVersion === assistantDataVersion} onApply={applyFigurePlan} onUndo={undoFigurePlan} />
               </CardBody>
             </Card>
           ) : null}

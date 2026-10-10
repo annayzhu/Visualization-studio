@@ -1,0 +1,13 @@
+
+ RUN  v4.1.11 /Users/annayzhu/Documents/Playground/LabNest/.local-runtime/studio-ai-deepseek-20261010
+
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > fails a time-course answer that omits the series requested by the scientist 6ms
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > every case has a usable table and a valid reference answer 16ms
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > scores a reference model that answers every case correctly as 10/10, and a wrong one as 0 7ms
+ ↓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > live model passes at least 8 of 10 cases
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 1 skipped (4)
+   Start at  01:20:50
+   Duration  369ms (transform 207ms, setup 0ms, import 251ms, tests 30ms, environment 0ms)
+

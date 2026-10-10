@@ -16,7 +16,7 @@ A browser-local scientific visualization workspace for creating compact, publica
 - Built-in journal-inspired and traditional Chinese color palettes
 - SVG, 600 dpi PNG, and reproducible JSON configuration export
 - Example datasets and downloadable input templates
-- Browser-local processing: uploaded data is not sent to a server
+- Browser-local processing: uploaded data is not sent to a server. The optional [AI figure assistant](docs/ai/README.md) sends only a column profile (names, types, counts, numeric ranges) when you click Propose, and never the table itself
 - Responsive desktop and mobile layouts
 
 ## Run locally

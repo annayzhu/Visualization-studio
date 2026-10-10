@@ -1,0 +1,28 @@
+
+ RUN  v4.1.11 /Users/annayzhu/Documents/Playground/LabNest/.local-runtime/studio-ai-deepseek-20261010
+
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > fails a time-course answer that omits the series requested by the scientist 6ms
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > every case has a usable table and a valid reference answer 16ms
+ ✓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > scores a reference model that answers every case correctly as 10/10, and a wrong one as 0 7ms
+ ↓ src/lib/studio-ai-eval.test.ts > assistant evaluation harness > live model passes at least 8 of 10 cases
+ ✓ src/lib/studio-ai.test.ts > assistant catalog > covers every registered plot and only real roles 4ms
+ ✓ src/lib/studio-ai.test.ts > assistant catalog > never exposes statistical settings to the model 2ms
+ ✓ src/lib/studio-ai.test.ts > data context > profiles columns without values unless the user opts in 1ms
+ ✓ src/lib/studio-ai.test.ts > data context > guards the proxy against extra fields and oversized input 0ms
+ ✓ src/lib/studio-ai.test.ts > data context > builds a prompt with the catalog, rules and profile but no cell values 1ms
+ ✓ src/lib/studio-ai.test.ts > plan checks > accepts a valid plan and lists the changes 4ms
+ ✓ src/lib/studio-ai.test.ts > plan checks > blocks unknown plots, missing columns, and missing required roles 0ms
+ ✓ src/lib/studio-ai.test.ts > plan checks > drops statistical, unsupported, and out-of-range settings without blocking 1ms
+ ✓ src/lib/studio-ai.test.ts > plan checks > keeps questions and rejects non-JSON text 1ms
+ ✓ src/lib/studio-ai.test.ts > publication checks > flags tiny text, repeated colors, hidden legends, and similar lightness 0ms
+ ✓ src/lib/studio-ai.test.ts > upstream calls > connects the DeepSeek preset through its official OpenAI-compatible endpoint 13ms
+ ✓ src/lib/studio-ai.test.ts > upstream calls > speaks the three provider dialects 1ms
+ ✓ src/lib/studio-ai.test.ts > upstream calls > scrubs the key from errors and enforces the host allowlist 1ms
+ ✓ src/lib/studio-ai.test.ts > proxy route > builds the prompt server-side and returns the model text 2ms
+ ✓ src/lib/studio-ai.test.ts > proxy route > rejects foreign origins, raw tables, and disabled deployments before calling out 2ms
+
+ Test Files  2 passed (2)
+      Tests  18 passed | 1 skipped (19)
+   Start at  01:21:51
+   Duration  414ms (transform 404ms, setup 0ms, import 501ms, tests 64ms, environment 0ms)
+

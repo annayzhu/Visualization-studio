@@ -3,7 +3,7 @@ import type {StudioDataset} from '@/lib/studio-project';
 import {isCustomPalette, type CustomPalette} from '@/lib/studio-palettes';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent, type ReactNode } from "react";
-import { Check, ChevronDown, Download, ExternalLink, FileJson, Image as ImageIcon, Lightbulb, RotateCcw, Save, Search, Upload } from "lucide-react";
+import { Check, ChevronDown, Download, ExternalLink, FileJson, Image as ImageIcon, Lightbulb, RotateCcw, Save, Search, Sparkles, Upload } from "lucide-react";
 import { StudioProjectPanel, type FigureSnapshot, downloadLocal } from './StudioProjectPanel';
 import { readLocalFile, type ImportedSheet } from '@/lib/studio-import';
 import { enrichmentDisplay } from '@/lib/studio-enrichment';
@@ -11,6 +11,9 @@ import { inspectTable } from '@/lib/studio-data';
 import { chartAliases, plotChineseNames, scenarioPresets, catalogPreference, catalogEntry, type CatalogEntry } from '@/lib/studio-catalog';
 import { Ui, GuidanceText } from "./StudioLanguage";
 import { StudioAnnotationImport } from "./StudioAnnotationImport";
+import { StudioAssistantPanel } from "./StudioAssistantPanel";
+import { publicationChecks } from "@/lib/studio-ai-context";
+import { checkPlan, type FigurePlan } from "@/lib/studio-ai-plan";
 import { PageHeader } from "@/components/PageHeader";
 import { ScientificChartPreview } from "@/components/ScientificChartPreview";
 import { Badge } from "@/components/ui/Badge";
@@ -452,6 +455,12 @@ export function VisualizationStudio() {
   const previewCardRef = useRef<HTMLDivElement | null>(null);
   const parameterScrollRef = useRef<HTMLDivElement | null>(null);
   const projectRestored=useRef(false);
+  const [rightPane, setRightPane] = useState<"parameters" | "assistant">("parameters");
+  const [assistantUndo, setAssistantUndo] = useState<Array<{ snapshot: FigureSnapshot; paletteSeriesId: PaletteSeriesId; customPaletteId: string; dataVersion: object }>>([]);
+  const [assistantProjectRevision, setAssistantProjectRevision] = useState(0);
+  // Identity changes even if a later edit restores identical text: an old action is still stale.
+  const assistantDataVersion = useMemo(() => ({ project: assistantProjectRevision, rawData, declaredFields, pcaInputMode, pcaOptions, pcaObservationMetadata }), [assistantProjectRevision, rawData, declaredFields, pcaInputMode, pcaOptions, pcaObservationMetadata]);
+  const assistantContextVersion = useMemo(() => ({ data: assistantDataVersion, plotType, mapping, settings, themeId, resultId, figureDisplay, paletteSeriesId, selectedCustomPaletteId }), [assistantDataVersion, plotType, mapping, settings, themeId, resultId, figureDisplay, paletteSeriesId, selectedCustomPaletteId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -591,7 +600,10 @@ export function VisualizationStudio() {
     catch(error) {return {table:{headers:[],rows:[]},issues:[{severity:'error' as const,table:'Data',code:'limit',row:undefined,field:undefined,message:String(error)}]};}
   }, [rawData,declaredFields]);
   const isValid = validation.errors.length === 0 && !inputPreflight.issues.some(issue => issue.severity === 'error');
+  const currentSnapshot: FigureSnapshot = { fields:declaredFields, analysisResultId: resultId, display: figureDisplay, plotType, raw: rawData, mapping, settings, themeId, pca: { inputMode: pcaInputMode, options: pcaOptions, observationMetadata: pcaObservationMetadata } };
   const restoreSnapshot = (snapshot: FigureSnapshot) => {
+    setAssistantProjectRevision((revision) => revision + 1);
+    setAssistantUndo([]);
     projectRestored.current=true;setDeclaredFields(snapshot.fields??{});setResultId(snapshot.analysisResultId); setFigureDisplay(snapshot.display);
     setPlotType(snapshot.plotType); setRawData(snapshot.raw); setMapping(snapshot.mapping);
     setSettings(snapshot.settings); setThemeId(snapshot.themeId); setPcaInputMode(snapshot.pca.inputMode);
@@ -611,6 +623,7 @@ export function VisualizationStudio() {
   }, [paletteSeriesId, selectedCustomPalette, themeId]);
   const currentPaletteName = paletteSeriesId === "custom" ? selectedCustomPalette?.name || "Custom" : journalThemes[themeId].name;
   const currentPalettePreviewColors = paletteColorsFromSettings(settings, themeId).categoricalColors.slice(0, 4);
+  const figureChecks = useMemo(() => publicationChecks({ plotType, settings, settingKeys: getPlotModule(plotType).capabilities.settingKeys, groupCount: categoryLabels.length }), [categoryLabels.length, plotType, settings]);
   const effectiveCategoricalColors = useMemo(() => categoryLabels.map((_, index) => categoricalColorForIndex(index, settings.categoricalColors)), [categoryLabels, settings.categoricalColors]);
   const hasUnsavedColorChanges = currentColorFingerprint !== selectedPaletteFingerprint;
   const colorResolvedSettings = useMemo(() => effectiveCategoricalColors.length ? { ...settings, categoricalColors: effectiveCategoricalColors } : settings, [effectiveCategoricalColors, settings]);
@@ -713,6 +726,39 @@ export function VisualizationStudio() {
       divergingHigh: theme.diverging[2],
       barBorderColor: theme.ink,
     }));
+  };
+
+  /** Applies a checked assistant plan as one undoable step; the data table is never changed. */
+  const applyFigurePlan = (proposal: FigurePlan, version: object): boolean => {
+    if (version !== assistantContextVersion) return false;
+    const checked = checkPlan({ ...proposal }, { plotType, mapping, settings, themeId, dataset });
+    if (!checked.canApply) return false;
+    const plan = checked.plan;
+    setAssistantUndo((stack) => [...stack, { snapshot: currentSnapshot, paletteSeriesId, customPaletteId: selectedCustomPaletteId, dataVersion: assistantDataVersion }].slice(-10));
+    const plotChanged = plan.plotType !== plotType;
+    if (plotChanged) { setPlotType(plan.plotType); setResultId(undefined); setFigureDisplay(undefined); setSelectedIntersectionSignature(''); }
+    setSelectedPreset(null); setSelectedExampleIndex(-1); setFileError('');
+    setMapping(plan.mapping);
+    const theme = plan.themeId ? journalThemes[plan.themeId] : undefined;
+    if (plan.themeId && theme) { setThemeId(plan.themeId); setPaletteSeriesId(theme.series); setSelectedCustomPaletteId(''); }
+    setSettings((current) => {
+      const base = plotChanged ? settingsForDistributionPreset(current, plan.plotType) : current;
+      const themed = theme ? { ...base, categoricalColors: [...theme.categorical], continuousLow: theme.sequential[0], continuousHigh: theme.sequential[1], divergingLow: theme.diverging[0], divergingMid: theme.diverging[1], divergingHigh: theme.diverging[2], barBorderColor: theme.ink } : base;
+      return { ...themed, ...plan.settingsPatch };
+    });
+    return true;
+  };
+
+  const undoFigurePlan = () => {
+    const last = assistantUndo.at(-1);
+    if (!last || last.dataVersion !== assistantDataVersion) return;
+    setAssistantUndo((stack) => stack.slice(0, -1));
+    // Undo presentation only; never write the raw table, fields, or PCA inputs.
+    setPlotType(last.snapshot.plotType); setMapping(last.snapshot.mapping);
+    setSettings(last.snapshot.settings); setThemeId(last.snapshot.themeId);
+    setResultId(last.snapshot.analysisResultId); setFigureDisplay(last.snapshot.display);
+    setPaletteSeriesId(last.paletteSeriesId);
+    setSelectedCustomPaletteId(last.customPaletteId);
   };
 
   const selectPaletteSeries = (nextSeries: PaletteSeriesId) => {
@@ -920,7 +966,7 @@ export function VisualizationStudio() {
   return (
     <div className="space-y-[var(--ln-vis-panel-gap)]" data-visualization-workbench>
       <details className="rounded-[9px] border border-hairline bg-white p-3"><summary className="cursor-pointer text-sm font-medium"><Ui text={"Scenarios, favorites & recent / 场景、收藏与最近使用"} /></summary><div className="mt-2 flex flex-wrap gap-2">{scenarioPresets.map(preset=><Button key={preset.id} size="sm" onClick={()=>{selectCatalogEntry(`preset:${preset.id}`);}}>{preset.en} / {preset.zh}</Button>)}</div><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={()=>{const next=favorites.includes(activeCatalogEntry)?favorites.filter(id=>id!==activeCatalogEntry):[activeCatalogEntry,...favorites];setFavorites(next);try{localStorage.setItem('studio.favorites',JSON.stringify(next));}catch{}}}>{favorites.includes(activeCatalogEntry)?'Unfavorite / 取消收藏':'Favorite / 收藏当前图'}</Button>{favorites.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>{recentPlots.length?<div className="mt-2 flex flex-wrap gap-2" aria-label="Recent plots">{recentPlots.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>:null}</details>
-      <StudioProjectPanel palettes={customPalettes} onPalettes={setCustomPalettes} snapshot={{ fields:declaredFields, analysisResultId: resultId, display: figureDisplay, plotType, raw: rawData, mapping, settings, themeId, pca: { inputMode: pcaInputMode, options: pcaOptions, observationMetadata: pcaObservationMetadata } }} onRestore={restoreSnapshot} />
+      <StudioProjectPanel palettes={customPalettes} onPalettes={setCustomPalettes} snapshot={currentSnapshot} onRestore={restoreSnapshot} />
       <div ref={stickyHeaderRef} data-visualization-sticky-header className="sticky top-0 z-20 -mx-1 space-y-1.5 border-b border-hairline/70 bg-paper/95 px-1 pb-2 backdrop-blur">
         <PageHeader identifier="TOOLS / VIS" title="Visualization Studio" className="min-h-8" />
         <Card className="overflow-hidden rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none">
@@ -1154,7 +1200,18 @@ export function VisualizationStudio() {
         </div>
 
         <div data-visualization-panel="parameters" className="flex min-h-0 flex-col gap-[var(--ln-vis-panel-gap)] overflow-hidden xl:sticky xl:top-[var(--visualization-panel-top)] xl:h-[var(--visualization-panel-height)]">
-          <Card className="min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col">
+          <div role="tablist" aria-label="Right panel" className="grid shrink-0 grid-cols-2 gap-1 rounded-[8px] border border-hairline bg-stone p-1">
+            <button type="button" role="tab" aria-selected={rightPane === "parameters"} onClick={() => setRightPane("parameters")} className={cn("focus-ring rounded-[6px] px-2 py-1.5 text-[11px] font-medium", rightPane === "parameters" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink")}><Ui text={"Figure parameters"} /></button>
+            <button type="button" role="tab" aria-selected={rightPane === "assistant"} onClick={() => setRightPane("assistant")} className={cn("focus-ring flex items-center justify-center gap-1 rounded-[6px] px-2 py-1.5 text-[11px] font-medium", rightPane === "assistant" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink")}><Sparkles className="h-3.5 w-3.5" aria-hidden />AI 智能作图</button>
+          </div>
+          {rightPane === "assistant" ? (
+            <Card className="min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col">
+              <CardBody className="p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:[scrollbar-gutter:stable]">
+                <StudioAssistantPanel contextVersion={assistantContextVersion} dataset={dataset} plotType={plotType} mapping={mapping} settings={settings} themeId={themeId} validationErrors={validation.errors} checks={figureChecks} canUndo={assistantUndo.at(-1)?.dataVersion === assistantDataVersion} onApply={applyFigurePlan} onUndo={undoFigurePlan} />
+              </CardBody>
+            </Card>
+          ) : null}
+          <Card className={cn("min-h-0 rounded-[var(--ln-vis-panel-radius)] border-[var(--ln-vis-panel-border)] shadow-none xl:flex xl:flex-1 xl:flex-col", rightPane !== "parameters" && "hidden xl:hidden")}>
             <CardHeader className="h-12 shrink-0" title="Figure parameters" action={<Button size="sm" variant="ghost" onClick={() => {
               const resetSettings = settingsForTheme(themeId);
               const plotResetSettings = plotType === "rose" ? { ...resetSettings, compositionLabelMode: "value" as const } : resetSettings;

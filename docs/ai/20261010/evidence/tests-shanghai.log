@@ -1,0 +1,13 @@
+
+> visualization-studio@1.0.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /Users/annayzhu/Documents/Playground/LabNest/.local-runtime/studio-ai-deepseek-20261010
+
+
+ Test Files  19 passed (19)
+      Tests  245 passed | 1 skipped (246)
+   Start at  01:26:47
+   Duration  3.98s (transform 11.31s, setup 0ms, import 16.23s, tests 9.30s, environment 2ms)
+

@@ -29,6 +29,18 @@ it('does not translate raw header values when the interface changes',()=>{
  expect(translateUi('Line','zh')).toBe('折线图');expect(translateUi('Ready','zh')).toBe('可作图');
  expect(inspectTable(text).table.headers).toEqual(['Line','group','Ready']);
 });
+it('uses scientific UI terms and handles labels containing English slashes',()=>{
+ for(const [source,en,zh] of [
+  ['Bar','Bar','柱状图'],['Auto','Auto','自动'],['Operation / 操作','Operation','操作'],
+  ['ID / fixed fields (comma-separated)','ID / fixed fields (comma-separated)','ID／固定列（逗号分隔）'],
+  ['Select / rename','Select / rename','选择／重命名'],
+  ['Unsaved / 未保存','Unsaved','未保存'],['PCA','PCA','主成分分析 PCA'],
+  ['Unlisted technical term','Unlisted technical term','Unlisted technical term'],
+ ]) {
+  expect(translateUi(source,'en')).toBe(en);
+  expect(translateUi(source,'zh')).toBe(zh);
+ }
+});
 it.each(['xls','xlsx'] as const)('reads all %s worksheets locally without replacing leading-zero string IDs',async bookType=>{
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['id','value'],['001',2]]),'First');XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['id','value'],['002',3]]),'Second');
  const bytes=XLSX.write(book,{type:'array',bookType:bookType==='xls'?'biff8':'xlsx'});

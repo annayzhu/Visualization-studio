@@ -1,6 +1,8 @@
 /** UI-only catalogue. Never pass raw headers, rows, group names or captions here. */
 export type StudioLocale='en'|'zh';
 export const uiMessages:Record<string,[string,string]>={
+ 'workflow.fixedFields':['ID / fixed fields (comma-separated)','ID／固定列（逗号分隔）'],
+ 'workflow.selectRename':['Select / rename','选择／重命名'],
  'plot.line.name':['Line','折线图'],'state.ready':['Ready','可作图'],'state.check':['Check data','检查数据'],
  'action.upload':['Upload','导入数据'],'action.template':['Template','下载模板'],'action.autoMap':['Auto-map','自动映射'],'action.reset':['Reset','重置'],
  'panel.data':['Data & mapping','数据与映射'],'panel.palette':['Palette','配色'],'panel.figure':['Figure','图形'],'panel.axes':['Axes','坐标轴'],'panel.labels':['Labels','标签'],'panel.legend':['Legend','图例'],

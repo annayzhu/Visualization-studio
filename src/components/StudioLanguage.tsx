@@ -10,6 +10,6 @@ export function StudioLanguage({children}:{children:ReactNode}) {
 }
 export function useStudioLanguage(){return useContext(LanguageContext);}
 export function Ui({text}:{text:string}){return translateUi(text,useStudioLanguage().locale);}
-export function LanguagePicker(){const {locale,setLocale}=useStudioLanguage();return <label className="inline-flex items-center gap-2 text-sm">Language / 语言<select aria-label="Interface language" className="focus-ring rounded border border-hairline bg-white p-1" value={locale} onChange={event=>setLocale(event.target.value as StudioLocale)}><option value="en">English</option><option value="zh">中文</option></select></label>;}
+export function LanguagePicker(){const {locale,setLocale}=useStudioLanguage();return <label className="inline-flex items-center gap-2 text-sm"><Ui text="Language / 语言" /><select aria-label="Interface language" className="focus-ring rounded border border-hairline bg-white p-1" value={locale} onChange={event=>setLocale(event.target.value as StudioLocale)}><option value="en">English</option><option value="zh">中文</option></select></label>;}
 
 export function GuidanceText({plotId,section}:{plotId:string;section:"definition"|"data"|"question"}){const {locale}=useStudioLanguage();return guidanceMessages[`help.${plotId}.${section}`]?.[locale==="zh"?1:0]??"";}

@@ -9,7 +9,8 @@ import { readLocalFile, type ImportedSheet } from '@/lib/studio-import';
 import { enrichmentDisplay } from '@/lib/studio-enrichment';
 import { inspectTable } from '@/lib/studio-data';
 import { chartAliases, plotChineseNames, scenarioPresets, catalogPreference, catalogEntry, type CatalogEntry } from '@/lib/studio-catalog';
-import { Ui, GuidanceText } from "./StudioLanguage";
+import { Ui, GuidanceText, useStudioLanguage } from "./StudioLanguage";
+import { translateUi } from "@/lib/studio-i18n";
 import { StudioAnnotationImport } from "./StudioAnnotationImport";
 import { StudioAssistantPanel } from "./StudioAssistantPanel";
 import { publicationChecks } from "@/lib/studio-ai-context";
@@ -355,6 +356,7 @@ function RangeControl({ label, value, minimum, maximum, step = 1, unit, onChange
 }
 
 function OptionalNumberControl({ label, value, invalid = false, describedBy, onChange }: { label: string; value: number | null; invalid?: boolean; describedBy?: string; onChange: (value: number | null) => void }) {
+  const { locale } = useStudioLanguage();
   const commit = (draft: string) => {
     const trimmed = draft.trim();
     if (!trimmed) {
@@ -373,7 +375,7 @@ function OptionalNumberControl({ label, value, invalid = false, describedBy, onC
         inputMode="decimal"
         key={value ?? "auto"}
         defaultValue={value ?? ""}
-        placeholder="Auto"
+        placeholder={translateUi("Auto", locale)}
         aria-invalid={invalid || undefined}
         aria-describedby={invalid ? describedBy : undefined}
         onBlur={(event) => {
@@ -965,7 +967,7 @@ export function VisualizationStudio() {
 
   return (
     <div className="space-y-[var(--ln-vis-panel-gap)]" data-visualization-workbench>
-      <details className="rounded-[9px] border border-hairline bg-white p-3"><summary className="cursor-pointer text-sm font-medium"><Ui text={"Scenarios, favorites & recent / 场景、收藏与最近使用"} /></summary><div className="mt-2 flex flex-wrap gap-2">{scenarioPresets.map(preset=><Button key={preset.id} size="sm" onClick={()=>{selectCatalogEntry(`preset:${preset.id}`);}}>{preset.en} / {preset.zh}</Button>)}</div><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={()=>{const next=favorites.includes(activeCatalogEntry)?favorites.filter(id=>id!==activeCatalogEntry):[activeCatalogEntry,...favorites];setFavorites(next);try{localStorage.setItem('studio.favorites',JSON.stringify(next));}catch{}}}>{favorites.includes(activeCatalogEntry)?'Unfavorite / 取消收藏':'Favorite / 收藏当前图'}</Button>{favorites.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>{recentPlots.length?<div className="mt-2 flex flex-wrap gap-2" aria-label="Recent plots">{recentPlots.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>:null}</details>
+      <details className="rounded-[9px] border border-hairline bg-white p-3"><summary className="cursor-pointer text-sm font-medium"><Ui text={"Scenarios, favorites & recent / 场景、收藏与最近使用"} /></summary><div className="mt-2 flex flex-wrap gap-2">{scenarioPresets.map(preset=><Button key={preset.id} size="sm" onClick={()=>{selectCatalogEntry(`preset:${preset.id}`);}}><Ui text={`${preset.en} / ${preset.zh}`} /></Button>)}</div><div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={()=>{const next=favorites.includes(activeCatalogEntry)?favorites.filter(id=>id!==activeCatalogEntry):[activeCatalogEntry,...favorites];setFavorites(next);try{localStorage.setItem('studio.favorites',JSON.stringify(next));}catch{}}}><Ui text={favorites.includes(activeCatalogEntry)?'Unfavorite / 取消收藏':'Favorite / 收藏当前图'} /></Button>{favorites.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>{recentPlots.length?<div className="mt-2 flex flex-wrap gap-2" aria-label="Recent plots">{recentPlots.map(id=><Button key={id} size="sm" onClick={()=>selectCatalogEntry(id)}><Ui text={catalogEntry(id).label} /></Button>)}</div>:null}</details>
       <StudioProjectPanel palettes={customPalettes} onPalettes={setCustomPalettes} snapshot={currentSnapshot} onRestore={restoreSnapshot} />
       <div ref={stickyHeaderRef} data-visualization-sticky-header className="sticky top-0 z-20 -mx-1 space-y-1.5 border-b border-hairline/70 bg-paper/95 px-1 pb-2 backdrop-blur">
         <PageHeader identifier="TOOLS / VIS" title="Visualization Studio" className="min-h-8" />
